@@ -205,6 +205,7 @@ class InventoryGateway(
     }
 
     internal fun postOwn(context: CommandContext, draft: JournalDraft): JournalEntry = ledger.post(context, capability, draft)
+    internal fun postAs(context: CommandContext, owner: PostingCapability, draft: JournalDraft): JournalEntry = ledger.post(context, owner, draft)
     internal val ownCapability: PostingCapability get() = capability
 
     private fun requireOwner(context: CommandContext, owner: PostingCapability) {

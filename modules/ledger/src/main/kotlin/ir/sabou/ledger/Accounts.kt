@@ -78,7 +78,7 @@ object StandardAccounts {
             a(RECEIVABLE, "حساب‌های دریافتنی", AccountType.ASSET, s),
             a(INVENTORY, "موجودی مواد و کالا", AccountType.ASSET, i),
             a(EMPLOYEE_ADVANCE, "مساعده پرسنل", AccountType.ASSET, y),
-            a(INTER_BRANCH, "حساب جاری بین شعب", AccountType.ASSET, t, i),
+            a(INTER_BRANCH, "حساب جاری بین شعب", AccountType.ASSET, t, i, p, s, y),
             a(PAYABLE, "حساب‌های پرداختنی", AccountType.LIABILITY, p),
             a(PAYROLL_PAYABLE, "حقوق پرداختنی", AccountType.LIABILITY, y),
             a(SALES_TAX_PAYABLE, "مالیات و عوارض فروش پرداختنی", AccountType.LIABILITY, s),

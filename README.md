@@ -12,8 +12,10 @@ This is a ground-up rebuild. The previous code base (`sabou-manager-v3-`) was au
 | `modules/platform` | Roles and permissions, branch scope, command pipeline, idempotency, audit chain, events, integrity anchors | kernel |
 | `modules/ledger` | Chart of accounts with control accounts, journals, ownership rules, period locks, manual accounting | platform |
 | `modules/treasury` | Cash boxes and bank accounts per branch, receipts, payments, transfers between branches, counts | ledger |
+| `modules/inventory` | Items, branch locations, per-location weighted average, receipts/consumption gateway, waste, counts, inter-branch transfers, versioned recipes | ledger |
+| `modules/purchasing` | Suppliers, purchase invoices (stock + AP), payments via treasury incl. from the central bank, payment/invoice reversal, returns at invoice price | inventory, treasury |
 
-Planned next: `inventory`, `purchasing`, `sales`, `payroll`, then `data-room` (Room/SQLCipher adapters), `app` (Compose UI) and `backup`.
+Planned next: `sales`, `payroll`, then `data-room` (Room/SQLCipher adapters), `app` (Compose UI) and `backup`.
 
 ## Build
 
@@ -23,4 +25,4 @@ python3 scripts/offline_build.py <jars-dir>      # offline fallback; enforces mo
 ```
 
 ## Status
-Domain foundation (kernel, platform, ledger, treasury): 28 JVM tests passing. Not production ready.
+Domain modules kernel, platform, ledger, treasury, inventory, purchasing: 45 JVM tests passing. Visual language approved (ADR-0005). Not production ready.
