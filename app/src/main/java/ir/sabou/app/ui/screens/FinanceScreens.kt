@@ -270,7 +270,7 @@ object FinanceScreens {
     fun TransferForm(nav: Nav) {
         val session = LocalSession.current
         val accounts by load(session) { overview.treasury().map { it.account } }
-        var from by remember { mutableStateOf<GlobalId?>(null) }
+        var source by remember { mutableStateOf<GlobalId?>(null) }
         var toDate by remember { mutableStateOf<GlobalId?>(null) }
         var amount by remember { mutableStateOf<Money?>(null) }
         var date by remember { mutableStateOf(session.today) }
@@ -282,10 +282,10 @@ object FinanceScreens {
             Page {
                 Loaded(accounts) { list ->
                     FormCard {
-                        Picker("از حساب", accountChoices(list), from, { from = it })
-                        Picker("به حساب", accountChoices(list).filter { it.value != from }, to, { to = it })
-                        val a = list.firstOrNull { it.id == from }
-                        val b = list.firstOrNull { it.id == to }
+                        Picker("از حساب", accountChoices(list), source, { source = it })
+                        Picker("به حساب", accountChoices(list).filter { it.value != source }, target, { target = it })
+                        val a = list.firstOrNull { it.id == source }
+                        val b = list.firstOrNull { it.id == target }
                         if (a != null && b != null && a.scope != b.scope) {
                             Banner("انتقال بین شعبه/سازمان است و در هر دو طرف از طریق حساب بین‌شعبه‌ای ثبت می‌شود.", ChipKind.PRIMARY)
                         }
