@@ -9,6 +9,7 @@ import ir.sabou.ledger.LedgerAccessRegistry
 import ir.sabou.ledger.ManualAccounting
 import ir.sabou.ledger.StandardAccounts
 import ir.sabou.payroll.PayrollOperations
+import ir.sabou.payroll.PolicyAdministration
 import ir.sabou.payroll.StatutoryPolicy
 import ir.sabou.payroll.StatutoryPolicyRegistry
 import ir.sabou.persistence.DatabaseMeta
@@ -27,6 +28,7 @@ import ir.sabou.persistence.SqlMovementStore
 import ir.sabou.persistence.SqlPayrollStore
 import ir.sabou.persistence.SqlPeriodStore
 import ir.sabou.persistence.SqlPersonnelStore
+import ir.sabou.persistence.SqlPolicyStore
 import ir.sabou.persistence.SqlPurchaseStore
 import ir.sabou.persistence.SqlRecipeStore
 import ir.sabou.persistence.SqlSalesStore
@@ -111,7 +113,10 @@ class SabouCore private constructor(
     val recipeBook = RecipeBook(recipes)
     val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases)
     val salesOps = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventoryGateway, recipeBook, treasuryGateway, customers, sales)
-    val payroll = PayrollOperations(bus, ledger, registry.issue(ModuleId.PAYROLL), treasuryGateway, personnel, payrollStore, StatutoryPolicyRegistry(policies))
+    /** Stored policies (entered by the owner) plus any supplied by the caller (tests). */
+    val payrollPolicies = PolicyAdministration(bus, SqlPolicyStore(db))
+    private val policyRegistry = StatutoryPolicyRegistry { payrollPolicies.policies() + policies }
+    val payroll = PayrollOperations(bus, ledger, registry.issue(ModuleId.PAYROLL), treasuryGateway, personnel, payrollStore, policyRegistry)
 
     val overview = Overview(this)
 

@@ -7,6 +7,7 @@ import java.time.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class FormatTest {
     private fun day(y: Int, m: Int, d: Int) = BusinessDate(LocalDate.of(y, m, d).toEpochDay())
@@ -51,5 +52,13 @@ class FormatTest {
         assertNull(Fa.parseQuantity("1.1234567"))
         assertEquals("۲٫۵", Fa.quantity(Quantity.of(2_500_000)))
         assertEquals("123456", Fa.latinDigits("۱۲۳۴۵۶"))
+    }
+
+    @Test fun errorsBecomeClearPersianSentences() {
+        assertEquals("جمع روش‌های تسویه با مبلغ قابل تسویه برابر نیست.",
+            Messages.of(ir.sabou.kernel.DomainError.InvalidState("DAILY_SALE", "SETTLEMENT_MISMATCH:40000")))
+        assertEquals("موجودی حساب کافی نیست (موجود: ۱٬۰۰۰ تومان).",
+            Messages.of(ir.sabou.kernel.DomainError.InsufficientFunds("x", 10_000, 20_000)))
+        assertTrue(Messages.of(IllegalStateException("boom")).startsWith("عملیات انجام نشد"))
     }
 }

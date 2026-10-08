@@ -147,6 +147,22 @@ class PayrollTest {
         })
     }
 
+    @Test fun ownerDefinesNonOverlappingYearlyPolicies() {
+        val store = ir.sabou.payroll.memory.InMemoryPolicyStore().also { uow.register(it) }
+        val admin = PolicyAdministration(bus, store)
+        val next = policy.copy(version = "1406", from = BusinessDate(21_001), to = BusinessDate(21_365))
+        admin.define(DefinePayrollPolicy(GlobalId.new(), next))
+        assertEquals(next, admin.registry.forPeriod(BusinessDate(21_010), BusinessDate(21_039)))
+        assertEquals("INVALID_STATE:PAYROLL_POLICY:OVERLAPPING_PERIOD",
+            code { admin.define(DefinePayrollPolicy(GlobalId.new(), next.copy(version = "X", from = BusinessDate(21_300), to = BusinessDate(21_400)))) })
+        assertEquals("INVALID_STATE:PAYROLL_POLICY:DUPLICATE_VERSION",
+            code { admin.define(DefinePayrollPolicy(GlobalId.new(), next.copy(from = BusinessDate(22_000), to = BusinessDate(22_100)))) })
+        session.actor = accountant
+        assertEquals("PERMISSION_DENIED:PAYROLL_APPROVE",
+            code { admin.define(DefinePayrollPolicy(GlobalId.new(), next.copy(version = "Y", from = BusinessDate(23_000), to = BusinessDate(23_100)))) })
+        assertEquals(1, admin.policies().size)
+    }
+
     @Test fun branchScopeAppliesToPayroll() {
         session.actor = accountant
         assertTrue(code { ops.calculate(CalculatePayroll(GlobalId.new(), other, from, to)) }.startsWith("SCOPE_DENIED"))

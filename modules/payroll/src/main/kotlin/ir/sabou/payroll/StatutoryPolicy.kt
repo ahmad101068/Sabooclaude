@@ -71,9 +71,11 @@ data class StatutoryPolicy(
     }
 }
 
-class StatutoryPolicyRegistry(private val policies: List<StatutoryPolicy>) {
+class StatutoryPolicyRegistry(private val source: () -> List<StatutoryPolicy>) {
+    constructor(policies: List<StatutoryPolicy>) : this({ policies })
+
     fun forPeriod(from: BusinessDate, to: BusinessDate): StatutoryPolicy =
-        policies.singleOrNull { from >= it.from && to <= it.to }
+        source().singleOrNull { from >= it.from && to <= it.to }
             ?: throw DomainException(DomainError.InvalidState("PAYROLL_POLICY", "NOT_CONFIGURED"))
 }
 

@@ -50,3 +50,12 @@ class InMemoryPayrollStore : PayrollStore, Transactional {
         runs.clear(); runs.putAll(r); payments.clear(); payments.putAll(p); remittances.clear(); remittances.addAll(m)
     }
 }
+
+class InMemoryPolicyStore : ir.sabou.payroll.PolicyStore, Transactional {
+    private val rows = mutableListOf<ir.sabou.payroll.StatutoryPolicy>()
+    override fun all() = rows.toList()
+    override fun save(policy: ir.sabou.payroll.StatutoryPolicy) { rows += policy }
+    override fun snapshot(): Any = rows.toList()
+    @Suppress("UNCHECKED_CAST")
+    override fun restore(snapshot: Any) { rows.clear(); rows.addAll(snapshot as List<ir.sabou.payroll.StatutoryPolicy>) }
+}

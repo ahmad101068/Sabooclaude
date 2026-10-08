@@ -17,6 +17,7 @@ import ir.sabou.kernel.Scope
 import ir.sabou.ledger.StandardAccounts
 import ir.sabou.payroll.ApprovePayroll
 import ir.sabou.payroll.CalculatePayroll
+import ir.sabou.payroll.DefinePayrollPolicy
 import ir.sabou.payroll.PaySalary
 import ir.sabou.payroll.RecordAttendance
 import ir.sabou.payroll.RegisterEmployee
@@ -73,7 +74,7 @@ class SabouCoreTest {
 
     private fun boot(path: Path = file, newEpoch: String? = null): SabouCore {
         val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:$path")).also { open += it }
-        return SabouCore.open(db, anchors, clock, listOf(policy), newEpoch)
+        return SabouCore.open(db, anchors, clock, emptyList(), newEpoch)
     }
 
     @AfterTest fun close() { open.forEach { it.close() }; dir.toFile().deleteRecursively() }
@@ -170,6 +171,8 @@ class SabouCoreTest {
     @Test fun payrollRunsEndToEndWithSegregationOfDuties() {
         val core = boot()
         val w = setUp(core)
+        core.payrollPolicies.define(DefinePayrollPolicy(id(), policy))
+        assertEquals(listOf(policy), boot().payrollPolicies.policies())     // stored and read back exactly
         core.identity.createUser("acc", "حسابدار", Role.ACCOUNTANT, setOf(w.branch.branchId), "654321".toCharArray())
         val chef = core.payroll.registerEmployee(RegisterEmployee(id(), w.branch, "سرآشپز", "0084575948", rial(30_000_000))).resultId
         core.payroll.recordAttendance(RecordAttendance(id(), w.branch, chef, BusinessDate(20_001), 480, 0, 0))

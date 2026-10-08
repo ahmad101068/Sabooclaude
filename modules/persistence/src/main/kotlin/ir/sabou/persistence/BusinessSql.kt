@@ -9,6 +9,9 @@ import ir.sabou.payroll.LiabilityKind
 import ir.sabou.payroll.PayrollRun
 import ir.sabou.payroll.PayrollStore
 import ir.sabou.payroll.Payslip
+import ir.sabou.payroll.PolicyStore
+import ir.sabou.payroll.StatutoryPolicy
+import ir.sabou.payroll.TaxBracket
 import ir.sabou.payroll.PersonnelStore
 import ir.sabou.payroll.Remittance
 import ir.sabou.payroll.RunStatus
@@ -332,6 +335,35 @@ class SqlPayrollStore(db: SqlDatabase) : SqlTable(db), PayrollStore {
             mapOf(
                 "id" to remittance.id.value, "scope" to Codec.scope(remittance.scope), "kind" to remittance.kind.name,
                 "amount" to remittance.amount.rial, "date" to remittance.date.epochDay,
+            ),
+        ),
+    )
+}
+
+class SqlPolicyStore(db: SqlDatabase) : SqlTable(db), PolicyStore {
+    override fun all() = docs("SELECT doc FROM payroll_policies ORDER BY from_day").map { d ->
+        StatutoryPolicy(
+            version = d.str("version"), from = Codec.date(d.long("from")), to = Codec.date(d.long("to")),
+            standardMonthlyMinutes = d.int("minutes"), overtimeMultiplierPercent = d.int("overtime"),
+            employeeInsuranceBp = d.int("empIns"), employerInsuranceBp = d.int("erIns"), unemploymentInsuranceBp = d.int("unemp"),
+            maxInsurableMonthly = Codec.money(d.long("maxInsurable")),
+            insuranceTaxExemptNumerator = d.int("exemptNum"), insuranceTaxExemptDenominator = d.int("exemptDen"),
+            taxBrackets = d.docs("brackets").map { TaxBracket(it.longOrNull("upTo")?.let(Codec::money), it.int("bp")) },
+        )
+    }
+
+    /** Immutable (trigger): a defined version is never changed. */
+    override fun save(policy: StatutoryPolicy) = db.execute(
+        "INSERT INTO payroll_policies (version, from_day, to_day, doc) VALUES (?, ?, ?, ?)",
+        policy.version, policy.from.epochDay, policy.to.epochDay,
+        Json.encode(
+            mapOf(
+                "version" to policy.version, "from" to policy.from.epochDay, "to" to policy.to.epochDay,
+                "minutes" to policy.standardMonthlyMinutes, "overtime" to policy.overtimeMultiplierPercent,
+                "empIns" to policy.employeeInsuranceBp, "erIns" to policy.employerInsuranceBp, "unemp" to policy.unemploymentInsuranceBp,
+                "maxInsurable" to policy.maxInsurableMonthly.rial, "exemptNum" to policy.insuranceTaxExemptNumerator,
+                "exemptDen" to policy.insuranceTaxExemptDenominator,
+                "brackets" to policy.taxBrackets.map { mapOf("upTo" to it.upToMonthly?.rial, "bp" to it.rateBasisPoints) },
             ),
         ),
     )

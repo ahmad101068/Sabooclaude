@@ -60,9 +60,10 @@ object Schema {
                 "CREATE TABLE attendance (id TEXT PRIMARY KEY, employee_id TEXT NOT NULL REFERENCES employees(id), date INTEGER NOT NULL, doc TEXT NOT NULL, UNIQUE(employee_id, date))",
                 "CREATE TABLE payroll_runs (id TEXT PRIMARY KEY, scope TEXT NOT NULL, doc TEXT NOT NULL)",
                 "CREATE TABLE salary_payments (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES payroll_runs(id), doc TEXT NOT NULL)",
+                "CREATE TABLE payroll_policies (version TEXT PRIMARY KEY, from_day INTEGER NOT NULL, to_day INTEGER NOT NULL, doc TEXT NOT NULL)",
                 "CREATE TABLE remittances (id TEXT PRIMARY KEY, scope TEXT NOT NULL, kind TEXT NOT NULL, doc TEXT NOT NULL)",
             ) + immutable("audit_events") + immutable("journal_entries") + immutable("journal_lines") +
-                immutable("treasury_movements") + immutable("stock_movements"),
+                immutable("treasury_movements") + immutable("stock_movements") + immutable("payroll_policies"),
         ),
     )
 
