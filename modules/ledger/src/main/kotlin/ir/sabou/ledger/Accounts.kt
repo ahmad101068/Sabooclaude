@@ -41,6 +41,7 @@ object StandardAccounts {
     val BANK = AccountCode.of("1102")
     val PETTY_CASH = AccountCode.of("1103")
     val CARD_CLEARING = AccountCode.of("1104")
+    val SALES_CLEARING = AccountCode.of("1190")
     val RECEIVABLE = AccountCode.of("1201")
     val INVENTORY = AccountCode.of("1301")
     val EMPLOYEE_ADVANCE = AccountCode.of("1401")
@@ -75,6 +76,7 @@ object StandardAccounts {
             a(BANK, "بانک", AccountType.ASSET, t),
             a(PETTY_CASH, "تنخواه‌گردان", AccountType.ASSET, t),
             a(CARD_CLEARING, "وجوه کارت‌خوان", AccountType.ASSET, t),
+            a(SALES_CLEARING, "حساب واسط تسویه فروش", AccountType.ASSET, s),
             a(RECEIVABLE, "حساب‌های دریافتنی", AccountType.ASSET, s),
             a(INVENTORY, "موجودی مواد و کالا", AccountType.ASSET, i),
             a(EMPLOYEE_ADVANCE, "مساعده پرسنل", AccountType.ASSET, y),
