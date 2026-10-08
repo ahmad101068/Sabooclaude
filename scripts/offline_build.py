@@ -15,6 +15,7 @@ MODULES = {  # module -> direct dependencies (must mirror build.gradle.kts)
     'platform': ['kernel'],
     'ledger': ['platform'],
     'treasury': ['ledger'],
+    'inventory': ['ledger'],
 }
 
 def closure(m):
