@@ -271,7 +271,7 @@ object FinanceScreens {
         val session = LocalSession.current
         val accounts by load(session) { overview.treasury().map { it.account } }
         var source by remember { mutableStateOf<GlobalId?>(null) }
-        var toDate by remember { mutableStateOf<GlobalId?>(null) }
+        var target by remember { mutableStateOf<GlobalId?>(null) }
         var amount by remember { mutableStateOf<Money?>(null) }
         var date by remember { mutableStateOf(session.today) }
         var note by remember { mutableStateOf("") }
