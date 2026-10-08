@@ -20,6 +20,7 @@ MODULES = {  # module -> direct dependencies (must mirror build.gradle.kts)
     'sales': ['inventory', 'treasury'],
     'payroll': ['treasury'],
     'backup': ['kernel'],
+    'persistence': ['sales', 'purchasing', 'payroll'],
 }
 
 def closure(m):

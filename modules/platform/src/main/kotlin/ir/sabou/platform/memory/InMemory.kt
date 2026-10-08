@@ -97,3 +97,16 @@ class InMemoryAnchorStore : AnchorStore {
 class MutableSession(var actor: Actor? = null) : SessionPort {
     override fun currentActor(): Actor? = actor
 }
+
+class InMemoryUserStore : Table<ir.sabou.kernel.GlobalId, ir.sabou.platform.User>(), ir.sabou.platform.UserStore {
+    override fun byId(id: ir.sabou.kernel.GlobalId) = get(id)
+    override fun byUsername(username: String) = values().firstOrNull { it.username == username }
+    override fun all() = values()
+    override fun save(user: ir.sabou.platform.User) = put(user.id, user)
+}
+
+class InMemoryBranchStore : Table<ir.sabou.kernel.BranchId, ir.sabou.platform.Branch>(), ir.sabou.platform.BranchStore {
+    override fun byId(id: ir.sabou.kernel.BranchId) = get(id)
+    override fun all() = values()
+    override fun save(branch: ir.sabou.platform.Branch) = put(branch.id, branch)
+}
