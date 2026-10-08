@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sabou mark: a saffron bowl with steam on the primary green (safe zone 66dp of 108dp). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#F0B43C"
+        android:pathData="M32,56h44a22,22 0 0,1 -44,0z" />
+    <path
+        android:fillColor="#F0B43C"
+        android:pathData="M42,80h24v4h-24z" />
+    <path
+        android:pathData="M44,48c-3,-4 3,-7 0,-11M54,48c-3,-4 3,-7 0,-11M64,48c-3,-4 3,-7 0,-11"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round" />
+</vector>
