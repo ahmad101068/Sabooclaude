@@ -131,6 +131,9 @@ class IdentityService(
         user.id
     }
 
+    /** Owner-only listing for user management. */
+    fun listUsers(): List<User> = asOwner { _ -> users.all() }
+
     fun deactivateUser(id: GlobalId) = asOwner { actor ->
         val user = users.byId(id) ?: throw DomainException(DomainError.NotFound("USER"))
         ensure(!(user.role == Role.OWNER && users.all().count { it.role == Role.OWNER && it.isActive } == 1)) { DomainError.InvalidState("USER", "LAST_OWNER") }

@@ -37,6 +37,12 @@ class AppContainer(private val context: Context) {
         System.loadLibrary("sqlcipher")
     }
 
+    /** Opens once per process; later calls (e.g. after an activity re-creation) do nothing. */
+    @Synchronized
+    fun ensureOpen() {
+        if (helper == null && state.value is AppState.Opening) open()
+    }
+
     @Synchronized
     fun open(newEpoch: String? = null) {
         mutableState.value = AppState.Opening
