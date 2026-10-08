@@ -47,7 +47,7 @@ object AuditHashing {
 
     fun sha256(text: String): String = MessageDigest.getInstance("SHA-256")
         .digest(text.toByteArray(Charsets.UTF_8))
-        .joinToString("") { "%02x".format(it) }
+        .joinToString("") { String.format(java.util.Locale.ROOT, "%02x", it) }   // locale-independent: device and server must agree
 }
 
 class AuditTrail(private val store: AuditStore) {

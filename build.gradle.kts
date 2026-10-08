@@ -1,5 +1,14 @@
 plugins {
     kotlin("jvm") version "2.1.20" apply false
+    kotlin("android") version "2.1.20" apply false
+    kotlin("plugin.compose") version "2.1.20" apply false
+    id("com.android.application") version "8.13.0" apply false
+}
+
+/** Domain and data modules only (no Android SDK needed): `./gradlew domainBuild`. */
+tasks.register("domainBuild") {
+    group = "verification"
+    dependsOn(subprojects.filter { it.path.startsWith(":modules:") }.map { "${it.path}:build" })
 }
 
 subprojects {

@@ -1,0 +1,7 @@
+<resources>
+    <!-- Mirrors docs/design/tokens.json -->
+    <color name="ground">#F3F2EE</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="primary">#0E5245</color>
+    <color name="accent">#F0B43C</color>
+</resources>

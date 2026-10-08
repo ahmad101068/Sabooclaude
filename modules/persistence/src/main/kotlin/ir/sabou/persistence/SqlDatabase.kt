@@ -55,7 +55,8 @@ class DatabaseMeta(private val db: SqlDatabase) {
     fun put(key: String, value: String) =
         db.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value)
 
-    fun epoch(): String = get(EPOCH) ?: java.util.UUID.randomUUID().toString().also { put(EPOCH, it) }
+    /** The stored epoch; a new database takes [initial] (announced beforehand by a rebase anchor) or a random one. */
+    fun epoch(initial: String? = null): String = get(EPOCH) ?: (initial ?: java.util.UUID.randomUUID().toString()).also { put(EPOCH, it) }
 
     companion object { const val EPOCH = "audit_epoch" }
 }

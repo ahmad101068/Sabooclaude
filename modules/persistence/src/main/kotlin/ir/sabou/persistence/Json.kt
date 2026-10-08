@@ -36,7 +36,7 @@ object Json {
             c == '\n' -> out.append("\\n")
             c == '\r' -> out.append("\\r")
             c == '\t' -> out.append("\\t")
-            c < ' ' -> out.append("\\u%04x".format(c.code))
+            c < ' ' -> out.append(String.format(java.util.Locale.ROOT, "\\u%04x", c.code))
             else -> out.append(c)
         }
         out.append('"')

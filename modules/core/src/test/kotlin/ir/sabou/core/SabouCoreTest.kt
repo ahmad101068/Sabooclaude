@@ -71,9 +71,9 @@ class SabouCoreTest {
         taxBrackets = listOf(TaxBracket(Money.of(10_000_000), 0), TaxBracket(Money.of(20_000_000), 1_000), TaxBracket(null, 2_000)),
     )
 
-    private fun boot(path: Path = file): SabouCore {
+    private fun boot(path: Path = file, newEpoch: String? = null): SabouCore {
         val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:$path")).also { open += it }
-        return SabouCore.open(db, anchors, clock, listOf(policy))
+        return SabouCore.open(db, anchors, clock, listOf(policy), newEpoch)
     }
 
     @AfterTest fun close() { open.forEach { it.close() }; dir.toFile().deleteRecursively() }
@@ -205,6 +205,22 @@ class SabouCoreTest {
         val verdict = boot().verifyStartup()
         assertIs<StartupVerdict.RollbackDetected>(verdict)
         assertTrue(verdict.detail.contains("AUDIT_EVENT_TAMPERED"))
+    }
+
+    @Test fun aFactoryResetAnnouncedBeforehandStartsCleanButASilentSwapDoesNot() {
+        val core = boot()
+        setUp(core)
+        assertEquals(StartupVerdict.Healthy, core.verifyStartup())
+        // A database appearing without an announcement is a rollback/swap.
+        assertIs<StartupVerdict.RollbackDetected>(boot(dir.resolve("other.db")).verifyStartup())
+        // The legitimate path: announce the new epoch, then create the new database with it.
+        val epoch = SabouCore.newEpoch()
+        core.acceptReplacement(epoch, "FACTORY_RESET")
+        val fresh = boot(dir.resolve("fresh.db"), epoch)
+        assertEquals(StartupVerdict.Healthy, fresh.verifyStartup())
+        assertTrue(fresh.identity.needsBootstrap())
+        // The replaced database is no longer accepted.
+        assertIs<StartupVerdict.RollbackDetected>(boot().verifyStartup())
     }
 
     @Test fun stockCompareAndSetRejectsAStaleWrite() {

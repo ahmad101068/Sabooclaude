@@ -61,6 +61,7 @@ class SabouCore private constructor(
     private val anchors: AnchorStore,
     val clock: Clock,
     policies: List<StatutoryPolicy>,
+    newDatabaseEpoch: String?,
 ) {
     private val meta = DatabaseMeta(db)
     val unitOfWork = SqlUnitOfWork(db)
@@ -88,7 +89,7 @@ class SabouCore private constructor(
 
     val epoch: String = unitOfWork.transaction {
         accounts.seed(StandardAccounts.chart())
-        meta.epoch()
+        meta.epoch(newDatabaseEpoch)
     }
 
     // Pipeline and identity
@@ -135,11 +136,23 @@ class SabouCore private constructor(
     fun acceptReplacement(newEpoch: String, reason: String) = integrity.recordRebase(newEpoch, reason, clock.nowEpochMillis())
 
     companion object {
-        /** Migrates [db] to the latest schema and builds the system. Foreign keys must already be enabled by the adapter. */
-        fun open(db: SqlDatabase, anchors: AnchorStore, clock: Clock = Clock.SYSTEM, policies: List<StatutoryPolicy> = emptyList()): SabouCore {
+        /**
+         * Migrates [db] to the latest schema and builds the system. Foreign keys must already be enabled by
+         * the adapter. [newDatabaseEpoch] is used only when [db] is brand new: after a factory reset it must
+         * be the epoch announced by [acceptReplacement] beforehand.
+         */
+        fun open(
+            db: SqlDatabase,
+            anchors: AnchorStore,
+            clock: Clock = Clock.SYSTEM,
+            policies: List<StatutoryPolicy> = emptyList(),
+            newDatabaseEpoch: String? = null,
+        ): SabouCore {
             check(db.query("PRAGMA foreign_keys").single().long("foreign_keys") == 1L) { "FOREIGN_KEYS_DISABLED" }
             Schema.migrate(db)
-            return SabouCore(db, anchors, clock, policies)
+            return SabouCore(db, anchors, clock, policies, newDatabaseEpoch)
         }
+
+        fun newEpoch(): String = java.util.UUID.randomUUID().toString()
     }
 }

@@ -29,6 +29,19 @@ private data class Ping(
 }
 
 class PlatformTest {
+    @Test fun hashesDoNotDependOnTheDeviceLocale() {
+        val original = java.util.Locale.getDefault()
+        try {
+            java.util.Locale.setDefault(java.util.Locale.forLanguageTag("fa-IR"))
+            val persian = AuditHashing.sha256("سابو")
+            java.util.Locale.setDefault(java.util.Locale.ROOT)
+            assertEquals(AuditHashing.sha256("سابو"), persian)
+            assertTrue(persian.matches(Regex("[0-9a-f]{64}")))
+        } finally {
+            java.util.Locale.setDefault(original)
+        }
+    }
+
     private val branchA = BranchId(GlobalId.new())
     private val branchB = BranchId(GlobalId.new())
     private val session = MutableSession()

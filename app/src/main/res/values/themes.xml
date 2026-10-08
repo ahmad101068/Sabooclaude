@@ -1,0 +1,9 @@
+<resources>
+    <!-- Window theme only; everything inside is drawn by Compose (ui/theme/Theme.kt). -->
+    <style name="Theme.Sabou" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/ground</item>
+        <item name="android:statusBarColor">@color/ground</item>
+        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>
