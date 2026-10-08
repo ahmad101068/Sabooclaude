@@ -4,7 +4,8 @@ Each module is compiled with ONLY its declared dependencies on the classpath, so
 cross-module import fails here exactly as it would in Gradle. Then all tests run with JUnit 4.
 CI uses Gradle; this script is a fallback for restricted environments.
 
-Usage: python3 scripts/offline_build.py <dir-with-kotlin-compiler-and-junit-jars>
+Usage: python3 scripts/offline_build.py <dir-with-kotlin-compiler-and-junit-jars> [--from <module>]
+(--from reuses already-built jars of earlier modules; for local iteration only.)
 """
 import os, subprocess, sys
 from pathlib import Path
@@ -21,7 +22,9 @@ MODULES = {  # module -> direct dependencies (must mirror build.gradle.kts)
     'payroll': ['treasury'],
     'backup': ['kernel'],
     'persistence': ['sales', 'purchasing', 'payroll'],
+    'core': ['persistence'],
 }
+TEST_ONLY = ('sqlite-jdbc',)  # testImplementation jars: never visible to main code
 
 def closure(m):
     seen = []
@@ -37,9 +40,14 @@ def main():
     env = dict(os.environ, JAVA_TOOL_OPTIONS='')
     kotlinc = ['java', '-Xmx3g', '-cp', tool_cp, 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler', '-no-stdlib', '-no-reflect', '-jvm-target', '17']
     test_classes = []
+    start = sys.argv[sys.argv.index('--from') + 1] if '--from' in sys.argv else None
+    skipping = start is not None
     for m in MODULES:
+        if skipping and m != start:
+            continue
+        skipping = False
         deps = [str(out / f'{d}.jar') for d in closure(m)]
-        cp = ':'.join(deps + jars)
+        cp = ':'.join(deps + [j for j in jars if not any(t in j for t in TEST_ONLY)])
         src = sorted(str(p) for p in (ROOT / 'modules' / m / 'src/main/kotlin').rglob('*.kt'))
         r = subprocess.run(kotlinc + ['-classpath', cp, '-d', str(out / f'{m}.jar')] + src, capture_output=True, text=True, env=env)
         print(f'[compile] {m}: exit={r.returncode}'); print(r.stdout + r.stderr, end='')
