@@ -295,7 +295,12 @@ fun TextInput(
  */
 @Composable
 fun MoneyInput(label: String, value: Money?, onChange: (Money?) -> Unit, modifier: Modifier = Modifier, hint: String? = null) {
-    var field by remember { mutableStateOf(TextFieldValue(value?.let { Fa.toman(it).substringBefore('٫') } ?: "")) }
+    fun shown(v: Money?) = v?.let { Fa.number(it.rial / 10) } ?: ""
+    var field by remember { mutableStateOf(TextFieldValue(shown(value))) }
+    // The form may reset the amount (e.g. after saving): follow it instead of keeping stale text.
+    androidx.compose.runtime.LaunchedEffect(value) {
+        if (value == null && field.text.isNotEmpty() && Fa.parseToman(field.text) != null) field = TextFieldValue("")
+    }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("$label (تومان)", style = SabouType.caption.copy(fontSize = SabouType.body.fontSize * 0.93f), color = Sabou.colors.muted)
         OutlinedTextField(
@@ -317,9 +322,16 @@ fun MoneyInput(label: String, value: Money?, onChange: (Money?) -> Unit, modifie
 
 /** Decimal quantity (e.g. kilograms). */
 @Composable
-fun QuantityInput(label: String, unit: String, onChange: (ir.sabou.kernel.Quantity?) -> Unit, modifier: Modifier = Modifier) {
+fun QuantityInput(
+    label: String,
+    unit: String,
+    onChange: (ir.sabou.kernel.Quantity?) -> Unit,
+    modifier: Modifier = Modifier,
+    /** What an empty field means: by default "not entered" (null), never zero (e.g. a stock count). */
+    blankAs: ir.sabou.kernel.Quantity? = null,
+) {
     var text by remember { mutableStateOf("") }
-    TextInput("$label ($unit)", text, { text = it; onChange(Fa.parseQuantity(it)) }, modifier, keyboard = KeyboardType.Decimal,
+    TextInput("$label ($unit)", text, { text = it; onChange(if (it.isBlank()) blankAs else Fa.parseQuantity(it)) }, modifier, keyboard = KeyboardType.Decimal,
         error = if (text.isNotBlank() && Fa.parseQuantity(text) == null) "مقدار معتبر نیست" else null)
 }
 

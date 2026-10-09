@@ -118,6 +118,32 @@ class PlatformTest {
         assertTrue(code { trail.verify(pageSize = 7) }.startsWith("INTEGRITY:AUDIT_EVENT_TAMPERED"))
     }
 
+    @Test fun deletingTheOldestEventsIsDetectedEvenWhenPositionsAreRenumbered() {
+        session.actor = actor(Role.OWNER)
+        repeat(5) { run(ping(text = "t$it")) }
+        val trail = AuditTrail(audit)
+        val checkpoint = trail.verify()!!
+        audit.events.removeAt(0); audit.events.removeAt(0)
+        assertTrue(code { trail.verify() }.startsWith("INTEGRITY:AUDIT_GAP"))
+        // An attacker who also renumbers positions still breaks the genesis link.
+        audit.events.replaceAll { it.copy(position = audit.events.indexOf(it) + 1L) }
+        assertTrue(code { trail.verify() }.startsWith("INTEGRITY:AUDIT_CHAIN_BROKEN"))
+        // And an anchored checkpoint that no longer exists is reported.
+        assertTrue(code { trail.verify(checkpoint) }.startsWith("INTEGRITY:AUDIT_CHECKPOINT_MISSING"))
+    }
+
+    @Test fun commandsNeedEveryPermissionTheyDeclare() {
+        session.actor = actor(Role.CASHIER, setOf(branchA))
+        val paying = object : Command {
+            override val commandId = GlobalId.new()
+            override val scope: Scope = Scope.Branch(branchA)
+            override val requiredPermission = Permission.SALES_RECORD
+            override val additionalPermissions = setOf(Permission.TREASURY_PAYMENT)
+            override fun fingerprint() = "x"
+        }
+        assertEquals("PERMISSION_DENIED:TREASURY_PAYMENT", code { bus.execute(ModuleId.SALES, paying) { _, _ -> GlobalId.new() } })
+    }
+
     @Test fun legitimateRebaseIsHealthyButSilentRollbackIsDetected() {
         session.actor = actor(Role.OWNER)
         val anchors = InMemoryAnchorStore()

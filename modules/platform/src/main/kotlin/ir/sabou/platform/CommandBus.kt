@@ -16,6 +16,15 @@ interface Command {
     val requiredPermission: Permission
     val scope: Scope
 
+    /** Extra permissions this particular command needs (e.g. paying while recording an invoice). */
+    val additionalPermissions: Set<Permission> get() = emptySet()
+
+    /**
+     * True for shared reference data (items, suppliers, menu, recipes) that every branch uses. Such
+     * commands live in the organization scope but need only their permission, not ORGANIZATION_DATA.
+     */
+    val sharedCatalog: Boolean get() = false
+
     /** Canonical content used to detect a retried command with different data. */
     fun fingerprint(): String
 }
@@ -75,8 +84,11 @@ class CommandBus(
 
     fun <C : Command> execute(module: ModuleId, command: C, handler: (C, CommandContext) -> GlobalId): CommandOutcome {
         val actor = session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
-        ensure(actor.role.allows(command.requiredPermission)) { DomainError.PermissionDenied(command.requiredPermission.name) }
-        ensure(actor.canAccess(command.scope)) { DomainError.ScopeDenied(CommandContext.scopeLabel(command.scope)) }
+        (setOf(command.requiredPermission) + command.additionalPermissions).forEach { p ->
+            ensure(actor.role.allows(p)) { DomainError.PermissionDenied(p.name) }
+        }
+        val catalog = command.sharedCatalog && command.scope == Scope.Organization
+        ensure(catalog || actor.canAccess(command.scope)) { DomainError.ScopeDenied(CommandContext.scopeLabel(command.scope)) }
         val type = command::class.qualifiedName ?: command::class.java.name
         val fingerprint = AuditHashing.sha256(type + "\u001F" + command.fingerprint())
         return unitOfWork.transaction {

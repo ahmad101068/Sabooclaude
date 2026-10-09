@@ -163,6 +163,14 @@ class PayrollTest {
         assertEquals(1, admin.policies().size)
     }
 
+    @Test fun aRunCoversExactlyOneMonthAndDuplicateIdsInPersianDigitsAreCaught() {
+        session.actor = accountant
+        assertEquals("INVALID_INPUT:period", code { ops.calculate(CalculatePayroll(GlobalId.new(), branch, from, from)) })
+        session.actor = owner
+        assertEquals("INVALID_STATE:EMPLOYEE:DUPLICATE_NATIONAL_ID",
+            code { ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "تکراری", "۰۰۸۴۵۷۵۹۴۸", rial(1_000))) })
+    }
+
     @Test fun branchScopeAppliesToPayroll() {
         session.actor = accountant
         assertTrue(code { ops.calculate(CalculatePayroll(GlobalId.new(), other, from, to)) }.startsWith("SCOPE_DENIED"))

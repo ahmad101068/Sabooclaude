@@ -124,7 +124,7 @@ class LedgerTest {
         session.actor = Actor(GlobalId.new(), "manager", Role.MANAGER, setOf(branchA))
         assertEquals("PERMISSION_DENIED:PERIOD_REOPEN", code { manual.reopenPeriod(ReopenPeriod(GlobalId.new(), lock, "اصلاح")) })
         // A branch manager cannot lock the whole organization's books either.
-        assertTrue(code { manual.closePeriod(ClosePeriod(GlobalId.new(), BusinessDate(30_000), BusinessDate(30_010))) }.startsWith("SCOPE_DENIED"))
+        assertEquals("PERMISSION_DENIED:PERIOD_CLOSE", code { manual.closePeriod(ClosePeriod(GlobalId.new(), BusinessDate(30_000), BusinessDate(30_010))) })
         session.actor = Actor(GlobalId.new(), "owner", Role.OWNER, emptySet())
         manual.reopenPeriod(ReopenPeriod(GlobalId.new(), lock, "اصلاح سند"))
         manualPost(listOf(ManualLine(StandardAccounts.RENT, rial(5), Money.ZERO), ManualLine(StandardAccounts.CAPITAL, Money.ZERO, rial(5))))

@@ -3,6 +3,7 @@ package ir.sabou.purchasing.memory
 import ir.sabou.kernel.GlobalId
 import ir.sabou.platform.memory.Table
 import ir.sabou.platform.memory.Transactional
+import ir.sabou.purchasing.InvoiceStatus
 import ir.sabou.purchasing.PurchaseInvoice
 import ir.sabou.purchasing.PurchaseReturn
 import ir.sabou.purchasing.PurchaseStore
@@ -22,7 +23,7 @@ class InMemoryPurchaseStore : PurchaseStore, Transactional {
     private val returns = mutableListOf<PurchaseReturn>()
     override fun invoice(id: GlobalId) = invoices[id]
     override fun invoiceByNumber(supplierId: GlobalId, normalizedNo: String) =
-        invoices.values.firstOrNull { it.supplierId == supplierId && it.supplierInvoiceNo == normalizedNo }
+        invoices.values.firstOrNull { it.supplierId == supplierId && it.supplierInvoiceNo == normalizedNo && it.status == InvoiceStatus.POSTED }
     override fun invoices() = invoices.values.toList()
     override fun saveInvoice(invoice: PurchaseInvoice) { invoices[invoice.id] = invoice }
     override fun payment(id: GlobalId) = payments[id]

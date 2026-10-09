@@ -50,6 +50,8 @@ class FormatTest {
         assertEquals(Quantity.of(2_500_000), Fa.parseQuantity("۲٫۵"))
         assertEquals(Quantity.of(250_000), Fa.parseQuantity("0.25"))
         assertNull(Fa.parseQuantity("1.1234567"))
+        assertNull(Fa.parseQuantity("")); assertNull(Fa.parseQuantity("  "))
+        assertEquals(Quantity.ZERO, Fa.parseQuantity("0"))
         assertEquals("۲٫۵", Fa.quantity(Quantity.of(2_500_000)))
         assertEquals("123456", Fa.latinDigits("۱۲۳۴۵۶"))
     }

@@ -114,12 +114,13 @@ object FinanceScreens {
     fun Hub(nav: Nav) {
         val session = LocalSession.current
         var tab by remember { mutableIntStateOf(0) }
-        val data by load(session) { overview.treasury() to overview.recentMovements(30) }
+        val canSee = session.can(Permission.TREASURY_VIEW)
+        val data by load(session) { if (canSee) overview.treasury() to overview.recentMovements(30) else emptyList<ir.sabou.core.AccountBalance>() to emptyList() }
         Column(Modifier.fillMaxSize()) {
             Header("صندوق و بانک")
             LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                item { Segmented(listOf("همه", "شعبه", "سازمان"), tab) { tab = it } }
-                item {
+                if (canSee) item { Segmented(listOf("همه", "شعبه", "سازمان"), tab) { tab = it } }
+                if (canSee) item {
                     Loaded(data) { (balances, movements) ->
                         val visible = balances.filter {
                             when (tab) {
@@ -163,8 +164,8 @@ object FinanceScreens {
                     }
                 }
                 item { SectionTitle("گزارش‌ها") }
-                item { NavRow(R.drawable.ic_person, "طلب از مشتریان", "دریافت نسیه‌ها", onClick = { nav.go(Route.Receivables) }) }
-                item { NavRow(R.drawable.ic_purchase, "بدهی به تأمین‌کنندگان", "فاکتورهای پرداخت‌نشده", onClick = { nav.go(Route.Purchases) }) }
+                if (session.can(Permission.SALES_VIEW)) item { NavRow(R.drawable.ic_person, "طلب از مشتریان", "دریافت نسیه‌ها", onClick = { nav.go(Route.Receivables) }) }
+                if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "بدهی به تأمین‌کنندگان", "فاکتورهای پرداخت‌نشده", onClick = { nav.go(Route.Purchases) }) }
                 if (session.can(Permission.LEDGER_VIEW)) item { NavRow(R.drawable.ic_finance, "تراز آزمایشی", "مانده همه حساب‌های دفتر کل", onClick = { nav.go(Route.TrialBalance) }) }
             }
         }
@@ -307,10 +308,7 @@ object FinanceScreens {
     @Composable
     fun AccountHistory(nav: Nav, accountId: GlobalId) {
         val session = LocalSession.current
-        val data by load(session, accountId) {
-            val balance = overview.treasury().first { it.account.id == accountId }
-            balance to treasuryMovements.byAccount(accountId, 200)
-        }
+        val data by load(session, accountId) { overview.accountHistory(accountId) }
         var reverse by remember { mutableStateOf<TreasuryMovement?>(null) }
         var reason by remember { mutableStateOf("") }
         val action = rememberAction()
@@ -352,17 +350,10 @@ object FinanceScreens {
 
     // ------------------------------------------------------------ Receivables
 
-    private data class Open(val id: GlobalId, val customer: String, val outstanding: Money, val due: ir.sabou.kernel.BusinessDate, val scope: Scope.Branch)
-
     @Composable
     fun Receivables(nav: Nav) {
         val session = LocalSession.current
-        val data by load(session) {
-            customers.all().flatMap { c ->
-                sales.receivablesOfCustomer(c.id).filter { !it.voided && session.actor.canAccess(it.scope) }
-                    .map { Open(it.id, c.name, salesOps.outstanding(it.id), it.dueDate, it.scope) }
-            }.filter { !it.outstanding.isZero }.sortedBy { it.due }
-        }
+        val data by load(session) { overview.openReceivables() }
         Column(Modifier.fillMaxSize()) {
             Header("طلب از مشتریان", onBack = nav.back)
             Page {
@@ -370,8 +361,9 @@ object FinanceScreens {
                     SCard { KeyValue("جمع طلب (تومان)", Fa.toman(Money.sum(list.map { it.outstanding })), strong = true) }
                     if (list.isEmpty()) EmptyState("طلب بازی وجود ندارد.")
                     list.forEach { r ->
-                        NavRow(R.drawable.ic_person, r.customer, "سررسید ${Fa.date(r.due)}" + if (r.due < session.today) " · گذشته" else "",
-                            Fa.tomanShort(r.outstanding.rial), onClick = { nav.go(Route.Collect(r.id)) })
+                        val due = r.receivable.dueDate
+                        NavRow(R.drawable.ic_person, r.customer, "سررسید ${Fa.date(due)}" + if (due < session.today) " · گذشته" else "",
+                            Fa.tomanShort(r.outstanding.rial), onClick = { nav.go(Route.Collect(r.receivable.id)) })
                     }
                 }
             }
@@ -382,8 +374,8 @@ object FinanceScreens {
     fun CollectForm(nav: Nav, receivableId: GlobalId) {
         val session = LocalSession.current
         val data by load(session, receivableId) {
-            val r = sales.receivable(receivableId)!!
-            Triple(r, salesOps.outstanding(r.id), overview.treasury().map { it.account }.filter { it.scope == r.scope })
+            val open = overview.receivable(receivableId)
+            Triple(open.receivable, open.outstanding, overview.paymentAccounts(open.receivable.scope))
         }
         var accountId by remember { mutableStateOf<GlobalId?>(null) }
         var amount by remember { mutableStateOf<Money?>(null) }
@@ -414,12 +406,9 @@ object FinanceScreens {
     @Composable
     fun TrialBalance(nav: Nav) {
         val session = LocalSession.current
-        val data by load(session) {
-            check(session.can(Permission.LEDGER_VIEW))
-            accounts.all().map { it to ledger.balance(it.code).rial }.filter { it.second != 0L }
-        }
+        val data by load(session) { overview.trialBalance() }
         Column(Modifier.fillMaxSize()) {
-            Header("تراز آزمایشی", "مانده بدهکار مثبت، بستانکار منفی", onBack = nav.back)
+            Header("تراز آزمایشی", if (session.actor.isOwner) "همه شعب و سازمان" else "فقط شعبه‌های در دسترس شما", onBack = nav.back)
             Page {
                 Loaded(data) { rows ->
                     SCard {

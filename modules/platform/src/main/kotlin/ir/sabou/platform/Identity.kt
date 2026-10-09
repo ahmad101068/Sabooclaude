@@ -142,6 +142,69 @@ class IdentityService(
         id
     }
 
+    /**
+     * Changes a user's role and branch grants without touching anything else (AUD-019: editing a user
+     * never re-activates them and never rewrites their PIN). The last active owner keeps the owner role.
+     */
+    fun updateUser(id: GlobalId, role: Role, grants: Set<BranchId>) = asOwner { actor ->
+        val user = users.byId(id) ?: throw DomainException(DomainError.NotFound("USER"))
+        ensure(role != Role.OWNER || grants.isEmpty()) { DomainError.InvalidInput("grants", "مالک به همه شعب دسترسی دارد.") }
+        grants.forEach { ensure(branches.byId(it)?.isActive == true) { DomainError.NotFound("BRANCH") } }
+        ensure(!(user.role == Role.OWNER && role != Role.OWNER && isLastActiveOwner(user))) { DomainError.InvalidState("USER", "LAST_OWNER") }
+        users.save(user.copy(role = role, branchGrants = grants))
+        trail.append(AuditDraft("USER_UPDATE", "USER", id.value, "${user.username}:$role:${grants.size}"), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, clock.nowEpochMillis(), epochProvider())
+        id
+    }
+
+    fun reactivateUser(id: GlobalId) = asOwner { actor ->
+        val user = users.byId(id) ?: throw DomainException(DomainError.NotFound("USER"))
+        users.save(user.copy(isActive = true, failedAttempts = 0, lockedUntilEpochMillis = 0))
+        trail.append(AuditDraft("USER_REACTIVATE", "USER", id.value, user.username), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, clock.nowEpochMillis(), epochProvider())
+        id
+    }
+
+    /** The owner sets a new PIN for a user who forgot theirs; it also clears a login lock. */
+    fun resetPin(id: GlobalId, pin: CharArray) = asOwner { actor ->
+        val user = users.byId(id) ?: throw DomainException(DomainError.NotFound("USER"))
+        users.save(user.copy(pinHash = hashValidPin(pin), failedAttempts = 0, lockedUntilEpochMillis = 0))
+        trail.append(AuditDraft("USER_PIN_RESET", "USER", id.value, user.username), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, clock.nowEpochMillis(), epochProvider())
+        id
+    }
+
+    /** Any signed-in user changes their own PIN by proving the current one. */
+    fun changeOwnPin(current: CharArray, next: CharArray): GlobalId {
+        // Wrong guesses count like failed logins (and survive the failure), so an unlocked phone
+        // cannot be used to guess the PIN; after the limit the account locks and the session ends.
+        val (id, error) = unitOfWork.transaction {
+            val actor = session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
+            val user = users.byId(actor.userId)!!
+            val now = clock.nowEpochMillis()
+            if (now < user.lockedUntilEpochMillis) return@transaction null to DomainError.InvalidState("USER", "LOCKED")
+            if (!PinHasher.verify(current, user.pinHash)) {
+                val attempts = user.failedAttempts + 1
+                val lock = if (attempts >= 5) now + minOf(15 * 60_000L, 30_000L shl minOf(attempts - 5, 5)) else 0L
+                users.save(user.copy(failedAttempts = attempts, lockedUntilEpochMillis = lock))
+                trail.append(AuditDraft("PIN_CHANGE_FAILURE", "USER", user.id.value, "attempts=$attempts"), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
+                return@transaction null to (if (lock > 0) DomainError.InvalidState("USER", "LOCKED") else DomainError.InvalidInput("pin", "رمز فعلی درست نیست."))
+            }
+            users.save(user.copy(pinHash = hashValidPin(next), failedAttempts = 0, lockedUntilEpochMillis = 0))
+            trail.append(AuditDraft("USER_PIN_CHANGE", "USER", user.id.value, user.username), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
+            user.id to null
+        }
+        if (id == null) {
+            if (error is DomainError.InvalidState) session.end()
+            throw DomainException(error!!)
+        }
+        return id
+    }
+
+    private fun isLastActiveOwner(user: User) = user.isActive && users.all().count { it.role == Role.OWNER && it.isActive } == 1
+
+    private fun hashValidPin(pin: CharArray): String {
+        ensure(pin.size in 6..12 && pin.all { it in '0'..'9' }) { DomainError.InvalidInput("pin", "رمز باید ۶ تا ۱۲ رقم باشد.") }
+        return PinHasher.hash(pin)
+    }
+
     fun login(username: String, pin: CharArray): Actor {
         val result = unitOfWork.transaction {
             val user = users.byUsername(username.trim().lowercase()) ?: return@transaction null to DomainError.AuthenticationRequired
@@ -174,9 +237,8 @@ class IdentityService(
         val u = username.trim().lowercase()
         ensure(u.matches(Regex("[a-z0-9._-]{3,32}"))) { DomainError.InvalidInput("username", "نام کاربری ۳ تا ۳۲ حرف لاتین یا عدد باشد.") }
         ensure(users.byUsername(u) == null) { DomainError.InvalidState("USER", "DUPLICATE_USERNAME") }
-        ensure(pin.size in 6..12 && pin.all { it.isDigit() }) { DomainError.InvalidInput("pin", "رمز باید ۶ تا ۱۲ رقم باشد.") }
         ensure(displayName.trim().length in 2..60) { DomainError.InvalidInput("displayName", "نام نمایشی الزامی است.") }
-        return User(GlobalId.new(), u, displayName.trim(), role, grants, PinHasher.hash(pin), 0, 0, true)
+        return User(GlobalId.new(), u, displayName.trim(), role, grants, hashValidPin(pin), 0, 0, true)
     }
 
     private fun <T> asOwner(block: (Actor) -> T): T = unitOfWork.transaction {

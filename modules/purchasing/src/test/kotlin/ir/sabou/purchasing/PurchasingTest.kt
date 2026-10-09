@@ -106,6 +106,39 @@ class PurchasingTest {
         assertEquals("INVALID_STATE:PURCHASE_INVOICE:DUPLICATE_NUMBER", code { invoice(no = " 10-01 ") })
     }
 
+    @Test fun aReversedInvoiceFreesItsNumberForTheCorrectedOne() {
+        val wrong = invoice(no = "X-9", value = 3_000_000)
+        ops.reverseInvoice(ReversePurchaseInvoice(GlobalId.new(), branchA, wrong, day, "مبلغ اشتباه"))
+        invoice(no = "X-9", value = 2_000_000)
+        assertEquals("INVALID_STATE:PURCHASE_INVOICE:DUPLICATE_NUMBER", code { invoice(no = "X-9") })
+        apMatchesSubLedger()
+    }
+
+    @Test fun returningEverythingUnitByUnitCreditsExactlyTheInvoice() {
+        val inv = invoice(qty = 3, value = 200_000)
+        repeat(3) { ops.returnGoods(ReturnToSupplier(GlobalId.new(), branchA, inv, listOf(IssueLine(cheese, kg(1))), day, "خراب")) }
+        assertEquals(0, ops.outstanding(inv).rial)
+        assertEquals(0, ledger.balance(StandardAccounts.PAYABLE, branchA).rial)
+        assertEquals(0, ledger.balance(StandardAccounts.INVENTORY, branchA).rial)
+        apMatchesSubLedger()
+    }
+
+    @Test fun tinyUnitPricesStillLetEveryUnitBeReturned() {
+        val inv = invoice(no = "T-1", qty = 8, value = 5)
+        repeat(8) { ops.returnGoods(ReturnToSupplier(GlobalId.new(), branchA, inv, listOf(IssueLine(cheese, kg(1))), day, "خراب")) }
+        assertEquals(0, ops.outstanding(inv).rial)
+        assertEquals(0, ledger.balance(StandardAccounts.INVENTORY, branchA).rial)
+        apMatchesSubLedger()
+    }
+
+    @Test fun payingWhileRecordingNeedsThePaymentPermission() {
+        fund(cashA, branchA, 5_000_000)
+        session.actor = Actor(GlobalId.new(), "store", Role.STOREKEEPER, setOf(branchA.branchId))
+        assertEquals("PERMISSION_DENIED:PURCHASE_PAY", code { invoice(payNow = ImmediatePayment(cashA, rial(2_000_000))) })
+        invoice()   // recording alone is allowed
+        assertEquals(5_000_000, treasury.balance(cashA))
+    }
+
     @Test fun partialPaymentsAndNoOverpayment() {
         fund(cashA, branchA, 5_000_000)
         val inv = invoice()

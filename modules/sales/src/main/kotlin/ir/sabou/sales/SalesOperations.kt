@@ -176,6 +176,7 @@ class SalesOperations(
         sale.settlements.filterIsInstance<Settlement.Credit>().groupBy { it.customerId }.forEach { (customerId, rows) ->
             val customer = customers.byId(customerId) ?: throw DomainException(DomainError.NotFound("CUSTOMER"))
             ensure(customer.isActive) { DomainError.InvalidState("CUSTOMER", "INACTIVE") }
+            ensure(customer.registeredIn == sale.scope) { DomainError.InvalidInput("customer", "این مشتری متعلق به این شعبه نیست.") }
             val after = customerBalance(customerId) + Money.sum(rows.map { it.amount })
             ensure(after <= customer.creditLimit || ctx.actor.role.allows(Permission.CREDIT_OVERRIDE)) {
                 DomainError.InvalidState("CUSTOMER", "CREDIT_LIMIT_EXCEEDED")
@@ -233,6 +234,8 @@ class SalesOperations(
         ensure(r.scope == cmd.scope) { DomainError.InvalidInput("scope", "این مطالبه متعلق به این شعبه نیست.") }
         ensure(!cmd.amount.isZero && cmd.amount <= outstanding(r.id)) { DomainError.InvalidState("RECEIVABLE", "AMOUNT_EXCEEDS_OUTSTANDING") }
         ensure(treasury.account(cmd.treasuryAccountId).scope == r.scope) { DomainError.InvalidInput("account", "حساب دریافت متعلق به این شعبه نیست.") }
+        val saleDate = sales.sale(r.saleId)?.date
+        ensure(saleDate == null || cmd.date >= saleDate) { DomainError.InvalidInput("date", "تاریخ دریافت قبل از تاریخ فروش است.") }
         val collectionId = GlobalId.new()
         treasury.settle(ctx, capability, cmd.treasuryAccountId, Direction.RECEIPT, cmd.amount, cmd.date, COLLECTION, collectionId, "وصول مطالبات",
             listOf(LineDraft(StandardAccounts.RECEIVABLE, credit = cmd.amount, by = capability)))

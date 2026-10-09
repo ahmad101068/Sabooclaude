@@ -8,6 +8,7 @@ import ir.sabou.platform.memory.InMemoryUnitOfWork
 import ir.sabou.platform.memory.InMemoryUserStore
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -48,5 +49,34 @@ class IdentityTest {
         identity.login("owner", "123456".toCharArray())
         now += 31 * 60_000
         assertNull(session.currentActor())
+    }
+
+    @Test fun editingAUserChangesOnlyRoleAndGrantsAndPinCanBeResetOrChanged() {
+        val ownerId = identity.bootstrapOwner("owner", "مالک", "123456".toCharArray())
+        val branch = identity.createBranch("ونک")
+        val id = identity.createUser("ali", "علی", Role.CASHIER, setOf(branch), "111111".toCharArray())
+        identity.deactivateUser(id)
+        identity.updateUser(id, Role.MANAGER, setOf(branch))
+        val edited = users.byId(id)!!
+        assertEquals(Role.MANAGER, edited.role)
+        assertFalse(edited.isActive)                              // editing never re-activates
+        identity.reactivateUser(id)
+        identity.resetPin(id, "222222".toCharArray())
+        assertEquals("LAST_OWNER", code { identity.updateUser(ownerId, Role.MANAGER, setOf(branch)) }.substringAfterLast(':'))
+        assertEquals("INVALID_INPUT:pin", code { identity.resetPin(id, "۱۲۳۴۵۶".toCharArray()) })   // UI normalizes digits first
+        identity.logout()
+        identity.login("ali", "222222".toCharArray())
+        assertEquals("INVALID_INPUT:pin", code { identity.changeOwnPin("000000".toCharArray(), "333333".toCharArray()) })
+        identity.changeOwnPin("222222".toCharArray(), "333333".toCharArray())
+        identity.logout()
+        identity.login("ali", "333333".toCharArray())
+    }
+
+    @Test fun guessingTheCurrentPinLocksTheAccount() {
+        identity.bootstrapOwner("owner", "مالک", "123456".toCharArray())
+        repeat(4) { assertEquals("INVALID_INPUT:pin", code { identity.changeOwnPin("000000".toCharArray(), "333333".toCharArray()) }) }
+        assertEquals("INVALID_STATE:USER:LOCKED", code { identity.changeOwnPin("000000".toCharArray(), "333333".toCharArray()) })
+        assertNull(session.currentActor())                                   // signed out
+        assertEquals("INVALID_STATE:USER:LOCKED", code { identity.login("owner", "123456".toCharArray()) })
     }
 }

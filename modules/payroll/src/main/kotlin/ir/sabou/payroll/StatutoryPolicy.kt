@@ -34,6 +34,8 @@ data class StatutoryPolicy(
         require(listOf(employeeInsuranceBp, employerInsuranceBp, unemploymentInsuranceBp).all { it in 0..10_000 })
         require(insuranceTaxExemptDenominator > 0 && insuranceTaxExemptNumerator in 0..insuranceTaxExemptDenominator)
         require(taxBrackets.isNotEmpty() && taxBrackets.last().upToMonthly == null)
+        require(taxBrackets.all { it.rateBasisPoints in 0..10_000 }) { "tax_rate_out_of_range" }
+        require(employeeInsuranceBp + taxBrackets.maxOf { it.rateBasisPoints } <= 10_000) { "deductions_exceed_gross" }
         val bounds = taxBrackets.mapNotNull { it.upToMonthly?.rial }
         require(bounds == bounds.sorted() && bounds.distinct() == bounds)
     }
@@ -81,6 +83,11 @@ class StatutoryPolicyRegistry(private val source: () -> List<StatutoryPolicy>) {
 
 /** Iranian national id (کد ملی) check-digit validation. */
 object NationalId {
+    /** Persian/Arabic digits → Latin, surrounding spaces removed; the stored and compared form. */
+    fun normalize(raw: String): String = raw.trim().map { ch ->
+        when (ch) { in '۰'..'۹' -> '0' + (ch - '۰'); in '٠'..'٩' -> '0' + (ch - '٠'); else -> ch }
+    }.joinToString("")
+
     fun isValid(raw: String): Boolean {
         val digits = raw.trim().map { ch ->
             when (ch) { in '۰'..'۹' -> '0' + (ch - '۰'); in '٠'..'٩' -> '0' + (ch - '٠'); else -> ch }

@@ -37,6 +37,16 @@ class DeviceKeys(private val context: Context) {
         throw DeviceKeyUnavailableException(e)
     }
 
+    /**
+     * Forgets the wrapped database key so the next open creates a new one. Only for a database that is
+     * being erased or replaced (factory reset, restore when the old key is unusable).
+     */
+    @Synchronized
+    fun forgetDatabaseKey() {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        check(prefs.edit().remove(WRAPPED_DB_KEY).commit()) { "key_not_removed" }
+    }
+
     fun hmac(data: ByteArray): ByteArray = Mac.getInstance(HMAC).run {
         init(hmacKey())
         doFinal(data)
@@ -52,7 +62,9 @@ class DeviceKeys(private val context: Context) {
         val packed = Base64.decode(value, Base64.NO_WRAP)
         require(packed.size > IV_BYTES) { "bad_wrapped_key" }
         val cipher = Cipher.getInstance(AES_GCM)
-        cipher.init(Cipher.DECRYPT_MODE, aesKey(), GCMParameterSpec(128, packed.copyOfRange(0, IV_BYTES)))
+        // Never generate a fresh key to unwrap: a lost Keystore key must surface as an error, not as a new key.
+        val key = keyStore().getKey(AES_ALIAS, null) as? SecretKey ?: error("KEYSTORE_KEY_MISSING")
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, packed.copyOfRange(0, IV_BYTES)))
         return cipher.doFinal(packed.copyOfRange(IV_BYTES, packed.size))
     }
 
@@ -80,15 +92,20 @@ class DeviceKeys(private val context: Context) {
         }
     }
 
-    private companion object {
-        const val PREFS = "sabou_keys"
-        const val WRAPPED_DB_KEY = "wrapped_db_key"
-        const val ANDROID_KEYSTORE = "AndroidKeyStore"
-        const val AES_ALIAS = "sabou_db_wrap"
-        const val HMAC_ALIAS = "sabou_anchor_hmac"
-        const val AES_GCM = "AES/GCM/NoPadding"
-        const val HMAC = "HmacSHA256"
-        const val PASSPHRASE_BYTES = 32
-        const val IV_BYTES = 12
+    companion object {
+        /** True when the wrapping key no longer exists or no longer matches (not a transient failure). */
+        fun isPermanentlyLost(e: Throwable): Boolean = generateSequence(e) { it.cause }.any {
+            it.message == "KEYSTORE_KEY_MISSING" || it is javax.crypto.AEADBadTagException
+        }
+
+        private const val PREFS = "sabou_keys"
+        private const val WRAPPED_DB_KEY = "wrapped_db_key"
+        private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+        private const val AES_ALIAS = "sabou_db_wrap"
+        private const val HMAC_ALIAS = "sabou_anchor_hmac"
+        private const val AES_GCM = "AES/GCM/NoPadding"
+        private const val HMAC = "HmacSHA256"
+        private const val PASSPHRASE_BYTES = 32
+        private const val IV_BYTES = 12
     }
 }

@@ -14,3 +14,6 @@ The previous code base had a disabled sync layer and device-local backups only, 
 
 ## Consequences
 Adding the server later is additive: an upload worker for the event log and a server-side ledger that replays the same commands.
+
+## Amendment (2026-10-09, ADR-0009)
+Until sync is switched on, domain events are kept locally for 90 days and then pruned, so the table cannot grow without bound (AUD-022). The audit chain remains the complete local history. When sync is introduced, the server is seeded from a full snapshot of the database, not by replaying old events; from then on only events already delivered are pruned.

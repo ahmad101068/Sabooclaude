@@ -90,31 +90,38 @@ object OperationsScreens {
 
     // ------------------------------------------------------------ Hub (design: Operations)
 
+    /** Who sees which group: the hub only lists what the role may open (AUD-012). */
+    private val inventoryPerms = listOf(Permission.INVENTORY_VIEW, Permission.INVENTORY_COUNT, Permission.INVENTORY_WASTE, Permission.INVENTORY_TRANSFER, Permission.RECIPE_MANAGE)
+    private val purchasePerms = listOf(Permission.PURCHASE_VIEW, Permission.SUPPLIER_MANAGE)
+    private val personnelPerms = listOf(Permission.PERSONNEL_VIEW, Permission.PERSONNEL_MANAGE, Permission.ATTENDANCE_RECORD, Permission.PAYROLL_CALCULATE, Permission.PAYROLL_APPROVE, Permission.PAYROLL_PAY)
+    val allPerms = inventoryPerms + purchasePerms + personnelPerms
+
     @Composable
     fun Hub(nav: Nav) {
         val session = LocalSession.current
+        fun any(perms: List<Permission>) = perms.any { session.can(it) }
         val counts by load(session, session.branch) {
-            val low = runCatching { overview.lowStock().size }.getOrNull()
-            val payable = runCatching { overview.payables() }.getOrNull()
+            val low = if (session.can(Permission.INVENTORY_VIEW)) overview.lowStock().size else null
+            val payable = if (session.can(Permission.PURCHASE_VIEW)) overview.payables() else null
             low to payable
         }
         val (low, payable) = counts.orNull() ?: (null to null)
         Column(Modifier.fillMaxSize()) {
             Header("عملیات") { BranchSwitcher() }
             LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                item { SectionTitle("انبار") }
-                item { NavRow(R.drawable.ic_operations, "موجودی", low?.let { if (it > 0) "${Fa.number(it.toLong())} کالا زیر حداقل" else "همه کالاها بالای حداقل" }, onClick = { nav.go(Route.Stock) }) }
-                item { NavRow(R.drawable.ic_count, "انبارگردانی", "شمارش و ثبت اختلاف", onClick = { nav.go(Route.Count) }) }
-                item { NavRow(R.drawable.ic_transfer, "انتقال", "بین انبارها و شعب", onClick = { nav.go(Route.StockTransfer) }) }
-                item { NavRow(R.drawable.ic_waste, "ضایعات", "ثبت با دلیل", onClick = { nav.go(Route.Waste) }) }
-                item { NavRow(R.drawable.ic_recipe, "رسپی و بهای تمام‌شده", "نسخه‌های رسپی آیتم‌های منو", onClick = { nav.go(Route.Recipes) }) }
-                item { SectionTitle("خرید") }
-                item { NavRow(R.drawable.ic_purchase, "خرید و دریافت کالا", payable?.let { "بدهی ${Fa.tomanShort(it.rial)}" }, tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Purchases) }) }
-                item { NavRow(R.drawable.ic_supplier, "تأمین‌کنندگان", "فهرست و مانده حساب", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Suppliers) }) }
-                item { SectionTitle("پرسنل") }
-                item { NavRow(R.drawable.ic_person, "کارکنان", "ثبت و مشخصات", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Personnel) }) }
-                item { NavRow(R.drawable.ic_clock, "حضور و غیاب", "ثبت روزانه کارکرد", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Attendance) }) }
-                item { NavRow(R.drawable.ic_payroll, "حقوق", "محاسبه، تأیید و پرداخت", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Payroll) }) }
+                if (any(inventoryPerms)) item { SectionTitle("انبار") }
+                if (session.can(Permission.INVENTORY_VIEW)) item { NavRow(R.drawable.ic_operations, "موجودی", low?.let { if (it > 0) "${Fa.number(it.toLong())} کالا زیر حداقل" else "همه کالاها بالای حداقل" }, onClick = { nav.go(Route.Stock) }) }
+                if (session.can(Permission.INVENTORY_COUNT)) item { NavRow(R.drawable.ic_count, "انبارگردانی", "شمارش و ثبت اختلاف", onClick = { nav.go(Route.Count) }) }
+                if (session.can(Permission.INVENTORY_TRANSFER)) item { NavRow(R.drawable.ic_transfer, "انتقال", "بین انبارها و شعب", onClick = { nav.go(Route.StockTransfer) }) }
+                if (session.can(Permission.INVENTORY_WASTE)) item { NavRow(R.drawable.ic_waste, "ضایعات", "ثبت با دلیل", onClick = { nav.go(Route.Waste) }) }
+                if (session.can(Permission.RECIPE_MANAGE)) item { NavRow(R.drawable.ic_recipe, "رسپی و بهای تمام‌شده", "نسخه‌های رسپی آیتم‌های منو", onClick = { nav.go(Route.Recipes) }) }
+                if (any(purchasePerms)) item { SectionTitle("خرید") }
+                if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "خرید و دریافت کالا", payable?.let { "بدهی ${Fa.tomanShort(it.rial)}" }, tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Purchases) }) }
+                if (any(purchasePerms)) item { NavRow(R.drawable.ic_supplier, "تأمین‌کنندگان", "فهرست و مانده حساب", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Suppliers) }) }
+                if (any(personnelPerms)) item { SectionTitle("پرسنل") }
+                if (session.can(Permission.PERSONNEL_VIEW) || session.can(Permission.PERSONNEL_MANAGE)) item { NavRow(R.drawable.ic_person, "کارکنان", "ثبت و مشخصات", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Personnel) }) }
+                if (session.can(Permission.ATTENDANCE_RECORD) || session.can(Permission.PERSONNEL_VIEW)) item { NavRow(R.drawable.ic_clock, "حضور و غیاب", "ثبت روزانه کارکرد", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Attendance) }) }
+                if (listOf(Permission.PAYROLL_CALCULATE, Permission.PAYROLL_APPROVE, Permission.PAYROLL_PAY).any { session.can(it) }) item { NavRow(R.drawable.ic_payroll, "حقوق", "محاسبه، تأیید و پرداخت", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Payroll) }) }
             }
         }
     }
@@ -125,7 +132,7 @@ object OperationsScreens {
 
     @Composable
     private fun invData(branch: Scope.Branch) = load(LocalSession.current, branch) {
-        InvData(items.all().filter { it.isActive }, locations.all().filter { it.isActive && it.scope == branch })
+        InvData(overview.items().filter { it.isActive }, overview.locations(branch).filter { it.isActive })
     }
 
     @Composable
@@ -140,7 +147,7 @@ object OperationsScreens {
                 Page {
                     Loaded(inv) { d ->
                         val loc = locationId ?: d.locations.firstOrNull()?.id
-                        val balances by load(session, loc) { loc?.let { stock.balances(it) }.orEmpty() }
+                        val balances by load(session, loc) { loc?.let { overview.stock(it) }.orEmpty() }
                         if (d.locations.size > 1) Picker("انبار", d.locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
                         if (d.items.isEmpty()) EmptyState("کالایی تعریف نشده است.", "تعریف کالا") { nav.go(Route.Items) }
                         Loaded(balances) { list ->
@@ -259,7 +266,7 @@ object OperationsScreens {
     @Composable
     private fun CountSheet(nav: Nav, branch: Scope.Branch, locationId: GlobalId, items: List<Item>) {
         val session = LocalSession.current
-        val balances by load(session, locationId) { stock.balances(locationId) }
+        val balances by load(session, locationId) { overview.stock(locationId) }
         val counted = remember { mutableStateMapOf<GlobalId, Quantity?>() }
         val id = remember { GlobalId.new() }
         var confirm by remember { mutableStateOf(false) }
@@ -292,11 +299,7 @@ object OperationsScreens {
             Header("انتقال کالا", onBack = nav.back)
             WithBranch { branch ->
                 val data by load(session, branch) {
-                    Triple(
-                        items.all().filter { it.isActive },
-                        locations.all().filter { it.isActive && it.scope == branch },
-                        locations.all().filter { it.isActive && session.actor.canAccess(it.scope) },
-                    )
+                    Triple(overview.items().filter { it.isActive }, overview.locations(branch).filter { it.isActive }, overview.transferTargets())
                 }
                 var source by remember { mutableStateOf<GlobalId?>(null) }
                 var target by remember { mutableStateOf<GlobalId?>(null) }
@@ -336,17 +339,13 @@ object OperationsScreens {
     @Composable
     fun Purchases(nav: Nav) {
         val session = LocalSession.current
-        val data by load(session) {
-            val names = suppliers.all().associate { it.id to it.name }
-            purchases.invoices().filter { session.actor.canAccess(it.scope) }.sortedByDescending { it.date }
-                .map { Triple(it, names[it.supplierId] ?: "", purchasing.outstanding(it.id)) }
-        }
+        val data by load(session) { overview.invoices() }
         Column(Modifier.fillMaxSize()) {
             Header("خرید و دریافت کالا", onBack = nav.back)
             Page {
                 if (session.can(Permission.PURCHASE_RECORD)) PrimaryButton("ثبت فاکتور خرید", { nav.go(Route.NewPurchase) })
                 Loaded(data) { list ->
-                    SCard { KeyValue("جمع بدهی (تومان)", Fa.toman(Money.sum(list.map { it.third })), strong = true) }
+                    SCard { KeyValue("جمع بدهی (تومان)", Fa.toman(Money.sum(list.filter { it.invoice.status == InvoiceStatus.POSTED }.map { it.outstanding })), strong = true) }
                     if (list.isEmpty()) EmptyState("هنوز فاکتوری ثبت نشده است.")
                     list.forEach { (inv, supplier, outstanding) ->
                         val sub = "${Fa.digits(inv.supplierInvoiceNo)} · ${Fa.date(inv.date)}" +
@@ -372,8 +371,10 @@ object OperationsScreens {
             Header("فاکتور خرید", "دریافت کالا به انبار", onBack = nav.back)
             WithBranch { branch ->
                 val data by load(session, branch) {
-                    Triple(suppliers.all().filter { it.isActive }, InvData(items.all().filter { it.isActive }, locations.all().filter { it.isActive && it.scope == branch }),
-                        overview.treasury().map { it.account }.filter { it.scope == branch })
+                    // A storekeeper records invoices but may not pay: payment accounts load only with PURCHASE_PAY.
+                    Triple(overview.suppliers().map { it.supplier }.filter { it.isActive },
+                        InvData(overview.items().filter { it.isActive }, overview.locations(branch).filter { it.isActive }),
+                        if (session.can(Permission.PURCHASE_PAY)) overview.paymentAccounts(branch) else emptyList())
                 }
                 var supplier by remember { mutableStateOf<GlobalId?>(null) }
                 var number by remember { mutableStateOf("") }
@@ -390,8 +391,8 @@ object OperationsScreens {
                     Loaded(data) { (sups, inv, accounts) ->
                         val loc = locationId ?: inv.locations.firstOrNull()?.id
                         FormCard {
-                            PickerOrHint("تأمین‌کننده", sups.map { Choice(it.id, it.name, it.phone) }, supplier, { supplier = it }, "ابتدا تأمین‌کننده را تعریف کنید.")
-                            if (sups.isEmpty()) SecondaryButton("تعریف تأمین‌کننده", { nav.go(Route.Suppliers) })
+                            PickerOrHint("تأمین‌کننده", sups.map { Choice(it.id, it.name, it.phone) }, supplier, { supplier = it }, "تأمین‌کننده‌ای تعریف نشده است؛ مدیر یا مالک باید آن را تعریف کند.")
+                            if (sups.isEmpty() && session.can(Permission.SUPPLIER_MANAGE)) SecondaryButton("تعریف تأمین‌کننده", { nav.go(Route.Suppliers) })
                             TextInput("شماره فاکتور تأمین‌کننده", number, { number = it })
                             if (inv.locations.size > 1) Picker("انبار دریافت", inv.locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
                             DateInput("تاریخ فاکتور", date, { date = it }, session.today)
@@ -416,7 +417,7 @@ object OperationsScreens {
                             val total = lines.sumOf { it.value?.rial ?: 0 }
                             KeyValue("جمع فاکتور (تومان)", Fa.toman(total), strong = true)
                         }
-                        FormCard {
+                        if (session.can(Permission.PURCHASE_PAY)) FormCard {
                             Row(Modifier.clickable { payNow = !payNow }, verticalAlignment = Alignment.CenterVertically) {
                                 androidx.compose.material3.Checkbox(checked = payNow, onCheckedChange = { payNow = it })
                                 Text("همین الان پرداخت می‌کنم", style = SabouType.bodyStrong, color = Sabou.colors.ink)
@@ -453,22 +454,24 @@ object OperationsScreens {
     fun PurchaseDetail(nav: Nav, invoiceId: GlobalId) {
         val session = LocalSession.current
         val data by load(session, invoiceId) {
-            val inv = purchases.invoice(invoiceId)!!
+            val v = overview.invoice(invoiceId)
             PurchaseView(
-                invoice = inv,
-                supplier = suppliers.byId(inv.supplierId)?.name ?: "",
-                outstanding = purchasing.outstanding(inv.id),
-                payments = purchases.payments(inv.id),
-                items = items.all().associateBy { it.id },
-                accounts = overview.treasury().map { it.account }.filter { session.actor.canAccess(it.scope) },
+                invoice = v.invoice,
+                supplier = v.supplier,
+                outstanding = v.outstanding,
+                payments = v.payments,
+                items = overview.items().associateBy { it.id },
+                accounts = if (session.can(Permission.PURCHASE_PAY)) overview.paymentAccounts() else emptyList(),
             )
         }
         var payAccount by remember { mutableStateOf<GlobalId?>(null) }
         var payAmount by remember { mutableStateOf<Money?>(null) }
         var reason by remember { mutableStateOf("") }
         var confirmReverse by remember { mutableStateOf(false) }
+        var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
         val id = remember { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
+        pending?.let { (title, act) -> Confirm(title, "سند برگشتی ثبت می‌شود و سابقه حذف نمی‌شود.", "برگشت بزن", act, { pending = null }, danger = true) }
         Column(Modifier.fillMaxSize()) {
             Header("فاکتور خرید", onBack = nav.back)
             Page {
@@ -494,7 +497,9 @@ object OperationsScreens {
                                 Text(Fa.toman(p.amount), style = SabouType.bodyStrong, color = Sabou.colors.moneyOut)
                                 if (!p.reversed && session.can(Permission.PURCHASE_REVERSE)) {
                                     Text("برگشت", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable {
-                                        action.run({ purchasing.reversePayment(ReverseSupplierPayment(GlobalId.new(), inv.scope, p.id, session.today, "اصلاح پرداخت")) })
+                                        pending = "برگشت این پرداخت؟" to {
+                                            action.run({ purchasing.reversePayment(ReverseSupplierPayment(GlobalId.new(), inv.scope, p.id, session.today, "اصلاح پرداخت")) })
+                                        }
                                     }.padding(start = 10.dp))
                                 }
                             }
@@ -549,7 +554,7 @@ object OperationsScreens {
     @Composable
     fun Suppliers(nav: Nav) {
         val session = LocalSession.current
-        val data by load(session) { suppliers.all().map { it to runCatching { purchasing.supplierBalance(it.id) }.getOrDefault(Money.ZERO) } }
+        val data by load(session) { overview.suppliers().map { it.supplier to it.owed } }
         var name by remember { mutableStateOf("") }
         var phone by remember { mutableStateOf("") }
         val id = remember { mutableStateOf(GlobalId.new()) }
@@ -585,7 +590,7 @@ object OperationsScreens {
         Column(Modifier.fillMaxSize()) {
             Header("کارکنان", onBack = nav.back) { BranchSwitcher() }
             WithBranch { branch ->
-                val data by load(session, branch) { personnel.employees(branch) }
+                val data by load(session, branch) { overview.employees(branch) }
                 var name by remember { mutableStateOf("") }
                 var nationalId by remember { mutableStateOf("") }
                 var salary by remember { mutableStateOf<Money?>(null) }
@@ -621,7 +626,7 @@ object OperationsScreens {
         Column(Modifier.fillMaxSize()) {
             Header("حضور و غیاب", onBack = nav.back)
             WithBranch { branch ->
-                val data by load(session, branch, date) { personnel.employees(branch).filter { it.isActive }.map { it to personnel.attendanceOn(it.id, date) } }
+                val data by load(session, branch, date) { overview.attendance(branch, date) }
                 Page {
                     SCard { DateInput("روز", date, { date = it }, session.today) }
                     Loaded(data) { list ->
@@ -649,7 +654,7 @@ object OperationsScreens {
             }
             action.error?.let { Banner(it) }
             val w = minutes(worked); val o = minutes(overtime); val a = minutes(absent)
-            SecondaryButton(if (record == null) "ثبت" else "اصلاح", {
+            if (LocalSession.current.can(Permission.ATTENDANCE_RECORD)) SecondaryButton(if (record == null) "ثبت" else "اصلاح", {
                 action.run({ payroll.recordAttendance(RecordAttendance(GlobalId.new(), branch, employeeId, date, w!!, o!!, a!!)) })
             }, enabled = w != null && o != null && a != null && !action.busy)
         }
@@ -667,32 +672,37 @@ object OperationsScreens {
     @Composable
     fun Payroll(nav: Nav) {
         val session = LocalSession.current
-        val j = Fa.jalali(session.today)
-        var fromDate by remember { mutableStateOf(Fa.fromJalali(j.year, j.month, 1)) }
-        var toDate by remember { mutableStateOf(Fa.fromJalali(j.year, j.month, Fa.monthLength(j.year, j.month))) }
+        // Payroll runs cover whole Jalali months: choose one of the last twelve.
+        val months = remember(session.today) {
+            val j = Fa.jalali(session.today)
+            (0 until 12).map { back ->
+                val index = j.year * 12 + (j.month - 1) - back
+                val y = index / 12; val m = index % 12 + 1
+                Choice(Fa.fromJalali(y, m, 1) to Fa.fromJalali(y, m, Fa.monthLength(y, m)), "${Fa.monthNames[m - 1]} ${Fa.digits(y.toString())}")
+            }
+        }
+        var period by remember { mutableStateOf(months.first().value) }
+        val fromDate = period.first
+        val toDate = period.second
         Column(Modifier.fillMaxSize()) {
             Header("حقوق", onBack = nav.back) { BranchSwitcher() }
             WithBranch { branch ->
                 val data by load(session, branch) {
-                    val runs = payrollStore.runs(branch).sortedByDescending { it.from }
+                    val v = overview.payroll(branch)
                     PayrollView(
-                        runs = runs,
-                        names = personnel.employees(branch).associate { it.id to it.name },
-                        accounts = overview.treasury().map { it.account }.filter { it.scope == branch },
-                        insurance = payroll.outstandingLiability(branch, LiabilityKind.INSURANCE),
-                        tax = payroll.outstandingLiability(branch, LiabilityKind.INCOME_TAX),
-                        unpaid = runs.filter { it.status == RunStatus.APPROVED }
-                            .associate { r -> r.id to r.payslips.associate { it.employeeId to payroll.unpaidNet(r.id, it.employeeId) } },
+                        runs = v.runs, names = v.names, insurance = v.insurance, tax = v.tax, unpaid = v.unpaid,
+                        accounts = if (session.can(Permission.PAYROLL_PAY)) overview.paymentAccounts(branch) else emptyList(),
                     )
                 }
                 val action = rememberAction()
+                var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+                pending?.let { (title, act) -> Confirm(title, "سند حقوق این دوره برگشت می‌خورد؛ می‌توانید دوباره محاسبه و تأیید کنید.", "برگشت بزن", act, { pending = null }, danger = true) }
                 val calcId = remember { mutableStateOf(GlobalId.new()) }
                 var payAccount by remember { mutableStateOf<GlobalId?>(null) }
                 Page {
                     if (session.can(Permission.PAYROLL_CALCULATE)) {
                         FormCard("محاسبه حقوق دوره") {
-                            DateInput("از", fromDate, { fromDate = it }, session.today)
-                            DateInput("تا", toDate, { toDate = it }, session.today)
+                            Picker("ماه", months, period, { period = it })
                             action.error?.let { Banner(it) }
                             PrimaryButton("محاسبه", {
                                 action.run({ payroll.calculate(CalculatePayroll(calcId.value, branch, fromDate, toDate)) }) { calcId.value = GlobalId.new() }
@@ -727,7 +737,7 @@ object OperationsScreens {
                                 }
                                 if (run.status == RunStatus.APPROVED && session.can(Permission.PAYROLL_APPROVE)) {
                                     SecondaryButton("برگشت لیست حقوق", {
-                                        action.run({ payroll.reverse(ReversePayroll(GlobalId.new(), branch, run.id, session.today, "اصلاح محاسبه")) })
+                                        pending = "برگشت لیست حقوق؟" to { action.run({ payroll.reverse(ReversePayroll(GlobalId.new(), branch, run.id, session.today, "اصلاح محاسبه")) }) }
                                     }, danger = true)
                                 }
                             }

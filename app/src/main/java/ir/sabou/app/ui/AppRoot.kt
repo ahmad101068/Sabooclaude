@@ -60,11 +60,6 @@ import ir.sabou.app.ui.theme.SabouType
 import ir.sabou.core.Fa
 import ir.sabou.core.Messages
 import ir.sabou.core.SabouCore
-import ir.sabou.kernel.GlobalId
-import ir.sabou.kernel.Scope
-import ir.sabou.treasury.OpenTreasuryAccount
-import ir.sabou.treasury.TreasuryKind
-import ir.sabou.inventory.CreateLocation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -72,20 +67,31 @@ import kotlinx.coroutines.withContext
 @Composable
 fun AppRoot(container: AppContainer, ui: UiState) {
     val state by container.state.collectAsState()
+    val rootScope = rememberCoroutineScope()
     LaunchedEffect(Unit) { withContext(Dispatchers.IO) { container.ensureOpen() } }
 
     Box(Modifier.fillMaxSize().background(Sabou.colors.ground).safeDrawingPadding().imePadding()) {
         when (val s = state) {
             AppState.Opening -> Splash()
-            is AppState.Failed -> StartupFailed(s.detail) { container.open() }
-            is AppState.Recovery -> RecoveryScreen(container, s.detail)
+            is AppState.Failed -> RecoveryScreen(
+                container, s.detail, title = "برنامه باز نشد",
+                explanation = "پایگاه داده یا کلید امن دستگاه در دسترس نیست. دوباره تلاش کنید؛ اگر تکرار شد، از پشتیبان بازیابی کنید.",
+                retry = { container.open() },
+            )
+            is AppState.Recovery -> RecoveryScreen(
+                container, s.detail, title = "بررسی یکپارچگی ناموفق بود",
+                explanation = "داده‌های این دستگاه با آخرین وضعیت ثبت‌شده هم‌خوانی ندارد. ممکن است پایگاه داده با نسخه قدیمی‌تری جایگزین یا دست‌کاری شده باشد.",
+            )
             is AppState.Ready -> {
                 val session = ui.session
                 when {
                     session != null && session.core === s.core -> Shell(ui, session)
                     else -> Gate(s.core, container) { actor ->
-                        val first = s.core.identity.accessibleBranches(actor).firstOrNull()?.id
-                        ui.session = AppSession(s.core, actor, first) { ui.signOut() }
+                        rootScope.launch {
+                            val first = withContext(Dispatchers.IO) { s.core.identity.accessibleBranches(actor).firstOrNull()?.id }
+                            ui.session?.close()   // e.g. the session of a database replaced by restore or reset
+                            ui.session = AppSession(s.core, actor, first) { ui.signOut() }
+                        }
                     }
                 }
             }
@@ -106,24 +112,12 @@ private fun Splash() {
     }
 }
 
-@Composable
-private fun StartupFailed(detail: String, retry: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    Page {
-        Spacer(Modifier.height(48.dp))
-        Text("برنامه باز نشد", style = SabouType.title, color = Sabou.colors.ink)
-        Banner("پایگاه داده یا کلید امن دستگاه در دسترس نیست. اگر دوباره تکرار شد، از پشتیبان بازیابی کنید.")
-        Text("جزئیات فنی: $detail", style = SabouType.caption, color = Sabou.colors.muted)
-        PrimaryButton("تلاش دوباره", { scope.launch(Dispatchers.IO) { retry() } })
-    }
-}
-
 /**
  * Shown when the database does not continue the recorded history (e.g. it was replaced with an older
  * copy) or the audit chain failed. Nothing is lost silently: the user restores a backup or starts over.
  */
 @Composable
-private fun RecoveryScreen(container: AppContainer, detail: String) {
+private fun RecoveryScreen(container: AppContainer, detail: String, title: String, explanation: String, retry: (() -> Unit)? = null) {
     val scope = rememberCoroutineScope()
     var password by remember { mutableStateOf("") }
     var uri by remember { mutableStateOf<Uri?>(null) }
@@ -134,9 +128,10 @@ private fun RecoveryScreen(container: AppContainer, detail: String) {
 
     Page {
         Spacer(Modifier.height(24.dp))
-        Text("بررسی یکپارچگی ناموفق بود", style = SabouType.title, color = Sabou.colors.ink)
-        Banner("داده‌های این دستگاه با آخرین وضعیت ثبت‌شده هم‌خوانی ندارد. ممکن است پایگاه داده با نسخه قدیمی‌تری جایگزین یا دست‌کاری شده باشد.")
+        Text(title, style = SabouType.title, color = Sabou.colors.ink)
+        Banner(explanation)
         Text("کد: $detail", style = SabouType.caption, color = Sabou.colors.muted)
+        if (retry != null) PrimaryButton("تلاش دوباره", { scope.launch(Dispatchers.IO) { retry() } })
         FormCard("بازیابی از فایل پشتیبان") {
             SecondaryButton(if (uri == null) "انتخاب فایل پشتیبان" else "فایل انتخاب شد ✓", { picker.launch(arrayOf("*/*")) })
             TextInput("رمز فایل پشتیبان", password, { password = it }, secret = true)
@@ -213,11 +208,8 @@ private fun Bootstrap(core: SabouCore, onSignedIn: (ir.sabou.platform.Actor) -> 
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
-                        core.identity.bootstrapOwner(username, name, Fa.latinDigits(pin).toCharArray())
-                        val scopeOf = Scope.Branch(core.identity.createBranch(branch))
-                        // A ready-to-use start: one cash box and one kitchen store in the first branch.
-                        core.treasury.openAccount(OpenTreasuryAccount(GlobalId.new(), scopeOf, "صندوق ${branch.trim()}", TreasuryKind.CASH))
-                        core.inventory.createLocation(CreateLocation(GlobalId.new(), scopeOf, "آشپزخانه"))
+                        // One transaction: owner, first branch, a cash box and a kitchen — or nothing.
+                        core.bootstrap(branch, name, username, Fa.latinDigits(pin).toCharArray())
                         checkNotNull(core.session.currentActor())
                     }
                 }
@@ -262,13 +254,16 @@ private fun Login(core: SabouCore, onSignedIn: (ir.sabou.platform.Actor) -> Unit
 
 // ---------------------------------------------------------------- Signed-in shell
 
-private data class TabSpec(val route: Route.Tab, val label: String, val icon: Int)
+private data class TabSpec(val route: Route.Tab, val label: String, val icon: Int, val needsAny: List<ir.sabou.platform.Permission> = emptyList())
 
 private val tabs = listOf(
     TabSpec(Route.Home, "خانه", R.drawable.ic_home),
-    TabSpec(Route.Sales, "فروش", R.drawable.ic_sales),
-    TabSpec(Route.Operations, "عملیات", R.drawable.ic_operations),
-    TabSpec(Route.Finance, "مالی", R.drawable.ic_finance),
+    TabSpec(Route.Sales, "فروش", R.drawable.ic_sales, listOf(ir.sabou.platform.Permission.SALES_VIEW)),
+    TabSpec(Route.Operations, "عملیات", R.drawable.ic_operations, OperationsScreens.allPerms),
+    TabSpec(Route.Finance, "مالی", R.drawable.ic_finance, listOf(
+        ir.sabou.platform.Permission.TREASURY_VIEW, ir.sabou.platform.Permission.LEDGER_VIEW,
+        ir.sabou.platform.Permission.SALES_VIEW, ir.sabou.platform.Permission.PURCHASE_VIEW,
+    )),
     TabSpec(Route.Me, "من", R.drawable.ic_me),
 )
 
@@ -293,7 +288,8 @@ private fun Shell(ui: UiState, session: AppSession) {
             Row(
                 Modifier.fillMaxWidth().background(Sabou.colors.surface).border(width = 1.dp, color = Sabou.colors.border).padding(horizontal = 6.dp, vertical = 8.dp),
             ) {
-                tabs.forEach { t ->
+                // A role only sees the tabs it can use (AUD-012).
+                tabs.filter { t -> t.needsAny.isEmpty() || t.needsAny.any { session.actor.role.allows(it) } }.forEach { t ->
                     val on = t.route == activeTab
                     Column(
                         Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable(role = Role.Tab) { ui.go(t.route) }.padding(vertical = 4.dp),

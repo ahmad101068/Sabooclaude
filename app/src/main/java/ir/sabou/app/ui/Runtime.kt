@@ -9,9 +9,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import ir.sabou.core.Messages
 import ir.sabou.core.SabouCore
@@ -36,6 +34,9 @@ class AppSession(
     branch: BranchId?,
     private val onSignedOut: () -> Unit,
 ) {
+    /** Lives as long as the signed-in session; writes run here so leaving a screen never abandons them. */
+    val scope: CoroutineScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate)
+
     var branchId by mutableStateOf(branch)
     /** Bumped after every successful write so every loaded view refreshes. */
     var version by mutableIntStateOf(0)
@@ -46,6 +47,7 @@ class AppSession(
 
     fun changed() { version++ }
     fun signedOut() = onSignedOut()
+    fun close() = scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
 }
 
 val LocalSession = compositionLocalOf<AppSession> { error("no session") }
@@ -58,12 +60,19 @@ sealed interface Load<out T> {
 
 fun <T> Load<T>.orNull(): T? = (this as? Load.Done<T>)?.value
 
-/** Loads on a background thread; reloads when [keys] or the session version change. */
+/**
+ * Loads on a background thread. New [keys] (another branch, date or record) start from Loading;
+ * a refresh after a write keeps showing the current data until the new data arrives, so forms
+ * inside a loaded section are not torn down by every save.
+ */
 @Composable
-fun <T> load(session: AppSession, vararg keys: Any?, block: SabouCore.() -> T): State<Load<T>> =
-    produceState<Load<T>>(Load.Loading, session.version, *keys) {
-        value = try {
+fun <T> load(session: AppSession, vararg keys: Any?, block: SabouCore.() -> T): State<Load<T>> {
+    val state = remember(*keys) { mutableStateOf<Load<T>>(Load.Loading) }
+    LaunchedEffect(session.version, *keys) {
+        state.value = try {
             Load.Done(withContext(Dispatchers.IO) { session.core.block() })
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: DomainException) {
             if (e.error == DomainError.AuthenticationRequired) session.signedOut()
             Load.Failed(Messages.of(e))
@@ -71,30 +80,34 @@ fun <T> load(session: AppSession, vararg keys: Any?, block: SabouCore.() -> T): 
             Load.Failed(Messages.of(e))
         }
     }
+    return state
+}
 
-/** Runs one write: busy flag, Persian error text, refresh on success, sign-out when the session expired. */
+/**
+ * Runs one write: busy flag, Persian error text, refresh on success, sign-out when the session expired.
+ * The work runs in the session's scope, so it finishes and refreshes every screen even if this screen
+ * leaves the composition meanwhile; the screen's own reaction runs only while it is still shown.
+ */
 @Stable
-class Action internal constructor(private val scope: CoroutineScope, private val session: AppSession) {
+class Action internal constructor(private val session: AppSession) {
     var busy by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)
+    internal var attached = true
 
     fun <T> run(block: SabouCore.() -> T, onSuccess: (T) -> Unit = {}) {
         if (busy) return
         busy = true
         error = null
-        scope.launch {
-            try {
-                val result = withContext(Dispatchers.IO) { session.core.block() }
+        session.scope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { session.core.block() } }
+            busy = false
+            result.onSuccess { value ->
                 session.changed()
-                onSuccess(result)
-            } catch (e: DomainException) {
-                if (e.error == DomainError.AuthenticationRequired) session.signedOut()
+                if (attached) onSuccess(value)
+            }.onFailure { e ->
+                if (e is DomainException && e.error == DomainError.AuthenticationRequired) session.signedOut()
                 error = Messages.of(e)
-            } catch (e: Exception) {
-                error = Messages.of(e)
-            } finally {
-                busy = false
             }
         }
     }
@@ -103,8 +116,12 @@ class Action internal constructor(private val scope: CoroutineScope, private val
 @Composable
 fun rememberAction(): Action {
     val session = LocalSession.current
-    val scope = rememberCoroutineScope()
-    return remember(session) { Action(scope, session) }
+    val action = remember(session) { Action(session) }
+    androidx.compose.runtime.DisposableEffect(action) {
+        action.attached = true
+        onDispose { action.attached = false }
+    }
+    return action
 }
 
 /** A fresh command id per form instance, so a double tap or a retry is recognised as the same command. */

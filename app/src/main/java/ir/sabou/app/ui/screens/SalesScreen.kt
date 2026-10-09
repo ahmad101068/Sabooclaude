@@ -96,13 +96,14 @@ fun SalesScreen(nav: Nav) {
     Column(Modifier.fillMaxSize()) {
         WithBranch { branch ->
             val state by load(session, branch, date) {
+                val view = overview.salesDay(branch, date)
                 SalesData(
-                    menu = recipes.menuItems().filter { it.isActive },
-                    kitchens = locations.all().filter { it.isActive && it.scope == branch },
-                    accounts = treasuryAccounts.all().filter { it.isActive && it.scope == branch },
-                    customers = customers.all().filter { it.isActive && it.registeredIn == branch },
-                    sale = sales.activeSale(branch, date),
-                    day = sales.day(branch, date),
+                    menu = overview.menu().map { it.item }.filter { it.isActive },
+                    kitchens = overview.locations(branch).filter { it.isActive },
+                    accounts = view.accounts,
+                    customers = view.customers,
+                    sale = view.sale,
+                    day = view.day,
                 )
             }
             val d = state.orNull()
@@ -123,7 +124,8 @@ fun SalesScreen(nav: Nav) {
                             data.kitchens.isEmpty() -> EmptyState("برای این شعبه آشپزخانه یا انباری تعریف نشده است.")
                             data.sale?.status == SaleStatus.POSTED -> PostedDay(branch, date, data)
                             data.day?.closed == true -> Banner("این روز بسته شده است.", ChipKind.ACCENT)
-                            else -> key(date, data.sale?.id) { Editor(branch, date, data) }
+                            // Keyed by branch and date only: saving a new draft must not reset the form or its error.
+                            else -> key(branch, date) { Editor(branch, date, data) }
                         }
                     }
                 }
@@ -268,10 +270,12 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                 }, enabled = kitchen != null && !action.busy)
                 if (session.can(Permission.SALES_POST)) {
                     PrimaryButton("ثبت نهایی فروش روز", {
-                        action.run({
-                            val saleId = salesOps.saveDraft(draft()).resultId
-                            salesOps.post(PostDailySale(postId.value, branch, saleId))
-                        }) { draftId.value = GlobalId.new(); postId.value = GlobalId.new() }
+                        // Two commands: the draft is saved (and its id retired) even if posting then fails,
+                        // so a corrected retry never reuses a command id with different content.
+                        action.run({ salesOps.saveDraft(draft()) }) { saved ->
+                            draftId.value = GlobalId.new()
+                            action.run({ salesOps.post(PostDailySale(postId.value, branch, saved.resultId)) }) { postId.value = GlobalId.new() }
+                        }
                     }, enabled = kitchen != null && form.payable() == form.settled(), busy = action.busy)
                     Text("با ثبت نهایی، مصرف مواد اولیه به بهای تمام‌شده، درآمد، واریز به صندوق‌ها و طلب مشتریان یک‌جا و با هم ثبت می‌شود.",
                         style = SabouType.caption, color = Sabou.colors.muted)

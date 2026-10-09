@@ -176,6 +176,7 @@ class InventoryGateway(
         context: CommandContext, itemId: GlobalId, location: Location, quantity: Quantity, value: Money,
         kind: MovementKind, date: BusinessDate, journalId: GlobalId?, source: SourceDocument, reversalOf: GlobalId?,
     ) {
+        ledger.requireOpenPeriod(date)   // also for moves without a journal (same-branch transfer, zero value)
         val before = stock.balance(itemId, location.id)
         stock.replace(before, before.copy(quantity = before.quantity + quantity, value = before.value + value))
         record(context, itemId, location, kind, quantity.micros, value.rial, date, journalId, source, reversalOf)
@@ -185,6 +186,7 @@ class InventoryGateway(
         context: CommandContext, itemId: GlobalId, location: Location, quantity: Quantity, value: Money,
         kind: MovementKind, date: BusinessDate, journalId: GlobalId?, source: SourceDocument, reversalOf: GlobalId?,
     ) {
+        ledger.requireOpenPeriod(date)
         val before = stock.balance(itemId, location.id)
         ensure(quantity <= before.quantity) { DomainError.InsufficientStock(itemId.value, before.quantity.micros, quantity.micros) }
         ensure(value <= before.value) { DomainError.InsufficientStock(itemId.value, before.value.rial, value.rial) }

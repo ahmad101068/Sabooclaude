@@ -70,6 +70,7 @@ class UiState {
 
     fun signOut() {
         session?.core?.identity?.logout()
+        session?.close()
         session = null
         stack.clear(); stack.add(Route.Home)
     }

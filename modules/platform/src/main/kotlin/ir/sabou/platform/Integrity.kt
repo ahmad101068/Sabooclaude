@@ -18,6 +18,8 @@ data class IntegrityAnchor(
     val hash: String,
     val reason: String,
     val recordedAtEpochMillis: Long,
+    /** Audit store position of the anchored event (CHECKPOINT only); lets startup verify incrementally. */
+    val position: Long = 0,
 )
 
 interface AnchorStore {
@@ -62,7 +64,7 @@ class IntegrityGuard(
     fun recordCheckpoint(epoch: String, nowEpochMillis: Long) {
         val head = audit.head()?.takeIf { it.epoch == epoch }
         anchors.record(
-            IntegrityAnchor(AnchorKind.CHECKPOINT, epoch, head?.sequence ?: 0L, head?.hash.orEmpty(), "STARTUP", nowEpochMillis),
+            IntegrityAnchor(AnchorKind.CHECKPOINT, epoch, head?.sequence ?: 0L, head?.hash.orEmpty(), "STARTUP", nowEpochMillis, head?.position ?: 0L),
         )
     }
 }

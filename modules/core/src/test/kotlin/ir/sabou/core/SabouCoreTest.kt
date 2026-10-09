@@ -85,12 +85,12 @@ class SabouCoreTest {
     private class World(val branch: Scope.Branch, val cash: GlobalId, val kitchen: GlobalId, val cheese: GlobalId, val pizza: GlobalId, val customer: GlobalId)
 
     private fun setUp(core: SabouCore): World {
-        core.identity.bootstrapOwner("owner", "مالک", "123456".toCharArray())
-        val branch = Scope.Branch(core.identity.createBranch("شعبه ونک"))
-        val cash = core.treasury.openAccount(OpenTreasuryAccount(id(), branch, "صندوق ونک", TreasuryKind.CASH)).resultId
+        core.bootstrap("شعبه ونک", "مالک", "owner", "123456".toCharArray())
+        val branch = Scope.Branch(core.overview.branches().single().id)
+        val cash = core.overview.treasury().single().account.id
         core.treasury.receipt(RecordReceipt(id(), branch, cash, ReceiptPurpose.OWNER_CAPITAL, rial(200_000_000), day, "آورده"))
         val cheese = core.inventory.createItem(CreateItem(id(), "پنیر", StockUnit.KILOGRAM, Quantity.units(2))).resultId
-        val kitchen = core.inventory.createLocation(CreateLocation(id(), branch, "آشپزخانه")).resultId
+        val kitchen = core.overview.locations(branch).single().id
         val pizza = core.inventory.defineMenuItem(DefineMenuItem(id(), "پیتزا")).resultId
         core.inventory.publishRecipe(PublishRecipe(id(), pizza, BusinessDate(19_000), listOf(RecipeLine(cheese, Quantity.of(200_000)))))
         val supplier = core.purchasing.registerSupplier(RegisterSupplier(id(), "لبنیات پگاه", "021")).resultId
@@ -202,12 +202,22 @@ class SabouCoreTest {
         // Swapping in the old copy is detected.
         assertIs<StartupVerdict.RollbackDetected>(boot(old).verifyStartup())
 
-        // Editing an audit row behind the app's back (dropping the trigger first) is detected.
+        // Editing an audit row behind the app's back (dropping the trigger first): an edit after the last
+        // anchored checkpoint is caught at startup; an older one is caught by the full verification.
         core.db.execute("DROP TRIGGER audit_events_no_update")
+        val last = core.db.query("SELECT MAX(position) AS p FROM audit_events").single().long("p")
         core.db.execute("UPDATE audit_events SET detail = 'forged' WHERE position = 2")
-        val verdict = boot().verifyStartup()
-        assertIs<StartupVerdict.RollbackDetected>(verdict)
-        assertTrue(verdict.detail.contains("AUDIT_EVENT_TAMPERED"))
+        assertEquals(StartupVerdict.Healthy, boot().verifyStartup())
+        val full = core.verifyAuditFull()
+        assertIs<StartupVerdict.RollbackDetected>(full)
+        assertTrue(full.detail.contains("AUDIT_EVENT_TAMPERED"))
+        // The periodic full verification at startup finds it too, at the latest a week later.
+        now += SabouCore.FULL_VERIFY_DAYS * 86_400_000L
+        assertIs<StartupVerdict.RollbackDetected>(boot().verifyStartup())
+        now -= SabouCore.FULL_VERIFY_DAYS * 86_400_000L
+        core.treasury.receipt(RecordReceipt(id(), w.branch, w.cash, ReceiptPurpose.OTHER_INCOME, rial(2), day, "y"))
+        core.db.execute("UPDATE audit_events SET detail = 'forged' WHERE position = ?", last + 1)
+        assertIs<StartupVerdict.RollbackDetected>(boot().verifyStartup())
     }
 
     @Test fun aFactoryResetAnnouncedBeforehandStartsCleanButASilentSwapDoesNot() {
@@ -236,6 +246,54 @@ class SabouCoreTest {
         assertEquals(current, core.stock.balance(w.cheese, w.kitchen))
     }
 
+    @Test fun readsNeedThePermissionAndStayInsideTheGrantedBranches() {
+        val core = boot()
+        val w = setUp(core)
+        val other = Scope.Branch(core.identity.createBranch("شعبه تجریش"))
+        core.treasury.openAccount(OpenTreasuryAccount(id(), other, "صندوق تجریش", TreasuryKind.CASH))
+        core.treasury.receipt(RecordReceipt(id(), other, core.overview.treasury().first { it.account.scope == other }.account.id,
+            ReceiptPurpose.OWNER_CAPITAL, rial(7_000_000), day, "آورده"))
+        core.identity.createUser("cashier", "صندوقدار", Role.CASHIER, setOf(w.branch.branchId), "111111".toCharArray())
+        core.identity.createUser("mgr", "مدیر", Role.MANAGER, setOf(w.branch.branchId), "222222".toCharArray())
+        core.identity.login("cashier", "111111".toCharArray())
+        fun denied(block: () -> Unit) = assertTrue(assertFailsWith<DomainException> { block() }.error.code.startsWith("PERMISSION_DENIED"))
+        denied { core.overview.employees(w.branch) }
+        denied { core.overview.payroll(w.branch) }
+        denied { core.overview.invoices() }
+        denied { core.overview.trialBalance() }
+        denied { core.overview.stock(w.kitchen) }
+        assertTrue(assertFailsWith<DomainException> { core.overview.salesDay(other, day) }.error.code.startsWith("SCOPE_DENIED"))
+        core.identity.login("mgr", "222222".toCharArray())
+        // The manager's trial balance covers only their branch: capital of the other branch is not in it.
+        val capital = core.overview.trialBalance().first { it.first.code == StandardAccounts.CAPITAL }.second
+        assertEquals(-core.ledger.balance(StandardAccounts.CAPITAL, w.branch).rial, -capital)
+        assertEquals(0, core.overview.trialBalance().sumOf { it.second })
+        assertTrue(assertFailsWith<DomainException> { core.overview.employees(other) }.error.code.startsWith("SCOPE_DENIED"))
+        assertEquals("PERMISSION_DENIED:BACKUP_CREATE", assertFailsWith<DomainException> { core.authorizeBackup() }.error.code)
+        assertEquals("PERMISSION_DENIED:FACTORY_RESET", assertFailsWith<DomainException> { core.acceptReplacement(SabouCore.newEpoch(), "FACTORY_RESET") }.error.code)
+    }
+
+    @Test fun bootstrapIsAllOrNothing() {
+        val core = boot()
+        assertEquals("INVALID_INPUT:name", assertFailsWith<DomainException> { core.bootstrap("x", "مالک", "owner", "123456".toCharArray()) }.error.code)
+        assertTrue(core.identity.needsBootstrap())
+        assertEquals("INVALID_INPUT:pin", assertFailsWith<DomainException> { core.bootstrap("شعبه ونک", "مالک", "owner", "12".toCharArray()) }.error.code)
+        assertTrue(core.identity.needsBootstrap())
+        core.bootstrap("شعبه ونک", "مالک", "owner", "123456".toCharArray())
+        assertEquals(1, core.overview.branches().size)
+        assertEquals(1, core.overview.treasury().size)
+        assertEquals(1, core.overview.locations(Scope.Branch(core.overview.branches().single().id)).size)
+    }
+
+    @Test fun localEventsAreKeptForALimitedTime() {
+        val core = boot()
+        setUp(core)
+        assertTrue(core.db.query("SELECT COUNT(*) AS n FROM domain_events").single().long("n") > 0)
+        now += (SabouCore.LOCAL_EVENT_DAYS + 1) * 86_400_000L
+        boot().also { it.identity.login("owner", "123456".toCharArray()) }.verifyStartup()
+        assertEquals(0, core.db.query("SELECT COUNT(*) AS n FROM domain_events").single().long("n"))
+    }
+
     @Test fun readsRespectBranchGrants() {
         val core = boot()
         val w = setUp(core)
@@ -243,7 +301,7 @@ class SabouCoreTest {
         core.treasury.openAccount(OpenTreasuryAccount(id(), other, "صندوق تجریش", TreasuryKind.CASH))
         core.identity.createUser("cashier", "صندوقدار", Role.CASHIER, setOf(w.branch.branchId), "111111".toCharArray())
         core.identity.login("cashier", "111111".toCharArray())
-        assertEquals(listOf("صندوق ونک"), core.overview.treasury().map { it.account.name })
+        assertEquals(listOf("صندوق شعبه ونک"), core.overview.treasury().map { it.account.name })
         assertEquals(listOf(w.branch.branchId), core.overview.branches().map { it.id })
         assertTrue(assertFailsWith<DomainException> { core.overview.payables() }.error.code.startsWith("PERMISSION_DENIED"))
     }

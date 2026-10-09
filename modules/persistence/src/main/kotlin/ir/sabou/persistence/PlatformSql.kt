@@ -32,7 +32,7 @@ class SqlAuditStore(private val db: SqlDatabase) : AuditStore {
     private fun read(r: SqlRow) = AuditEvent(
         r.str("epoch"), r.long("sequence"), r.str("previous_hash"), r.str("hash"), r.long("occurred_at"), r.str("actor_id"),
         r.str("actor_name"), ModuleId.valueOf(r.str("module")), r.str("action"), r.str("entity_type"), r.str("entity_id"),
-        r.str("scope"), r.str("command_id"), r.str("detail"),
+        r.str("scope"), r.str("command_id"), r.str("detail"), r.long("position"),
     )
 
     override fun head(): AuditEvent? = db.query("SELECT * FROM audit_events ORDER BY position DESC LIMIT 1").firstOrNull()?.let(::read)
@@ -47,6 +47,9 @@ class SqlAuditStore(private val db: SqlDatabase) : AuditStore {
     override fun page(afterPosition: Long, limit: Int): List<AuditEvent> =
         db.query("SELECT * FROM audit_events WHERE position > ? ORDER BY position LIMIT ?", afterPosition, limit).map(::read)
 
+    override fun at(position: Long): AuditEvent? =
+        db.query("SELECT * FROM audit_events WHERE position = ?", position).firstOrNull()?.let(::read)
+
     override fun contains(epoch: String, sequence: Long, hash: String): Boolean =
         db.query("SELECT 1 AS x FROM audit_events WHERE epoch = ? AND sequence = ? AND hash = ?", epoch, sequence, hash).isNotEmpty()
 }
@@ -56,6 +59,12 @@ class SqlEventLog(private val db: SqlDatabase) : EventLog {
         "INSERT INTO domain_events (event_id, command_id, module, type, scope, occurred_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?)",
         event.eventId, event.commandId, event.module.name, event.type, event.scope, event.occurredAtEpochMillis, Json.encode(event.payload),
     )
+
+    fun markSynced(eventIds: List<String>) = eventIds.forEach { db.execute("UPDATE domain_events SET synced = 1 WHERE event_id = ?", it) }
+
+    /** Removes events older than [beforeMillis]; with [onlySynced], undelivered events are always kept. */
+    fun prune(beforeMillis: Long, onlySynced: Boolean) =
+        db.execute("DELETE FROM domain_events WHERE occurred_at < ? AND (? = 0 OR synced = 1)", beforeMillis, if (onlySynced) 1L else 0L)
 
     /** Events not yet delivered to a server (ADR-0001). */
     fun unsynced(limit: Int): List<DomainEvent> =

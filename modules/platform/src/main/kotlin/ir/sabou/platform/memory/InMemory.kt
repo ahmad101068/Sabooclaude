@@ -69,9 +69,10 @@ class InMemoryIdempotencyStore : Table<String, IdempotencyRecord>(), Idempotency
 class InMemoryAuditStore : AuditStore, Transactional {
     val events = mutableListOf<AuditEvent>()
     override fun head(): AuditEvent? = events.lastOrNull()
-    override fun append(event: AuditEvent) { events += event }
+    override fun append(event: AuditEvent) { events += event.copy(position = events.size + 1L) }
     override fun page(afterPosition: Long, limit: Int): List<AuditEvent> =
-        events.drop(afterPosition.toInt()).take(limit)
+        events.filter { it.position > afterPosition }.take(limit)
+    override fun at(position: Long): AuditEvent? = events.firstOrNull { it.position == position }
     override fun contains(epoch: String, sequence: Long, hash: String): Boolean =
         events.any { it.epoch == epoch && it.sequence == sequence && it.hash == hash }
     override fun snapshot(): Any = events.toList()
