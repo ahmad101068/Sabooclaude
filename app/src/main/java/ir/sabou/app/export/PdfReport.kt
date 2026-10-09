@@ -24,6 +24,7 @@ import java.io.OutputStream
 object PdfReport {
     private const val MARGIN = 32f
     private const val CELL_PAD = 4f
+    private const val MAX_LINES = 12
 
     fun write(context: Context, tables: List<ReportTable>, out: OutputStream) {
         val regular = ResourcesCompat.getFont(context, R.font.vazirmatn_regular) ?: Typeface.DEFAULT
@@ -138,9 +139,12 @@ object PdfReport {
             page = null; canvas = null
         }
 
+        /** At most [MAX_LINES] lines per cell, so one row can never be taller than a page. */
         private fun layout(text: String, paint: TextPaint, width: Float, align: Layout.Alignment = Layout.Alignment.ALIGN_NORMAL): StaticLayout =
             StaticLayout.Builder.obtain(text, 0, text.length, paint, width.toInt().coerceAtLeast(8))
                 .setAlignment(align)
+                .setMaxLines(MAX_LINES)
+                .setEllipsize(android.text.TextUtils.TruncateAt.END)
                 .setTextDirection(TextDirectionHeuristics.RTL)
                 .setIncludePad(false)
                 .build()

@@ -118,8 +118,11 @@ object Xlsx {
 
     private fun cell(row: Int, col: Int, cell: Cell, bold: Boolean): String = when (cell) {
         is Cell.Text -> text(row, col, cell.text, if (bold) 1 else 0)
-        is Cell.Amount -> number(row, col, BigDecimal.valueOf(cell.rial).movePointLeft(1).stripTrailingZeros().toPlainString(), if (bold) 7 else 3)
-        is Cell.Qty -> number(row, col, BigDecimal.valueOf(cell.micros).movePointLeft(6).stripTrailingZeros().toPlainString(), if (bold) 8 else 4)
+        // Whole numbers use the integer format: "#,##0.#" would show a trailing decimal point in Excel.
+        is Cell.Amount -> number(row, col, BigDecimal.valueOf(cell.rial).movePointLeft(1).stripTrailingZeros().toPlainString(),
+            if (cell.rial % 10 == 0L) (if (bold) 10 else 6) else (if (bold) 7 else 3))
+        is Cell.Qty -> number(row, col, BigDecimal.valueOf(cell.micros).movePointLeft(6).stripTrailingZeros().toPlainString(),
+            if (cell.micros % 1_000_000 == 0L) (if (bold) 10 else 6) else (if (bold) 8 else 4))
         is Cell.Percent -> number(row, col, BigDecimal.valueOf(cell.bp).movePointLeft(4).stripTrailingZeros().toPlainString(), if (bold) 9 else 5)
         is Cell.Count -> number(row, col, cell.value.toString(), if (bold) 10 else 6)
     }
@@ -128,7 +131,8 @@ object Xlsx {
     internal fun sheetNames(titles: List<String>): List<String> {
         val used = HashSet<String>()
         return titles.mapIndexed { i, t ->
-            val base = t.replace(Regex("""[\[\]:*?/\\]"""), " ").trim().ifEmpty { "Sheet${i + 1}" }.take(28)
+            // Excel also rejects a name that starts or ends with an apostrophe.
+            val base = t.replace(Regex("""[\[\]:*?/\\]"""), " ").trim().trim('\'').trim().take(28).trimEnd('\'').trim().ifEmpty { "Sheet${i + 1}" }
             var name = base
             var n = 2
             while (!used.add(name.lowercase())) name = "${base.take(25)} ${n++}"

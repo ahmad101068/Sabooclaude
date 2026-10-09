@@ -169,4 +169,17 @@ class ReportsTest {
         val run = ir.sabou.payroll.PayrollRun(id(), branch, day, day.plusDays(29), "T", listOf(slip), ir.sabou.payroll.RunStatus.DRAFT, id(), null, null)
         return listOf(ReportTables.payrollRun(run, mapOf(e to "سرآشپز"), "شعبه"), ReportTables.payslip(run, slip, "سرآشپز", "شعبه"))
     }
+
+    @Test fun aCashierSeesSalesFiguresButNoCostsPurchasesOrWaste() {
+        businessDay()
+        core.identity.createUser("cashier1", "صندوقدار", Role.CASHIER, setOf(branch.branchId), "654321".toCharArray())
+        core.identity.logout()
+        core.identity.login("cashier1", "654321".toCharArray())
+        val mix = core.reports.productMix(branch, day, day)
+        assertEquals(50_000_000, mix.gross.rial)
+        assertNull(mix.rows.single().unitCost)
+        val flash = core.reports.dayFlash(branch, day)
+        assertEquals(50_000_000, flash.payable.rial)
+        assertNull(flash.purchases); assertNull(flash.waste)
+    }
 }

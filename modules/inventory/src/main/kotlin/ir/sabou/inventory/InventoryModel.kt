@@ -124,6 +124,7 @@ interface StockStore {
 
 interface RecipeStore {
     fun menuItem(id: GlobalId): MenuItem?
+    fun menuItems(): List<MenuItem>
     fun saveMenuItem(item: MenuItem)
     fun versions(menuItemId: GlobalId): List<RecipeVersion>
     fun saveVersion(version: RecipeVersion)

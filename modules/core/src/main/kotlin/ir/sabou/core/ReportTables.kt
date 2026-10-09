@@ -78,7 +78,7 @@ object ReportTables {
             f.settlements.forEach { (name, m) -> kv("دریافتی · $name", Cell.Amount(m.rial)) }
             kv("نسیه", Cell.Amount(f.credit.rial))
             kv("بهای مواد مصرفی", Cell.Amount(f.cost.rial)); kv("درصد بهای غذا", pct(f.foodCostBp))
-            kv("خرید امروز", Cell.Amount(f.purchases.rial)); kv("ضایعات امروز", Cell.Amount(f.waste.rial))
+            f.purchases?.let { kv("خرید امروز", Cell.Amount(it.rial)) }; f.waste?.let { kv("ضایعات امروز", Cell.Amount(it.rial)) }
             kv("نقد فروش (مورد انتظار)", Cell.Amount(f.cashSales.rial))
             kv("نقد شمارش‌شده", amount(f.countedCash?.rial))
             kv("کسر / اضافه صندوق", amount(f.cashDifference))

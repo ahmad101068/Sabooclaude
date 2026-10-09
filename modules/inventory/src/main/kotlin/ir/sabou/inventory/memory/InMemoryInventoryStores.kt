@@ -72,6 +72,7 @@ class InMemoryRecipeStore : RecipeStore, Transactional {
     override fun prepVersions(itemId: GlobalId) = preps.filter { it.itemId == itemId }
     override fun savePrepVersion(version: ir.sabou.inventory.PrepRecipe) { preps += version }
     override fun menuItem(id: GlobalId) = menu[id]
+    override fun menuItems() = menu.values.toList()
     override fun saveMenuItem(item: MenuItem) { menu[item.id] = item }
     override fun versions(menuItemId: GlobalId) = versions.filter { it.menuItemId == menuItemId }
     override fun saveVersion(version: RecipeVersion) { versions += version }

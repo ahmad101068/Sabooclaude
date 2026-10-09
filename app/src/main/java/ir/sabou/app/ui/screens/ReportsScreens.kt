@@ -265,8 +265,9 @@ object ReportsScreens {
                             f.settlements.forEach { (name, m) -> KeyValue(name, Fa.toman(m)) }
                             if (!f.credit.isZero) KeyValue("نسیه", Fa.toman(f.credit))
                             Divider()
-                            KeyValue("نقد مورد انتظار", Fa.toman(f.cashSales))
-                            KeyValue("نقد شمارش‌شده", f.countedCash?.let { Fa.toman(it) } ?: "روز بسته نشده")
+                            KeyValue("نقد فروش امروز", Fa.toman(f.cashSales))
+                            KeyValue("نقد شمارش‌شده در بستن روز", f.countedCash?.let { Fa.toman(it) } ?: "روز بسته نشده")
+                            Text("تنخواه اول روز و نسیه‌های وصول‌شده‌ی نقدی در «نقد فروش امروز» نیست؛ اختلاف را با آن‌ها بسنجید.", style = SabouType.caption, color = Sabou.colors.muted)
                             f.cashDifference?.let { d ->
                                 KeyValue(if (d < 0) "کسری صندوق" else "اضافه‌ی صندوق", Fa.toman(kotlin.math.abs(d)), if (d < 0) Sabou.colors.danger else Sabou.colors.ink, strong = true)
                             }
@@ -274,7 +275,7 @@ object ReportsScreens {
                         SCard {
                             KeyValue("بهای مواد مصرفی", Fa.toman(f.cost))
                             KeyValue("درصد بهای غذا", f.foodCostBp?.let { Fa.percent(it) } ?: "—")
-                            KeyValue("خرید امروز", Fa.toman(f.purchases)); KeyValue("ضایعات امروز", Fa.toman(f.waste))
+                            f.purchases?.let { KeyValue("خرید امروز", Fa.toman(it)) }; f.waste?.let { KeyValue("ضایعات امروز", Fa.toman(it)) }
                         }
                     }
                     ExportButtons("پایان-روز") { listOf(ReportTables.dayFlash(reports.dayFlash(branch, date))) }
@@ -329,10 +330,10 @@ object ReportsScreens {
         val session = LocalSession.current
         var from by rememberSaveable { mutableStateOf(monthStart(session.today)) }
         var to by rememberSaveable { mutableStateOf(session.today) }
-        var location by rememberSaveable { mutableStateOf<GlobalId?>(null) }
         Column(Modifier.fillMaxSize()) {
             Header("مصرف واقعی در برابر تئوریک", onBack = nav.back) { BranchSwitcher() }
             WithBranch { branch ->
+                var location by rememberSaveable(branch) { mutableStateOf<GlobalId?>(null) }
                 val locations by load(session, branch) { overview.locations(branch) }
                 val data by load(session, branch, location, from, to) { reports.actualVsTheoretical(branch, location, from, to) }
                 Page {

@@ -111,8 +111,10 @@ data class DayFlash(
     val settlements: List<Pair<String, Money>>,
     val credit: Money,
     val cost: Money,
-    val purchases: Money,
-    val waste: Money,
+    /** Null when the viewer may not see purchase values. */
+    val purchases: Money?,
+    /** Null when the viewer may not see stock values. */
+    val waste: Money?,
     val cashSales: Money,
     val countedCash: Money?,
 ) {
@@ -271,14 +273,16 @@ class Reports internal constructor(private val core: SabouCore) {
         val names = core.recipes.menuItems().associate { it.id to it.name }
         val lines = posted.flatMap { it.lines }.groupBy { it.menuItemId }
         val gross = Money.sum(posted.flatMap { it.lines }.map { it.gross })
-        val costs = UnitCosts(branch)
+        // Ingredient costs are stock and purchase data: shown only to roles that may see those.
+        val seesCosts = listOf(Permission.INVENTORY_VIEW, Permission.PURCHASE_VIEW, Permission.RECIPE_MANAGE).any { a.role.allows(it) }
+        val costs = UnitCosts(branch, to)
         val rows = lines.map { (id, l) ->
             val g = Money.sum(l.map { it.gross })
             MixRow(
                 menuItemId = id, name = names[id].orEmpty(),
                 portions = l.fold(Quantity.ZERO) { acc, x -> acc + x.portions }, gross = g,
                 shareBp = if (gross.isZero) 0 else Ratio.mulDiv(g.rial, 10_000, gross.rial),
-                unitCost = costs.portion(id, to),
+                unitCost = if (seesCosts) costs.portion(id, to) else null,
             )
         }.sortedByDescending { it.gross }
         return ProductMix(from, to, scopeName(branch), rows, gross, posted.size)
@@ -304,8 +308,9 @@ class Reports internal constructor(private val core: SabouCore) {
             settlements = liquid.groupBy { it.treasuryAccountId }.map { (id, l) -> (accounts[id]?.name ?: "حساب") to Money.sum(l.map { it.amount }) },
             credit = Money.sum(sale?.settlements.orEmpty().filterIsInstance<Settlement.Credit>().map { it.amount }),
             cost = sale?.cost ?: Money.ZERO,
-            purchases = Money.sum(purchases.map { it.total }),
-            waste = Money.of(maxOf(0, waste)),
+            // Purchases and waste values only for roles that may see purchasing / stock values.
+            purchases = if (a.role.allows(Permission.PURCHASE_VIEW)) Money.sum(purchases.map { it.total }) else null,
+            waste = if (a.role.allows(Permission.INVENTORY_VIEW)) Money.of(maxOf(0, waste)) else null,
             cashSales = Money.sum(liquid.filter { accounts[it.treasuryAccountId]?.kind == TreasuryKind.CASH }.map { it.amount }),
             countedCash = day?.countedCash,
         )
@@ -368,7 +373,7 @@ class Reports internal constructor(private val core: SabouCore) {
     // ------------------------------------------------------------ Costs
 
     /** Average cost of ingredients in one branch: stock value ÷ quantity, else the last purchase price. */
-    private inner class UnitCosts(private val branch: Scope.Branch) {
+    private inner class UnitCosts(private val branch: Scope.Branch, private val date: BusinessDate) {
         private val book = RecipeBook(core.recipes)
         private val cache = HashMap<GlobalId, Long?>()     // rial per unit (SCALE micro-units)
 
@@ -377,12 +382,26 @@ class Reports internal constructor(private val core: SabouCore) {
             val qty = balances.sumOf { it.quantity.micros }
             val value = balances.sumOf { it.value.rial }
             if (qty > 0 && value > 0) Ratio.mulDiv(value, Quantity.SCALE, qty)
-            else lastPurchase(itemId)
+            else lastPurchase(itemId) ?: prepCost(itemId)
+        }
+
+        /** A prepared item with no stock: the cost of its prep recipe per unit (null if anything is unknown). */
+        private val visiting = HashSet<GlobalId>()
+        private fun prepCost(itemId: GlobalId): Long? {
+            if (core.items.byId(itemId)?.prepared != true || !visiting.add(itemId)) return null
+            try {
+                val lines = runCatching { book.prepRequirements(itemId, date, Quantity.units(1)) }.getOrNull() ?: return null
+                var total = 0L
+                for (l in lines) total += Ratio.mulDiv(perUnit(l.itemId) ?: return null, l.quantity.micros, Quantity.SCALE)
+                return total
+            } finally {
+                visiting.remove(itemId)
+            }
         }
 
         private fun lastPurchase(itemId: GlobalId): Long? = core.purchases.invoices()
-            .filter { it.status == InvoiceStatus.POSTED }
-            .sortedWith(compareByDescending<ir.sabou.purchasing.PurchaseInvoice> { it.scope == branch }.thenByDescending { it.date })
+            .filter { it.status == InvoiceStatus.POSTED && it.scope == branch }     // never another branch's prices
+            .sortedByDescending { it.date }
             .firstNotNullOfOrNull { inv -> inv.lines.firstOrNull { it.itemId == itemId && !it.quantity.isZero } }
             ?.let { Ratio.mulDiv(it.value.rial, Quantity.SCALE, it.quantity.micros) }
 

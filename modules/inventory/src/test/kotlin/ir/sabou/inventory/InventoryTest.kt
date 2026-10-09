@@ -229,6 +229,8 @@ class InventoryTest {
         assertEquals(1_300_000, made.value.rial)                                              // all ingredient value, nothing lost
         assertEquals(1_300_000, ledger.balance(StandardAccounts.INVENTORY, branchA).rial)     // no journal needed, still equal
         assertTrue(code { ops.produce(RecordProduction(GlobalId.new(), branchA, kitchen, sauce, kg(1), day)) }.startsWith("INSUFFICIENT_STOCK"))
+        // So little that every ingredient rounds to zero: refused instead of making sauce for free.
+        assertEquals("INVALID_INPUT:quantity", code { ops.produce(RecordProduction(GlobalId.new(), branchA, kitchen, sauce, Quantity.of(1), day)) })
         // Movements by period: the opening of the next day is today's closing.
         val totals = stock.totalsBefore(kitchen, day.plusDays(1)).associateBy { it.itemId }
         assertEquals(8_000_000, totals.getValue(sauce).quantity)
@@ -251,5 +253,21 @@ class InventoryTest {
         assertEquals("برنج هاشمی", stored.name); assertEquals(kg(30), stored.parLevel); assertEquals("انبار خشک · قفسه ۲", stored.shelf)
         assertEquals(setOf(supplierA, supplierB), stored.approvedSupplierIds)
         assertEquals(StockUnit.KILOGRAM, stored.unit)
+    }
+
+    @Test fun anItemWithStockOrInARecipeCannotBeDeactivated() {
+        val kitchen = location(branchA, "آشپزخانه")
+        val salt = item("نمک")
+        buy(kitchen, branchA, salt, kg(1), 10_000)
+        fun deactivate() = ops.updateItem(UpdateItem(GlobalId.new(), salt, "نمک", kg(0), kg(0), "", "", null, emptySet(), false))
+        assertEquals("INVALID_STATE:ITEM:HAS_STOCK", code { deactivate() })
+        ops.waste(RecordWaste(GlobalId.new(), branchA, kitchen, salt, kg(1), WasteReason.SPOILAGE, "", day))
+        val soup = ops.defineMenuItem(DefineMenuItem(GlobalId.new(), "سوپ")).resultId
+        ops.publishRecipe(PublishRecipe(GlobalId.new(), soup, day, listOf(RecipeLine(salt, Quantity.of(1_000)))))
+        assertEquals("INVALID_STATE:ITEM:USED_IN_RECIPE", code { deactivate() })
+        val other = item("فلفل")
+        ops.publishRecipe(PublishRecipe(GlobalId.new(), soup, day.plusDays(1), listOf(RecipeLine(other, Quantity.of(1_000)))))
+        deactivate()
+        assertTrue(!items.byId(salt)!!.isActive)
     }
 }

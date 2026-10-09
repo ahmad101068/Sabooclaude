@@ -177,7 +177,7 @@ private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
     fun payable() = grossTotal() - (discount?.rial ?: 0) + (service?.rial ?: 0) + (tax?.rial ?: 0)
     fun settled() = settlements().sumOf { it.amount.rial }
 
-    fun count(text: String): Int? = if (text.isBlank()) 0 else Fa.parseLong(text)?.takeIf { it in 0..1_000_000 }?.toInt()
+    fun count(text: String): Int? = if (text.isBlank()) 0 else Fa.parseLong(text)?.takeIf { it in 0..100_000 }?.toInt()
     fun countsValid() = count(guests) != null && count(transactions) != null
 }
 

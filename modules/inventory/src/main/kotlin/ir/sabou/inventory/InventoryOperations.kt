@@ -189,6 +189,15 @@ class InventoryOperations(
         ensure(cmd.preferredSupplierId == null || cmd.approvedSupplierIds.isEmpty() || cmd.preferredSupplierId in cmd.approvedSupplierIds) {
             DomainError.InvalidInput("supplier", "تأمین‌کننده‌ی اصلی باید در فهرست مجاز باشد.")
         }
+        if (item.isActive && !cmd.isActive) {
+            // An inactive item can no longer leave stock (sales, waste, counts, transfers refuse it):
+            // only items with nothing on hand and no current recipe may be deactivated.
+            ensure(locations.all().all { gateway.balance(item.id, it.id).quantity.isZero }) { DomainError.InvalidState("ITEM", "HAS_STOCK") }
+            val usedByMenu = recipes.menuItems().filter { it.isActive }.any { m -> recipes.versions(m.id).maxByOrNull { it.version }?.lines?.any { it.itemId == item.id } == true }
+            val usedByPrep = items.all().filter { it.prepared && it.isActive && it.id != item.id }
+                .any { p -> recipes.prepVersions(p.id).maxByOrNull { it.version }?.lines?.any { it.itemId == item.id } == true }
+            ensure(!usedByMenu && !usedByPrep) { DomainError.InvalidState("ITEM", "USED_IN_RECIPE") }
+        }
         val next = item.copy(
             name = name, minimumStock = cmd.minimumStock, parLevel = cmd.parLevel, shelf = cmd.shelf.trim(), allergens = cmd.allergens.trim(),
             preferredSupplierId = cmd.preferredSupplierId, approvedSupplierIds = cmd.approvedSupplierIds, isActive = cmd.isActive,
@@ -219,6 +228,9 @@ class InventoryOperations(
         ensure(item.prepared) { DomainError.InvalidState("ITEM", "NOT_PREPARED") }
         ensure(!cmd.quantity.isZero) { DomainError.InvalidInput("quantity", "مقدار تولید باید بیشتر از صفر باشد.") }
         val requirements = RecipeBook(recipes).prepRequirements(item.id, cmd.date, cmd.quantity)
+        // A quantity so small that every ingredient rounds to nothing would create stock for free.
+        val recipeLines = RecipeBook(recipes).prepOn(item.id, cmd.date).lines.size
+        ensure(requirements.size == recipeLines) { DomainError.InvalidInput("quantity", "مقدار تولید آن‌قدر کم است که مواد آن قابل اندازه‌گیری نیست.") }
         val priced = requirements.map { gateway.item(it.itemId); IssuedCost(it.itemId, it.quantity, gateway.valueOf(gateway.balance(it.itemId, location.id), it.quantity)) }
         val total = Money.sum(priced.map { it.cost })
         val docId = GlobalId.new()

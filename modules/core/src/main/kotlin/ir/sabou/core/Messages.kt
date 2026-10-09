@@ -71,6 +71,9 @@ object Messages {
         "DAILY_SALE:REVERSED" to "فروش این روز برگشت خورده است.",
         "DAILY_SALE:POSTED" to "فروش این روز ثبت نهایی شده است.",
         "PURCHASE_INVOICE:REVERSED" to "این فاکتور برگشت خورده است.",
+        "ITEM:HAS_STOCK" to "این کالا هنوز در انبار موجودی دارد؛ ابتدا موجودی را مصرف، انتقال یا انبارگردانی کنید.",
+        "ITEM:USED_IN_RECIPE" to "این کالا در رسپی فعلی یک آیتم منو یا قلم آماده است؛ ابتدا رسپی را عوض کنید.",
+        "ITEM:NOT_PREPARED" to "این کالا «تولید داخلی» نیست.",
     )
 
     fun of(error: Throwable): String = when (error) {

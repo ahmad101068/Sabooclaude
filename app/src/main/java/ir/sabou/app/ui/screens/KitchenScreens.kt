@@ -173,7 +173,7 @@ object KitchenScreens {
                 val data by load(session, branch) {
                     overview.prepRecipes().filter { it.second != null && it.first.isActive }.map { it.first } to overview.locations(branch).filter { it.isActive }
                 }
-                var locationId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+                var locationId by rememberSaveable(branch) { mutableStateOf<GlobalId?>(null) }
                 var itemId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
                 var qty by rememberSaveable { mutableStateOf<Quantity?>(null) }
                 var date by rememberSaveable { mutableStateOf(session.today) }
