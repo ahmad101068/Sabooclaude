@@ -43,8 +43,7 @@ class UiSmokeTest {
         val actor = checkNotNull(core.session.currentActor())
         val branch = core.identity.accessibleBranches(actor).first().id
         instrumentation.runOnMainSync { app.ui.session = AppSession(core, actor, branch) {} }
-        val itemId = GlobalId.new()
-        core.inventory.createItem(CreateItem(itemId, "پیاز", StockUnit.KILOGRAM, Quantity.ZERO))
+        val itemId = core.inventory.createItem(CreateItem(GlobalId.new(), "پیاز", StockUnit.KILOGRAM, Quantity.ZERO)).resultId
         core.inventory.createItem(CreateItem(GlobalId.new(), "سس مخصوص", StockUnit.KILOGRAM, Quantity.ZERO, prepared = true))
         val today = java.time.LocalDate.now().toEpochDay()
         // Purchasing documents so the detail pages have something to show.
