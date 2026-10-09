@@ -718,6 +718,7 @@ object OperationsScreens {
             }
         }
         var period by rememberSaveable { mutableStateOf(months.first().value) }
+        @Suppress("UNUSED_VARIABLE") val probe = rememberSaveable { mutableStateOf(months.first()) }   // MUTATION: Choice is not saveable
         val fromDate = period.first
         val toDate = period.second
         Column(Modifier.fillMaxSize()) {
