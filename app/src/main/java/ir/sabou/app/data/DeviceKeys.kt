@@ -92,15 +92,20 @@ class DeviceKeys(private val context: Context) {
         }
     }
 
-    private companion object {
-        const val PREFS = "sabou_keys"
-        const val WRAPPED_DB_KEY = "wrapped_db_key"
-        const val ANDROID_KEYSTORE = "AndroidKeyStore"
-        const val AES_ALIAS = "sabou_db_wrap"
-        const val HMAC_ALIAS = "sabou_anchor_hmac"
-        const val AES_GCM = "AES/GCM/NoPadding"
-        const val HMAC = "HmacSHA256"
-        const val PASSPHRASE_BYTES = 32
-        const val IV_BYTES = 12
+    companion object {
+        /** True when the wrapping key no longer exists or no longer matches (not a transient failure). */
+        fun isPermanentlyLost(e: Throwable): Boolean = generateSequence(e) { it.cause }.any {
+            it.message == "KEYSTORE_KEY_MISSING" || it is javax.crypto.AEADBadTagException
+        }
+
+        private const val PREFS = "sabou_keys"
+        private const val WRAPPED_DB_KEY = "wrapped_db_key"
+        private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+        private const val AES_ALIAS = "sabou_db_wrap"
+        private const val HMAC_ALIAS = "sabou_anchor_hmac"
+        private const val AES_GCM = "AES/GCM/NoPadding"
+        private const val HMAC = "HmacSHA256"
+        private const val PASSPHRASE_BYTES = 32
+        private const val IV_BYTES = 12
     }
 }

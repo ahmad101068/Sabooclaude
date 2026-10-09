@@ -89,6 +89,7 @@ fun AppRoot(container: AppContainer, ui: UiState) {
                     else -> Gate(s.core, container) { actor ->
                         rootScope.launch {
                             val first = withContext(Dispatchers.IO) { s.core.identity.accessibleBranches(actor).firstOrNull()?.id }
+                            ui.session?.close()   // e.g. the session of a database replaced by restore or reset
                             ui.session = AppSession(s.core, actor, first) { ui.signOut() }
                         }
                     }

@@ -391,8 +391,8 @@ object OperationsScreens {
                     Loaded(data) { (sups, inv, accounts) ->
                         val loc = locationId ?: inv.locations.firstOrNull()?.id
                         FormCard {
-                            PickerOrHint("تأمین‌کننده", sups.map { Choice(it.id, it.name, it.phone) }, supplier, { supplier = it }, "ابتدا تأمین‌کننده را تعریف کنید.")
-                            if (sups.isEmpty()) SecondaryButton("تعریف تأمین‌کننده", { nav.go(Route.Suppliers) })
+                            PickerOrHint("تأمین‌کننده", sups.map { Choice(it.id, it.name, it.phone) }, supplier, { supplier = it }, "تأمین‌کننده‌ای تعریف نشده است؛ مدیر یا مالک باید آن را تعریف کند.")
+                            if (sups.isEmpty() && session.can(Permission.SUPPLIER_MANAGE)) SecondaryButton("تعریف تأمین‌کننده", { nav.go(Route.Suppliers) })
                             TextInput("شماره فاکتور تأمین‌کننده", number, { number = it })
                             if (inv.locations.size > 1) Picker("انبار دریافت", inv.locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
                             DateInput("تاریخ فاکتور", date, { date = it }, session.today)

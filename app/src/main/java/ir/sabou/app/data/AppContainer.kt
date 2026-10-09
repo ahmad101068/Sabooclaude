@@ -126,7 +126,8 @@ class AppContainer(private val context: Context) {
             val passphrase = try {
                 keys.databasePassphrase()
             } catch (e: DeviceKeyUnavailableException) {
-                if (current != null) throw e
+                // Replace the key only when it is provably gone (not after a passing Keystore hiccup).
+                if (current != null || !DeviceKeys.isPermanentlyLost(e)) throw e
                 keys.forgetDatabaseKey()
                 keys.databasePassphrase()
             }
