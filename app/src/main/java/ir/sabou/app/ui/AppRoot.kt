@@ -35,7 +35,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
@@ -73,7 +72,7 @@ fun AppRoot(container: AppContainer, ui: UiState) {
 
     // Leaving the app always asks first. Screens deeper in the tree register their own (higher-priority)
     // back handlers, so this one only runs at the root: the Home tab, sign-in, setup or recovery.
-    val activity = LocalContext.current as? android.app.Activity
+    val activity = androidx.activity.compose.LocalActivity.current
     var confirmExit by remember { mutableStateOf(false) }
     BackHandler { confirmExit = true }
     if (confirmExit) {
