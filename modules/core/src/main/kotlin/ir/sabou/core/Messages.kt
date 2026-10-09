@@ -50,6 +50,7 @@ object Messages {
         "PURCHASE_INVOICE:HAS_CREDITS" to "اعتبار مرجوعی روی این فاکتور اعمال شده است؛ ابتدا آن را آزاد کنید.",
         "PURCHASE_INVOICE:HAS_RESOLVED_LINES" to "ردیف‌های در انتظار بررسی این فاکتور تعیین تکلیف شده‌اند؛ برگشت کل فاکتور ممکن نیست. مرجوعی یا سند اصلاحی ثبت کنید.",
         "SUPPLIER_CREDIT:EXCEEDS_AVAILABLE" to "مبلغ از اعتبار استفاده‌نشده‌ی این تأمین‌کننده بیشتر است.",
+        "SUPPLIER_REFUND:ALREADY_REVERSED" to "این استرداد قبلاً برگشت خورده است.",
         "CREDIT_ALLOCATION:ALREADY_RELEASED" to "این اعتبار قبلاً آزاد شده است.",
         "REVIEW_LINE:ALREADY_RESOLVED" to "این ردیف قبلاً تعیین تکلیف شده است.",
         "PURCHASE_ORDER:RECEIVED" to "این سفارش تحویل گرفته شده است.",

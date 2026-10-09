@@ -35,6 +35,10 @@ class InMemoryPurchaseStore : PurchaseStore, Transactional {
     private val returns = mutableListOf<PurchaseReturn>()
     private val allocations = LinkedHashMap<GlobalId, CreditAllocation>()
     private val orders = LinkedHashMap<GlobalId, PurchaseOrder>()
+    private val refunds = LinkedHashMap<GlobalId, ir.sabou.purchasing.SupplierRefund>()
+    override fun refund(id: GlobalId) = refunds[id]
+    override fun refundsOf(supplierId: GlobalId, scope: Scope.Branch) = refunds.values.filter { it.supplierId == supplierId && it.scope == scope }
+    override fun saveRefund(refund: ir.sabou.purchasing.SupplierRefund) { refunds[refund.id] = refund }
     override fun invoice(id: GlobalId) = invoices[id]
     override fun invoiceByNumber(supplierId: GlobalId, normalizedNo: String) =
         invoices.values.firstOrNull { it.supplierId == supplierId && it.supplierInvoiceNo == normalizedNo && it.status == InvoiceStatus.POSTED }
@@ -53,7 +57,7 @@ class InMemoryPurchaseStore : PurchaseStore, Transactional {
     override fun orders() = orders.values.toList()
     override fun saveOrder(order: PurchaseOrder) { orders[order.id] = order }
     override fun nextOrderNumber() = (orders.values.maxOfOrNull { it.number } ?: 0L) + 1
-    override fun snapshot(): Any = listOf(LinkedHashMap(invoices), LinkedHashMap(payments), returns.toList(), LinkedHashMap(allocations), LinkedHashMap(orders))
+    override fun snapshot(): Any = listOf(LinkedHashMap(invoices), LinkedHashMap(payments), returns.toList(), LinkedHashMap(allocations), LinkedHashMap(orders), LinkedHashMap(refunds))
     @Suppress("UNCHECKED_CAST")
     override fun restore(snapshot: Any) {
         val l = snapshot as List<Any>
@@ -62,6 +66,7 @@ class InMemoryPurchaseStore : PurchaseStore, Transactional {
         returns.clear(); returns.addAll(l[2] as List<PurchaseReturn>)
         allocations.clear(); allocations.putAll(l[3] as Map<GlobalId, CreditAllocation>)
         orders.clear(); orders.putAll(l[4] as Map<GlobalId, PurchaseOrder>)
+        refunds.clear(); refunds.putAll(l[5] as Map<GlobalId, ir.sabou.purchasing.SupplierRefund>)
     }
 }
 

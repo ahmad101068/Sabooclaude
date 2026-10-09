@@ -22,8 +22,11 @@ data class SaleLine(val menuItemId: GlobalId, val portions: Quantity, val gross:
 
 sealed interface Settlement {
     val amount: Money
-    /** Cash, card or bank transfer into a treasury account of the same branch. */
-    data class Liquid(val treasuryAccountId: GlobalId, override val amount: Money) : Settlement
+    /**
+     * Cash, card or bank transfer into a treasury account of the same branch, or a customer's cheque
+     * into a cheque box ([cheque] then holds its details; one settlement per cheque).
+     */
+    data class Liquid(val treasuryAccountId: GlobalId, override val amount: Money, val cheque: ir.sabou.treasury.ChequeDetails? = null) : Settlement
     /** On account: becomes a receivable. */
     data class Credit(val customerId: GlobalId, override val amount: Money, val dueDate: BusinessDate) : Settlement
 }

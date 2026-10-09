@@ -204,6 +204,32 @@ data class ReleaseCreditAllocation(
     override fun fingerprint() = "$scope|$allocationId|$reason"
 }
 
+/** The supplier pays back unapplied return credit into [treasuryAccountId] (a cheque box needs [cheque]). */
+data class ReceiveSupplierRefund(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val supplierId: GlobalId,
+    val treasuryAccountId: GlobalId,
+    val amount: Money,
+    val date: BusinessDate,
+    val cheque: ChequeDetails? = null,
+) : Command {
+    override val requiredPermission = Permission.PURCHASE_PAY
+    override val additionalPermissions = setOf(Permission.TREASURY_RECEIPT)
+    override fun fingerprint() = "$scope|$supplierId|$treasuryAccountId|${amount.rial}|${date.epochDay}|${cheque?.fingerprint()}"
+}
+
+data class ReverseSupplierRefund(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val refundId: GlobalId,
+    val date: BusinessDate,
+    val reason: String,
+) : Command {
+    override val requiredPermission = Permission.PURCHASE_REVERSE
+    override fun fingerprint() = "$scope|$refundId|${date.epochDay}|$reason"
+}
+
 class PurchasingOperations(
     private val bus: CommandBus,
     private val ledger: Ledger,
@@ -233,7 +259,8 @@ class PurchasingOperations(
         val returned = purchases.invoices().filter { it.supplierId == supplierId && it.scope == scope }
             .sumOf { inv -> purchases.returns(inv.id).sumOf { it.credit.rial } }
         val allocated = purchases.allocationsOf(supplierId, scope).filter { !it.released }.sumOf { it.amount.rial }
-        return Money.of(returned - allocated)
+        val refunded = purchases.refundsOf(supplierId, scope).filter { !it.reversed }.sumOf { it.amount.rial }
+        return Money.of(returned - allocated - refunded)
     }
 
     /** Supplier sub-ledger balance (owed minus unapplied credit); equals GL 2101 for that supplier. */
@@ -473,6 +500,43 @@ class PurchasingOperations(
         allocation.id
     }
 
+    fun receiveRefund(c: ReceiveSupplierRefund): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
+        val supplier = suppliers.byId(cmd.supplierId) ?: throw DomainException(DomainError.NotFound("SUPPLIER"))
+        ensure(!cmd.amount.isZero) { DomainError.InvalidInput("amount", "مبلغ باید بیشتر از صفر باشد.") }
+        ensure(cmd.amount <= unappliedCredit(supplier.id, cmd.scope)) { DomainError.InvalidState("SUPPLIER_CREDIT", "EXCEEDS_AVAILABLE") }
+        val account = treasury.account(cmd.treasuryAccountId)
+        val refundId = GlobalId.new()
+        val title = "استرداد اعتبار مرجوعی از ${supplier.name}"
+        val cheque = cmd.cheque?.let { ChequeInstruction.New(it) }
+        var bridge: GlobalId? = null
+        // The credit sits as a debit in the branch's payables: the money received clears it.
+        if (account.scope == cmd.scope) {
+            treasury.settle(ctx, capability, account.id, Direction.RECEIPT, cmd.amount, cmd.date, REFUND, refundId, title,
+                listOf(LineDraft(StandardAccounts.PAYABLE, credit = cmd.amount, memo = supplier.name, by = capability)), cheque)
+        } else {
+            treasury.settle(ctx, capability, account.id, Direction.RECEIPT, cmd.amount, cmd.date, REFUND, refundId, title,
+                listOf(LineDraft(StandardAccounts.INTER_BRANCH, credit = cmd.amount, memo = "طلب شعبه", by = capability)), cheque)
+            bridge = ledger.post(ctx, capability, JournalDraft(cmd.date, cmd.scope, REFUND, refundId, "$title (به حساب مرکزی)", listOf(
+                LineDraft(StandardAccounts.INTER_BRANCH, debit = cmd.amount, memo = account.name, by = capability),
+                LineDraft(StandardAccounts.PAYABLE, credit = cmd.amount, memo = supplier.name, by = capability),
+            ))).id
+        }
+        purchases.saveRefund(SupplierRefund(refundId, supplier.id, cmd.scope, account.id, cmd.amount, cmd.date, bridge))
+        ctx.audit(AuditDraft("SUPPLIER_REFUND", "SUPPLIER", supplier.id.value, "refund=$refundId;amount=${cmd.amount.rial}"))
+        refundId
+    }
+
+    fun reverseRefund(c: ReverseSupplierRefund): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
+        val refund = purchases.refund(cmd.refundId) ?: throw DomainException(DomainError.NotFound("SUPPLIER_REFUND"))
+        ensure(refund.scope == cmd.scope) { DomainError.InvalidInput("scope", "متعلق به این شعبه نیست.") }
+        ensure(!refund.reversed) { DomainError.InvalidState("SUPPLIER_REFUND", "ALREADY_REVERSED") }
+        treasury.reverseDocument(ctx, capability, REFUND, refund.id, cmd.date, cmd.reason)
+        refund.bridgeJournalId?.let { ledger.reverse(ctx, capability, emptySet(), it, cmd.date, cmd.reason) }
+        purchases.saveRefund(refund.copy(reversed = true))
+        ctx.audit(AuditDraft("SUPPLIER_REFUND_REVERSE", "SUPPLIER", refund.supplierId.value, "refund=${refund.id};reason=${cmd.reason.trim()}"))
+        refund.id
+    }
+
     private fun pay(ctx: CommandContext, invoice: PurchaseInvoice, accountId: GlobalId, amount: Money, date: BusinessDate, cheque: ChequeInstruction?): SupplierPayment {
         ensure(invoice.approved) { DomainError.InvalidState("PURCHASE_INVOICE", "NOT_APPROVED:${invoice.approvals.size}/${invoice.requiredApprovals}") }
         ensure(!amount.isZero) { DomainError.InvalidInput("amount", "مبلغ پرداخت باید بیشتر از صفر باشد.") }
@@ -558,5 +622,6 @@ class PurchasingOperations(
         const val PAYMENT = "SUPPLIER_PAYMENT"
         const val RETURN = "PURCHASE_RETURN"
         const val REVIEW = "PURCHASE_REVIEW"
+        const val REFUND = "SUPPLIER_REFUND"
     }
 }

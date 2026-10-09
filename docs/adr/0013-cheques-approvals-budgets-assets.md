@@ -11,7 +11,7 @@
   - a bounced cheque moves to 1107 / 2108 until it is **settled** in money.
 - Collecting and clearing are one journal between the box/book and the bank.
 - Reversing the document behind a step puts the cheque back one step. It is refused if the cheque has moved on since, and an untouched cheque whose receipt is reversed becomes VOID.
-- The daily sale settlement does not offer cheque accounts. Transfers and cash counts refuse them.
+- The daily sale can be settled partly with customers' cheques: one settlement per cheque into a cheque box, with its details; reversing the sale voids them while untouched. Transfers and cash counts refuse cheque accounts.
 - Due cheques (14 days, overdue first) are listed and shown on Home.
 - Our cheques print on a leaf-sized PDF:
   - date in figures and words, amount in rial in figures and words, payee;
@@ -38,4 +38,7 @@
 - Presets follow common classes of the tax depreciation table and must be confirmed by a tax advisor.
 
 ## Consequences
-Schema v4 adds the tables cheques, approval_rules, budgets, fixed_assets and depreciation_runs. Accounts 1105, 1107, 1501, 1509, 2107, 2108 and 6110 are added on open. Cash refunds of a supplier's unapplied credit, and cheques in the daily sale, are not modelled.
+Schema v4 adds the tables cheques, approval_rules, budgets, fixed_assets and depreciation_runs. Accounts 1105, 1107, 1501, 1509, 2107, 2108 and 6110 are added on open.
+
+## Supplier refunds (schema v5)
+A supplier may pay back unapplied return credit in money (cash, transfer or its cheque into a cheque box, in the branch or centrally through the inter-branch account): the receipt credits 2101, and unapplied credit = returns − allocations − active refunds. A refund is reversed like a payment (refused if its cheque has moved on).

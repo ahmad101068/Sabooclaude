@@ -432,4 +432,31 @@ class PurchasingTest {
         assertEquals(1_500_000, ops.outstanding(inv).rial)
         apMatchesSubLedger()
     }
+
+    @Test fun aSupplierPaysBackUnappliedCreditInCashOrByCheque() {
+        fund(cashA, branchA, 10_000_000)
+        val paid = invoice(no = "R-1", qty = 10, value = 2_000_000, payNow = ImmediatePayment(cashA, rial(2_000_000)))
+        ops.returnGoods(ReturnToSupplier(GlobalId.new(), branchA, paid, listOf(IssueLine(cheese, kg(10))), day, "کیفیت نامناسب"))
+        assertEquals(2_000_000, ops.unappliedCredit(supplier, branchA).rial)
+        assertEquals("INVALID_STATE:SUPPLIER_CREDIT:EXCEEDS_AVAILABLE", code {
+            ops.receiveRefund(ReceiveSupplierRefund(GlobalId.new(), branchA, supplier, cashA, rial(2_000_001), day))
+        })
+        val cashRefund = ops.receiveRefund(ReceiveSupplierRefund(GlobalId.new(), branchA, supplier, cashA, rial(500_000), day)).resultId
+        assertEquals(8_500_000, treasury.balance(cashA))
+        apMatchesSubLedger()
+        // The rest arrives as the supplier's cheque, into a cheque box of the organization.
+        val box = treasuryOps.openAccount(OpenTreasuryAccount(GlobalId.new(), Scope.Organization, "صندوق چک مرکزی", TreasuryKind.RECEIVED_CHEQUES)).resultId
+        ops.receiveRefund(ReceiveSupplierRefund(GlobalId.new(), branchA, supplier, box, rial(1_500_000), day,
+            ir.sabou.treasury.ChequeDetails("31", "ملی", "", day.plusDays(10), "لبنیات پگاه")))
+        assertEquals(0, ops.unappliedCredit(supplier, branchA).rial)
+        assertEquals(1_500_000, treasury.balance(box))
+        assertEquals(0, ledger.balance(StandardAccounts.INTER_BRANCH).rial)
+        assertEquals(0, ledger.balance(StandardAccounts.PAYABLE, branchA).rial)
+        apMatchesSubLedger()
+        ops.reverseRefund(ReverseSupplierRefund(GlobalId.new(), branchA, cashRefund, day, "ثبت اشتباه"))
+        assertEquals(500_000, ops.unappliedCredit(supplier, branchA).rial)
+        assertEquals(8_000_000, treasury.balance(cashA))
+        apMatchesSubLedger()
+        assertEquals("INVALID_STATE:SUPPLIER_REFUND:ALREADY_REVERSED", code { ops.reverseRefund(ReverseSupplierRefund(GlobalId.new(), branchA, cashRefund, day, "دوباره")) })
+    }
 }

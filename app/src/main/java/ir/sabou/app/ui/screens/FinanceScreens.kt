@@ -82,6 +82,7 @@ object FinanceScreens {
             "SUPPLIER_PAYMENT", "PURCHASE_INVOICE" -> "پرداخت به تأمین‌کننده"
             "SALARY_PAYMENT" -> "پرداخت حقوق"
             "PAYROLL_REMITTANCE" -> "پرداخت بیمه / مالیات"
+            "SUPPLIER_REFUND" -> "استرداد از تأمین‌کننده"
             "CHEQUE_COLLECT" -> "وصول چک"
             "CHEQUE_CLEAR" -> "پاس شدن چک"
             "CHEQUE_BOUNCE" -> "برگشت چک"

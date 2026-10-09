@@ -69,7 +69,7 @@ class UiSmokeTest {
         val asset = core.fixedAssets.acquire(ir.sabou.assets.AcquireAsset(GlobalId.new(), scope, "فر", "تجهیزات", ir.sabou.kernel.Money.of(50_000_000), ir.sabou.kernel.Money.ZERO,
             ir.sabou.kernel.BusinessDate(today), ir.sabou.assets.DepreciationMethod.STRAIGHT_LINE, 120, null, ir.sabou.assets.Funding.Paid(bank))).resultId
         val allPages = pages + listOf(
-            Route.ChequeDetail(cheque), Route.AssetDetail(asset),
+            Route.ChequeDetail(cheque), Route.AssetDetail(asset), Route.SupplierAccount(supplier),
             Route.ItemEdit(itemId), Route.LedgerDetail("4101", today - 30, today, null),
             Route.PurchaseDetail(invoice), Route.OrderDetail(order), Route.PurchaseFromOrder(order), Route.SupplierEdit(supplier),
             Route.NewOrder(supplier, location, listOf(ir.sabou.app.ui.OrderDraftLine(itemId, 2_000_000, 100_000))),
