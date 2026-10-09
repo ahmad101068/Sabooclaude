@@ -51,6 +51,8 @@ class InventoryTest {
     private val ledger = Ledger(registry, InMemoryAccountStore(StandardAccounts.chart()), journals, InMemoryPeriodStore())
     private val gateway = InventoryGateway(ledger, registry.issue(ModuleId.INVENTORY), items, locations, stock)
     private val ops = InventoryOperations(bus, gateway, items, locations, recipes)
+    private val countStore = ir.sabou.inventory.memory.InMemoryStockCountStore()
+    private val counts = StockCountOperations(bus, gateway, countStore)
     private val purchasing = registry.issue(ModuleId.PURCHASING)
     private val sales = registry.issue(ModuleId.SALES)
     private val day = BusinessDate(20_000)
@@ -137,7 +139,8 @@ class InventoryTest {
         val rice = item("برنج")
         val store = location(branchA, "انبار")
         buy(store, branchA, rice, kg(10), 1_000_000)
-        ops.count(PostStockCount(GlobalId.new(), branchA, store, listOf(CountLine(rice, kg(9))), day))
+        val count = counts.submit(SubmitStockCount(GlobalId.new(), branchA, store, day, listOf(CountEntry(rice, kg(9))))).resultId
+        counts.approve(ApproveStockCount(GlobalId.new(), branchA, count, mapOf(rice to LineReason(VarianceReason.UNRECORDED_WASTE))))
         assertEquals(100_000, ledger.balance(StandardAccounts.INVENTORY_VARIANCE, branchA).rial)
         ops.waste(RecordWaste(GlobalId.new(), branchA, store, rice, kg(1), WasteReason.SPOILAGE, "", day))
         assertEquals(100_000, ledger.balance(StandardAccounts.WASTE, branchA).rial)
@@ -275,5 +278,62 @@ class InventoryTest {
         ops.publishRecipe(PublishRecipe(GlobalId.new(), soup, day.plusDays(1), listOf(RecipeLine(other, Quantity.of(1_000)))))
         deactivate()
         assertTrue(!items.byId(salt)!!.isActive)
+    }
+
+    // ------------------------------------------------------------ Counts with review
+
+    @Test fun aCountChangesNothingUntilSomeoneElseApprovesItWithAReasonForEveryDifference() {
+        val rice = item("برنج"); val oil = item("روغن"); val salt = item("نمک")
+        val store = location(branchA, "انبار")
+        buy(store, branchA, rice, kg(10), 1_000_000); buy(store, branchA, oil, kg(5), 500_000); buy(store, branchA, salt, kg(2), 20_000)
+        val clerk = Actor(GlobalId.new(), "store", Role.STOREKEEPER, setOf(branchA.branchId))
+        val manager = Actor(GlobalId.new(), "manager", Role.MANAGER, setOf(branchA.branchId))
+        session.actor = clerk
+        val count = counts.submit(SubmitStockCount(GlobalId.new(), branchA, store, day,
+            listOf(CountEntry(rice, kg(8), "کیسه پاره"), CountEntry(oil, kg(6)), CountEntry(salt, kg(2))))).resultId
+        assertEquals(kg(10), gateway.balance(rice, store).quantity)                   // nothing changed yet
+        assertEquals(0, ledger.balance(StandardAccounts.INVENTORY_VARIANCE, branchA).rial)
+        assertEquals("INVALID_STATE:STOCK_COUNT:PENDING_EXISTS", code {
+            counts.submit(SubmitStockCount(GlobalId.new(), branchA, store, day, listOf(CountEntry(rice, kg(1)))))
+        })
+        assertEquals("PERMISSION_DENIED:INVENTORY_ADJUST", code { counts.approve(ApproveStockCount(GlobalId.new(), branchA, count, emptyMap())) })
+        session.actor = manager
+        assertEquals("INVALID_INPUT:reason", code {
+            counts.approve(ApproveStockCount(GlobalId.new(), branchA, count, mapOf(rice to LineReason(VarianceReason.MISSING))))
+        })
+        assertEquals("INVALID_INPUT:reasonNote", code {
+            counts.approve(ApproveStockCount(GlobalId.new(), branchA, count, mapOf(rice to LineReason(VarianceReason.MISSING), oil to LineReason(VarianceReason.OTHER))))
+        })
+        // Rice was sold between counting and approval: the counted shortage (2 kg) is what gets booked.
+        sell(store, branchA, listOf(IssueLine(rice, kg(1))))
+        counts.approve(ApproveStockCount(GlobalId.new(), branchA, count, mapOf(rice to LineReason(VarianceReason.MISSING), oil to LineReason(VarianceReason.ENTRY_ERROR, "فاکتور ۴ کیلو بود"))))
+        assertEquals(kg(7), gateway.balance(rice, store).quantity)
+        assertEquals(kg(6), gateway.balance(oil, store).quantity)
+        val posted = countStore.byId(count)!!
+        assertEquals(CountStatus.POSTED, posted.status)
+        assertEquals("manager", posted.reviewedByName)
+        assertEquals(VarianceReason.MISSING, posted.lines.first { it.itemId == rice }.reason)
+        assertEquals(-200_000, posted.lines.first { it.itemId == rice }.postedValue)
+        assertEquals(100_000, posted.lines.first { it.itemId == oil }.postedValue)
+        assertEquals(100_000, ledger.balance(StandardAccounts.INVENTORY_VARIANCE, branchA).rial)
+        assertEquals(stockValue(branchA), ledger.balance(StandardAccounts.INVENTORY, branchA).rial)
+        assertEquals("INVALID_STATE:STOCK_COUNT:POSTED", code { counts.reject(RejectStockCount(GlobalId.new(), branchA, count, "دوباره")) })
+    }
+
+    @Test fun theCounterCannotApproveTheirOwnCountAndARejectionChangesNothing() {
+        val rice = item("برنج")
+        val store = location(branchA, "انبار")
+        buy(store, branchA, rice, kg(10), 1_000_000)
+        session.actor = Actor(GlobalId.new(), "manager", Role.MANAGER, setOf(branchA.branchId))
+        val count = counts.submit(SubmitStockCount(GlobalId.new(), branchA, store, day, listOf(CountEntry(rice, kg(3))))).resultId
+        assertEquals("INVALID_STATE:STOCK_COUNT:SAME_PERSON", code {
+            counts.approve(ApproveStockCount(GlobalId.new(), branchA, count, mapOf(rice to LineReason(VarianceReason.MISSING))))
+        })
+        session.actor = Actor(GlobalId.new(), "manager-2", Role.MANAGER, setOf(branchA.branchId))
+        counts.reject(RejectStockCount(GlobalId.new(), branchA, count, "دوباره شمرده شود"))
+        assertEquals(kg(10), gateway.balance(rice, store).quantity)
+        assertEquals("دوباره شمرده شود", countStore.byId(count)!!.rejectReason)
+        // A new count can follow.
+        counts.submit(SubmitStockCount(GlobalId.new(), branchA, store, day, listOf(CountEntry(rice, kg(10)))))
     }
 }

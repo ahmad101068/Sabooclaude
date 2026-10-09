@@ -1,9 +1,7 @@
 package ir.sabou.core
 
-import ir.sabou.inventory.CountLine
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.DefineMenuItem
-import ir.sabou.inventory.PostStockCount
 import ir.sabou.inventory.PublishRecipe
 import ir.sabou.inventory.RecipeLine
 import ir.sabou.inventory.RecordWaste
@@ -68,7 +66,8 @@ class ReportsTest {
             rial(0), rial(0), rial(0), listOf(Settlement.Liquid(cash, rial(50_000_000))), guests = 25, transactions = 8)).resultId
         core.salesOps.post(PostDailySale(id(), branch, sale))
         core.inventory.waste(RecordWaste(id(), branch, kitchen, cheese, Quantity.of(500_000), WasteReason.SPOILAGE, "", day))
-        core.inventory.count(PostStockCount(id(), branch, kitchen, listOf(CountLine(cheese, Quantity.units(7))), day))
+        val count = core.counts.submit(ir.sabou.inventory.SubmitStockCount(id(), branch, kitchen, day, listOf(ir.sabou.inventory.CountEntry(cheese, Quantity.units(7))))).resultId
+        core.counts.approve(ir.sabou.inventory.ApproveStockCount(id(), branch, count, mapOf(cheese to ir.sabou.inventory.LineReason(ir.sabou.inventory.VarianceReason.MISSING))))
         core.salesOps.closeDay(CloseSalesDay(id(), branch, day, rial(49_000_000)))
     }
 

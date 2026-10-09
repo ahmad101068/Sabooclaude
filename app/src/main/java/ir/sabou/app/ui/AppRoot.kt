@@ -423,6 +423,8 @@ private fun Pages(route: Route, nav: Nav) {
         Route.Stock -> OperationsScreens.Stock(nav)
         Route.Waste -> OperationsScreens.Waste(nav)
         Route.Count -> OperationsScreens.Count(nav)
+        Route.CountHistory -> OperationsScreens.CountHistory(nav)
+        is Route.CountDetail -> OperationsScreens.CountDetail(nav, route.countId)
         Route.StockTransfer -> OperationsScreens.StockTransfer(nav)
         Route.Recipes -> OperationsScreens.Recipes(nav)
         Route.PrepRecipes -> KitchenScreens.PrepRecipes(nav)

@@ -133,6 +133,14 @@ object Schema {
                 "CREATE INDEX supplier_refunds_supplier ON supplier_refunds(supplier_id, scope)",
             ),
         ),
+        Migration(
+            6,
+            listOf(
+                // Counts awaiting approval, approved and rejected, with who counted, who reviewed and why.
+                "CREATE TABLE stock_counts (id TEXT PRIMARY KEY, scope TEXT NOT NULL, location_id TEXT NOT NULL REFERENCES locations(id), status TEXT NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX stock_counts_location ON stock_counts(location_id, status)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

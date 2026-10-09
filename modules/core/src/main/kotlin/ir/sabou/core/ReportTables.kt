@@ -289,4 +289,30 @@ object ReportTables {
             Cell.Amount(rows.filter { it.asset.status == ir.sabou.assets.AssetStatus.ACTIVE }.sumOf { it.asset.bookValue.rial }), Cell.EMPTY),
         notes = listOf(TOMAN, "روش و نرخ استهلاک هر گروه باید با جدول استهلاکات مالیاتی و مشاور مالیاتی تطبیق داده شود."),
     )
+
+    fun countStatusName(s: ir.sabou.inventory.CountStatus) = when (s) {
+        ir.sabou.inventory.CountStatus.PENDING -> "در انتظار تأیید"
+        ir.sabou.inventory.CountStatus.POSTED -> "تأیید و ثبت‌شده"
+        ir.sabou.inventory.CountStatus.REJECTED -> "ردشده"
+    }
+
+    /** One count: counted against book, the difference, its value and reason. */
+    fun stockCount(v: CountView, items: Map<ir.sabou.kernel.GlobalId, ir.sabou.inventory.Item>): ReportTable {
+        val c = v.count
+        return ReportTable(
+            "انبارگردانی ${v.location}", "${Fa.date(c.date)} · ${countStatusName(c.status)} · شمارش: ${c.countedByName}" + (c.reviewedByName?.let { " · بررسی: $it" } ?: ""),
+            listOf("کالا", "قفسه", "واحد", "دفتری", "شمارش‌شده", "اختلاف", "ارزش اختلاف", "دلیل", "توضیح"),
+            c.lines.map { l ->
+                val item = items[l.itemId]
+                listOf(Cell.of(item?.name ?: ""), Cell.of(item?.shelf ?: ""), Cell.of(item?.let { unitName(it.unit) } ?: ""),
+                    if (v.showsBook) Cell.Qty(l.bookAtCount.micros) else Cell.of("—"), Cell.Qty(l.counted.micros),
+                    if (v.showsBook) Cell.Qty(l.difference) else Cell.of("—"), amount(l.postedValue),
+                    Cell.of(l.reason?.let(ir.sabou.inventory.StockCountOperations::reasonName) ?: ""),
+                    Cell.of(listOf(l.note, l.reasonNote).filter { it.isNotBlank() }.joinToString(" · ")))
+            },
+            footer = listOf(Cell.of("جمع ارزش اختلاف"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(c.lines.sumOf { it.postedValue ?: 0 }), Cell.EMPTY, Cell.EMPTY),
+            notes = listOfNotNull(TOMAN, "اختلاف = شمارش‌شده − دفتری در زمان شمارش؛ منفی یعنی کسری.", c.note.takeIf { it.isNotBlank() }?.let { "توضیح: $it" },
+                c.rejectReason?.let { "دلیل رد: $it" }),
+        )
+    }
 }
