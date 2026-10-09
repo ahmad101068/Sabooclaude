@@ -7,7 +7,16 @@ import ir.sabou.kernel.Scope
 import ir.sabou.ledger.AccountCode
 import ir.sabou.ledger.SourceDocument
 
-enum class TreasuryKind { CASH, BANK, CARD_TERMINAL, PETTY_CASH }
+enum class TreasuryKind {
+    CASH, BANK, CARD_TERMINAL, PETTY_CASH,
+    /** Customers' cheques we hold (GL 1105). */
+    RECEIVED_CHEQUES,
+    /** Our cheques not yet cleared (GL 2107, a liability: its balance is minus what is outstanding). */
+    ISSUED_CHEQUES;
+
+    /** Money accounts (not cheque registers). */
+    val isOrdinary: Boolean get() = this != RECEIVED_CHEQUES && this != ISSUED_CHEQUES
+}
 
 /**
  * A real cash box / bank account. Each one belongs to exactly one scope (a branch or the
@@ -38,6 +47,8 @@ data class TreasuryMovement(
     val source: SourceDocument,
     val reversalOf: GlobalId?,
     val recordedAtEpochMillis: Long,
+    /** The cheque this movement received, paid, cleared or settled. */
+    val chequeId: GlobalId? = null,
 )
 
 interface TreasuryAccountStore {

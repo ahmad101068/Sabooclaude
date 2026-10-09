@@ -20,6 +20,10 @@ import ir.sabou.ledger.AccountCode
 import ir.sabou.platform.Attachment
 import ir.sabou.platform.AttachmentStore
 import ir.sabou.purchasing.AccountLine
+import ir.sabou.purchasing.Approval
+import ir.sabou.purchasing.ApprovalRule
+import ir.sabou.purchasing.ApprovalRuleStore
+import ir.sabou.purchasing.InvoiceCategory
 import ir.sabou.purchasing.CreditAllocation
 import ir.sabou.purchasing.InvoiceLine
 import ir.sabou.purchasing.OrderLine
@@ -92,6 +96,8 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
             ReviewLine(it.str("name"), it.strOr("qtyNote", ""), Codec.money(it.long("amount")), resolutionOf(it.docOrNull("resolution")))
         },
         note = d.strOr("note", ""), orderId = Codec.idOrNull(d.strOrNull("order")), journalIds = d.strsOr("journals").map(Codec::id),
+        recordedBy = Codec.idOrNull(d.strOrNull("recordedBy")), requiredApprovals = d.intOr("requiredApprovals", 0),
+        approvals = d.docsOr("approvals").map { Approval(Codec.id(it.str("user")), it.str("name"), it.long("at")) },
     )
 
     override fun invoice(id: GlobalId) = doc("SELECT doc FROM purchase_invoices WHERE id = ?", id.value)?.let(::invoiceOf)
@@ -119,6 +125,8 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
                         })
                     },
                     "note" to invoice.note, "order" to invoice.orderId?.value, "journals" to invoice.journalIds.map { it.value },
+                    "recordedBy" to invoice.recordedBy?.value, "requiredApprovals" to invoice.requiredApprovals.toLong(),
+                    "approvals" to invoice.approvals.map { mapOf("user" to it.userId.value, "name" to it.name, "at" to it.atEpochMillis) },
                 ),
             ),
         ),
@@ -197,6 +205,22 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
         ),
     )
     override fun nextOrderNumber(): Long = db.query("SELECT COALESCE(MAX(number), 0) + 1 AS n FROM purchase_orders").single().long("n")
+}
+
+class SqlApprovalRuleStore(db: SqlDatabase) : SqlTable(db), ApprovalRuleStore {
+    private fun read(d: Doc) = ApprovalRule(
+        Codec.id(d.str("id")), d.str("name"), d.strOrNull("branch")?.let(Codec::branchOf), Codec.idOrNull(d.strOrNull("supplier")),
+        d.strOrNull("category")?.let(InvoiceCategory::valueOf), Codec.money(d.long("min")), d.int("steps"), d.bool("active"),
+    )
+    override fun all() = docs("SELECT doc FROM approval_rules ORDER BY rowid").map(::read)
+    override fun byId(id: GlobalId) = doc("SELECT doc FROM approval_rules WHERE id = ?", id.value)?.let(::read)
+    override fun save(rule: ApprovalRule) = upsert(
+        "approval_rules", "id",
+        mapOf("id" to rule.id.value, "doc" to Json.encode(mapOf(
+            "id" to rule.id.value, "name" to rule.name, "branch" to rule.branch?.let(Codec::scope), "supplier" to rule.supplierId?.value,
+            "category" to rule.category?.name, "min" to rule.minAmount.rial, "steps" to rule.steps.toLong(), "active" to rule.isActive,
+        ))),
+    )
 }
 
 /** Attachment bytes live in the encrypted database, so backups carry them. Rows are immutable. */
@@ -482,5 +506,42 @@ class SqlPolicyStore(db: SqlDatabase) : SqlTable(db), PolicyStore {
                 "prorationDays" to policy.prorationDays,
             ),
         ),
+    )
+}
+
+// ---------------------------------------------------------------- Fixed assets
+
+class SqlAssetStore(db: SqlDatabase) : SqlTable(db), ir.sabou.assets.AssetStore {
+    private fun read(d: Doc) = ir.sabou.assets.FixedAsset(
+        Codec.id(d.str("id")), d.str("name"), d.strOr("category", ""), Codec.branchOf(d.str("scope")), Codec.money(d.long("cost")), Codec.money(d.long("salvage")),
+        Codec.date(d.long("acquired")), ir.sabou.assets.DepreciationMethod.valueOf(d.str("method")), d.longOrNull("lifeMonths")?.toInt(), d.longOrNull("rateBp"),
+        Codec.money(d.long("accumulated")), d.longOrNull("through")?.let(Codec::date), ir.sabou.assets.AssetStatus.valueOf(d.str("status")),
+        d.longOrNull("disposed")?.let(Codec::date), d.str("sourceType"), Codec.id(d.str("sourceId")),
+    )
+    override fun byId(id: GlobalId) = doc("SELECT doc FROM fixed_assets WHERE id = ?", id.value)?.let(::read)
+    override fun all() = docs("SELECT doc FROM fixed_assets ORDER BY rowid").map(::read)
+    override fun save(asset: ir.sabou.assets.FixedAsset) = upsert(
+        "fixed_assets", "id",
+        mapOf("id" to asset.id.value, "scope" to Codec.scope(asset.scope), "doc" to Json.encode(mapOf(
+            "id" to asset.id.value, "name" to asset.name, "category" to asset.category, "scope" to Codec.scope(asset.scope), "cost" to asset.cost.rial,
+            "salvage" to asset.salvage.rial, "acquired" to asset.acquiredOn.epochDay, "method" to asset.method.name, "lifeMonths" to asset.usefulLifeMonths?.toLong(),
+            "rateBp" to asset.rateBp, "accumulated" to asset.accumulated.rial, "through" to asset.depreciatedThrough?.epochDay, "status" to asset.status.name,
+            "disposed" to asset.disposedOn?.epochDay, "sourceType" to asset.acquisitionSource, "sourceId" to asset.acquisitionId.value,
+        ))),
+    )
+    private fun readRun(d: Doc) = ir.sabou.assets.DepreciationRun(
+        Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.date(d.long("through")), Codec.date(d.long("date")),
+        d.docs("lines").map { ir.sabou.assets.DepreciationLine(Codec.id(it.str("asset")), Codec.money(it.long("amount")), it.longOrNull("previous")?.let(Codec::date)) },
+        Codec.idOrNull(d.strOrNull("journal")), d.bool("reversed"),
+    )
+    override fun runs() = docs("SELECT doc FROM depreciation_runs ORDER BY rowid").map(::readRun)
+    override fun run(id: GlobalId) = doc("SELECT doc FROM depreciation_runs WHERE id = ?", id.value)?.let(::readRun)
+    override fun saveRun(run: ir.sabou.assets.DepreciationRun) = upsert(
+        "depreciation_runs", "id",
+        mapOf("id" to run.id.value, "doc" to Json.encode(mapOf(
+            "id" to run.id.value, "scope" to Codec.scope(run.scope), "through" to run.through.epochDay, "date" to run.date.epochDay,
+            "lines" to run.lines.map { mapOf("asset" to it.assetId.value, "amount" to it.amount.rial, "previous" to it.previousThrough?.epochDay) },
+            "journal" to run.journalId?.value, "reversed" to run.reversed,
+        ))),
     )
 }

@@ -67,6 +67,36 @@ data class ReviewResolution(
 
 enum class InvoiceStatus { POSTED, REVERSED }
 
+/** Goods only (including held lines), expense lines only, or both. */
+enum class InvoiceCategory { GOODS, EXPENSES, MIXED }
+
+data class Approval(val userId: GlobalId, val name: String, val atEpochMillis: Long)
+
+/**
+ * An invoice matching every non-null condition needs [steps] approvals (by different people, none of
+ * them the person who recorded it) before it can be paid. The strictest matching rule wins.
+ */
+data class ApprovalRule(
+    val id: GlobalId,
+    val name: String,
+    val branch: Scope.Branch?,
+    val supplierId: GlobalId?,
+    val category: InvoiceCategory?,
+    val minAmount: Money,
+    val steps: Int,
+    val isActive: Boolean = true,
+) {
+    fun matches(scope: Scope.Branch, supplier: GlobalId, category: InvoiceCategory, total: Money): Boolean =
+        isActive && (branch == null || branch == scope) && (supplierId == null || supplierId == supplier) &&
+            (this.category == null || this.category == category) && total >= minAmount
+}
+
+interface ApprovalRuleStore {
+    fun all(): List<ApprovalRule>
+    fun byId(id: GlobalId): ApprovalRule?
+    fun save(rule: ApprovalRule)
+}
+
 data class PurchaseInvoice(
     val id: GlobalId,
     val supplierId: GlobalId,
@@ -85,7 +115,17 @@ data class PurchaseInvoice(
     val orderId: GlobalId? = null,
     /** Journals of the non-goods lines (the goods journal belongs to the stock receipt). */
     val journalIds: List<GlobalId> = emptyList(),
+    val recordedBy: GlobalId? = null,
+    /** Approvals needed before it may be paid, fixed when it is recorded (the rules then in force). */
+    val requiredApprovals: Int = 0,
+    val approvals: List<Approval> = emptyList(),
 ) {
+    val category: InvoiceCategory get() = when {
+        accountLines.isEmpty() -> InvoiceCategory.GOODS
+        lines.isEmpty() && reviewLines.isEmpty() -> InvoiceCategory.EXPENSES
+        else -> InvoiceCategory.MIXED
+    }
+    val approved: Boolean get() = approvals.size >= requiredApprovals
     val goodsTotal: Money get() = Money.sum(lines.map { it.value })
     val openReviewLines: List<Pair<Int, ReviewLine>> get() = reviewLines.withIndex().filter { it.value.resolution == null }.map { it.index to it.value }
 }

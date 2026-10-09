@@ -43,6 +43,7 @@ data class OpenTreasuryAccount(
     override fun fingerprint() = "$scope|$name|$kind"
 }
 
+/** [cheque]: details when the money is a cheque received into a cheque box. */
 data class RecordReceipt(
     override val commandId: GlobalId,
     override val scope: Scope,
@@ -51,11 +52,13 @@ data class RecordReceipt(
     val amount: Money,
     val date: BusinessDate,
     val description: String,
+    val cheque: ChequeDetails? = null,
 ) : Command {
     override val requiredPermission = Permission.TREASURY_RECEIPT
-    override fun fingerprint() = "$scope|$accountId|$purpose|${amount.rial}|${date.epochDay}|$description"
+    override fun fingerprint() = "$scope|$accountId|$purpose|${amount.rial}|${date.epochDay}|$description|${cheque?.fingerprint()}"
 }
 
+/** [cheque]: our new cheque (from a cheque book); [chequeId]: a customer's cheque passed on (from a cheque box). */
 data class RecordPayment(
     override val commandId: GlobalId,
     override val scope: Scope,
@@ -64,9 +67,19 @@ data class RecordPayment(
     val amount: Money,
     val date: BusinessDate,
     val description: String,
+    val cheque: ChequeDetails? = null,
+    val chequeId: GlobalId? = null,
 ) : Command {
     override val requiredPermission = Permission.TREASURY_PAYMENT
-    override fun fingerprint() = "$scope|$accountId|$purpose|${amount.rial}|${date.epochDay}|$description"
+    override fun fingerprint() = "$scope|$accountId|$purpose|${amount.rial}|${date.epochDay}|$description|${cheque?.fingerprint()}|$chequeId"
+}
+
+/** Builds the cheque step of a payment: a new cheque of ours, or a held cheque passed on. */
+fun paymentCheque(cheque: ChequeDetails?, chequeId: GlobalId?): ChequeInstruction? = when {
+    cheque != null && chequeId != null -> throw ir.sabou.kernel.DomainException(DomainError.InvalidInput("cheque", "یا چک جدید یا چک موجود."))
+    cheque != null -> ChequeInstruction.New(cheque)
+    chequeId != null -> ChequeInstruction.Move(chequeId, ChequeStatus.ENDORSED)
+    else -> null
 }
 
 /** Moves money between two treasury accounts, including between branches (cash deposit to bank). */
@@ -128,8 +141,11 @@ class TreasuryOperations(
             TreasuryKind.BANK -> StandardAccounts.BANK
             TreasuryKind.CARD_TERMINAL -> StandardAccounts.CARD_CLEARING
             TreasuryKind.PETTY_CASH -> StandardAccounts.PETTY_CASH
+            TreasuryKind.RECEIVED_CHEQUES -> StandardAccounts.CHEQUES_RECEIVABLE
+            TreasuryKind.ISSUED_CHEQUES -> StandardAccounts.CHEQUES_PAYABLE
         }
-        val account = TreasuryAccount(GlobalId.new(), name, cmd.kind, cmd.scope, gl)
+        // A cheque book is a liability: its balance goes below zero by what is outstanding.
+        val account = TreasuryAccount(GlobalId.new(), name, cmd.kind, cmd.scope, gl, allowOverdraft = cmd.kind == TreasuryKind.ISSUED_CHEQUES)
         accounts.save(account)
         ctx.audit(AuditDraft("TREASURY_ACCOUNT_OPEN", "TREASURY_ACCOUNT", account.id.value, "${cmd.kind}:$name"))
         account.id
@@ -141,6 +157,7 @@ class TreasuryOperations(
         gateway.settle(
             ctx, capability, cmd.accountId, Direction.RECEIPT, cmd.amount, cmd.date, RECEIPT, docId, cmd.description,
             listOf(LineDraft(cmd.purpose.counterAccount, credit = cmd.amount, memo = cmd.purpose.name, by = capability)),
+            cmd.cheque?.let { ChequeInstruction.New(it) },
         )
         docId
     }
@@ -151,6 +168,7 @@ class TreasuryOperations(
         gateway.settle(
             ctx, capability, cmd.accountId, Direction.PAYMENT, cmd.amount, cmd.date, PAYMENT, docId, cmd.description,
             listOf(LineDraft(cmd.purpose.counterAccount, debit = cmd.amount, memo = cmd.purpose.name, by = capability)),
+            paymentCheque(cmd.cheque, cmd.chequeId),
         )
         docId
     }
@@ -159,6 +177,7 @@ class TreasuryOperations(
         ensure(cmd.fromAccountId != cmd.toAccountId) { DomainError.InvalidInput("account", "حساب مبدأ و مقصد یکسان است.") }
         val from = gateway.account(cmd.fromAccountId)
         val to = gateway.account(cmd.toAccountId)
+        ensure(from.kind.isOrdinary && to.kind.isOrdinary) { DomainError.InvalidInput("account", "چک‌ها با عملیات چک جابه‌جا می‌شوند، نه با انتقال وجه.") }
         ensure(from.scope == cmd.scope) { DomainError.InvalidInput("scope", "محدوده فرمان با حساب مبدأ یکسان نیست.") }
         ctx.requireScope(to.scope)
         val docId = GlobalId.new()
@@ -180,6 +199,7 @@ class TreasuryOperations(
 
     fun reconcile(c: ReconcileAccount): CommandOutcome = bus.execute(ModuleId.TREASURY, c) { cmd, ctx ->
         requireAccountScope(cmd.accountId, cmd.scope)
+        ensure(gateway.account(cmd.accountId).kind.isOrdinary) { DomainError.InvalidInput("account", "صندوق و دسته‌چک شمارش نمی‌شوند؛ وضعیت هر چک را ثبت کنید.") }
         val book = gateway.balance(cmd.accountId)
         val difference = cmd.counted.rial - book
         val docId = GlobalId.new()
@@ -209,6 +229,11 @@ class TreasuryOperations(
         const val PAYMENT = "TREASURY_PAYMENT"
         const val TRANSFER = "TREASURY_TRANSFER"
         const val RECONCILIATION = "TREASURY_RECONCILIATION"
-        private val OWN_DOCUMENTS = setOf(RECEIPT, PAYMENT, TRANSFER, RECONCILIATION)
+        const val CHEQUE_DEPOSIT = "CHEQUE_DEPOSIT"
+        const val CHEQUE_COLLECT = "CHEQUE_COLLECT"
+        const val CHEQUE_CLEAR = "CHEQUE_CLEAR"
+        const val CHEQUE_BOUNCE = "CHEQUE_BOUNCE"
+        const val CHEQUE_SETTLE = "CHEQUE_SETTLE"
+        private val OWN_DOCUMENTS = setOf(RECEIPT, PAYMENT, TRANSFER, RECONCILIATION, CHEQUE_COLLECT, CHEQUE_CLEAR, CHEQUE_BOUNCE, CHEQUE_SETTLE)
     }
 }

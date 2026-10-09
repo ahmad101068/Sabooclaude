@@ -33,6 +33,7 @@ import ir.sabou.platform.memory.InMemoryEventLog
 import ir.sabou.platform.memory.InMemoryIdempotencyStore
 import ir.sabou.platform.memory.InMemoryUnitOfWork
 import ir.sabou.platform.memory.MutableSession
+import ir.sabou.purchasing.memory.InMemoryApprovalRuleStore
 import ir.sabou.purchasing.memory.InMemoryPurchaseStore
 import ir.sabou.purchasing.memory.InMemorySupplierStore
 import ir.sabou.treasury.OpenTreasuryAccount
@@ -66,14 +67,17 @@ class PurchasingTest {
     private val inventory = InventoryGateway(ledger, registry.issue(ModuleId.INVENTORY), items, locations, stock)
     private val inventoryOps = InventoryOperations(bus, inventory, items, locations, recipes)
     private val treasuryCap = registry.issue(ModuleId.TREASURY)
-    private val treasury = TreasuryGateway(ledger, treasuryCap, tAccounts, movements)
+    private val cheques = ir.sabou.treasury.memory.InMemoryChequeStore()
+    private val treasury = TreasuryGateway(ledger, treasuryCap, tAccounts, movements, cheques)
     private val treasuryOps = TreasuryOperations(bus, treasury, treasuryCap, tAccounts)
     private val attachments = ir.sabou.platform.memory.InMemoryAttachmentStore()
-    private val ops = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventory, treasury, suppliers, purchases, attachments)
+    private val rules = InMemoryApprovalRuleStore()
+    private val ops = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventory, treasury, suppliers, purchases, attachments, rules)
+    private val approvals = ApprovalOperations(bus, rules, purchases)
     private val orders = OrderOperations(bus, inventory, suppliers, purchases)
     private val day = BusinessDate(20_000)
 
-    init { uow.register(journals, items, locations, stock, recipes, tAccounts, movements, suppliers, purchases, attachments) }
+    init { uow.register(journals, items, locations, stock, recipes, tAccounts, movements, suppliers, purchases, attachments, rules, cheques) }
 
     private fun code(block: () -> Unit) = assertFailsWith<DomainException> { block() }.error.code
     private fun rial(v: Long) = Money.of(v)
@@ -365,5 +369,67 @@ class PurchasingTest {
             ops.attach(AttachToInvoice(GlobalId.new(), branchA, inv, listOf(ir.sabou.platform.AttachmentInput("big.pdf", "application/pdf", ByteArray(ir.sabou.platform.Attachments.MAX_BYTES + 1)))))
         })
         assertContentEquals(photo.bytes, attachments.content(attachments.of(PurchasingOperations.INVOICE, inv).single().id))
+    }
+
+    // ------------------------------------------------------------ Stage C: approvals and cheques
+
+    @Test fun invoicesMatchingARuleNeedApprovalsByOtherPeopleBeforePayment() {
+        fund(cashA, branchA, 10_000_000)
+        approvals.saveRule(SaveApprovalRule(GlobalId.new(), null, "بالای ۱ میلیون", branchA, null, null, rial(1_000_000), 2))
+        approvals.saveRule(SaveApprovalRule(GlobalId.new(), null, "کالا", null, supplier, InvoiceCategory.GOODS, rial(0), 1))
+        val small = invoice(no = "S", value = 500_000)
+        assertEquals(1, purchases.invoice(small)!!.requiredApprovals)               // only the supplier rule
+        val big = invoice(no = "B", value = 2_000_000)
+        assertEquals(2, purchases.invoice(big)!!.requiredApprovals)                 // the strictest rule wins
+        assertTrue(code { ops.payInvoice(PaySupplierInvoice(GlobalId.new(), branchA, big, cashA, rial(1), day)) }.startsWith("INVALID_STATE:PURCHASE_INVOICE:NOT_APPROVED"))
+        assertTrue(code { invoice(no = "C", value = 3_000_000, payNow = ImmediatePayment(cashA, rial(1))) }.startsWith("INVALID_STATE:PURCHASE_INVOICE:NOT_APPROVED"))
+        val clerk = Actor(GlobalId.new(), "clerk", Role.STOREKEEPER, setOf(branchA.branchId))
+        val m1 = Actor(GlobalId.new(), "manager-1", Role.MANAGER, setOf(branchA.branchId))
+        val m2 = Actor(GlobalId.new(), "manager-2", Role.MANAGER, setOf(branchA.branchId))
+        session.actor = clerk
+        val clerkInvoice = invoice(no = "K", value = 2_000_000)
+        assertEquals("PERMISSION_DENIED:PURCHASE_APPROVE", code { approvals.approve(ApproveInvoice(GlobalId.new(), branchA, clerkInvoice)) })
+        session.actor = m1
+        approvals.approve(ApproveInvoice(GlobalId.new(), branchA, clerkInvoice))
+        assertEquals("INVALID_STATE:PURCHASE_INVOICE:SAME_APPROVER", code { approvals.approve(ApproveInvoice(GlobalId.new(), branchA, clerkInvoice)) })
+        assertEquals("PERMISSION_DENIED:PURCHASE_UNAPPROVE", code { approvals.unapprove(UnapproveInvoice(GlobalId.new(), branchA, clerkInvoice, "اشتباه")) })
+        val own = invoice(no = "M", value = 2_000_000)
+        assertEquals("INVALID_STATE:PURCHASE_INVOICE:RECORDER_CANNOT_APPROVE", code { approvals.approve(ApproveInvoice(GlobalId.new(), branchA, own)) })
+        session.actor = m2
+        approvals.approve(ApproveInvoice(GlobalId.new(), branchA, clerkInvoice))
+        assertEquals("INVALID_STATE:PURCHASE_INVOICE:ALREADY_APPROVED", code { approvals.approve(ApproveInvoice(GlobalId.new(), branchA, clerkInvoice)) })
+        ops.payInvoice(PaySupplierInvoice(GlobalId.new(), branchA, clerkInvoice, cashA, rial(500_000), day))
+        session.actor = Actor(GlobalId.new(), "owner2", Role.OWNER, emptySet())
+        assertEquals("INVALID_STATE:PURCHASE_INVOICE:HAS_ACTIVE_PAYMENTS", code { approvals.unapprove(UnapproveInvoice(GlobalId.new(), branchA, clerkInvoice, "اشتباه")) })
+        // Rules apply to invoices recorded after them: an inactive rule stops applying.
+        rules.all().forEach { approvals.saveRule(SaveApprovalRule(GlobalId.new(), it.id, it.name, it.branch, it.supplierId, it.category, it.minAmount, it.steps, false)) }
+        assertEquals(0, purchases.invoice(invoice(no = "Z", value = 5_000_000))!!.requiredApprovals)
+        assertEquals("PERMISSION_DENIED:APPROVAL_RULES", run {
+            session.actor = m1
+            code { approvals.saveRule(SaveApprovalRule(GlobalId.new(), null, "x", null, null, null, rial(0), 1)) }
+        })
+    }
+
+    @Test fun suppliersArePaidWithOurChequeOrACustomersChequeAndReversalVoidsIt() {
+        val book = treasuryOps.openAccount(OpenTreasuryAccount(GlobalId.new(), branchA, "دسته‌چک", TreasuryKind.ISSUED_CHEQUES)).resultId
+        val bankA = treasuryOps.openAccount(OpenTreasuryAccount(GlobalId.new(), branchA, "بانک A", TreasuryKind.BANK)).resultId
+        val box = treasuryOps.openAccount(OpenTreasuryAccount(GlobalId.new(), branchA, "صندوق چک", TreasuryKind.RECEIVED_CHEQUES)).resultId
+        val inv = invoice(value = 2_000_000)
+        val ours = ir.sabou.treasury.ChequeDetails("777", "ملت", "", day.plusDays(20), "لبنیات پگاه", bankAccountId = bankA)
+        val payment = ops.payInvoice(PaySupplierInvoice(GlobalId.new(), branchA, inv, book, rial(1_500_000), day, cheque = ours)).resultId
+        assertEquals(500_000, ops.outstanding(inv).rial)
+        assertEquals(-1_500_000, ledger.balance(StandardAccounts.CHEQUES_PAYABLE, branchA).rial)
+        apMatchesSubLedger()
+        treasuryOps.receipt(RecordReceipt(GlobalId.new(), branchA, box, ReceiptPurpose.OTHER_INCOME, rial(500_000), day, "چک مشتری",
+            ir.sabou.treasury.ChequeDetails("55", "صادرات", "", day.plusDays(5), "مشتری")))
+        val held = cheques.all().single { it.direction == ir.sabou.treasury.ChequeDirection.RECEIVED }.id
+        ops.payInvoice(PaySupplierInvoice(GlobalId.new(), branchA, inv, box, rial(500_000), day, chequeId = held))
+        assertEquals(0, ops.outstanding(inv).rial)
+        assertEquals(ir.sabou.treasury.ChequeStatus.ENDORSED, treasury.cheque(held).status)
+        ops.reversePayment(ReverseSupplierPayment(GlobalId.new(), branchA, payment, day, "چک باطل شد"))
+        assertEquals(ir.sabou.treasury.ChequeStatus.VOID, cheques.all().single { it.details.number == "777" }.status)
+        assertEquals(0, ledger.balance(StandardAccounts.CHEQUES_PAYABLE, branchA).rial)
+        assertEquals(1_500_000, ops.outstanding(inv).rial)
+        apMatchesSubLedger()
     }
 }

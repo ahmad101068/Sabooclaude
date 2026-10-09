@@ -80,6 +80,10 @@ class SabouCore private constructor(
     internal val periods = SqlPeriodStore(db)
     internal val treasuryAccounts = SqlTreasuryAccountStore(db)
     internal val treasuryMovements = SqlMovementStore(db)
+    internal val cheques = ir.sabou.persistence.SqlChequeStore(db)
+    internal val approvalRules = ir.sabou.persistence.SqlApprovalRuleStore(db)
+    internal val budgetStore = ir.sabou.persistence.SqlBudgetStore(db)
+    internal val assetStore = ir.sabou.persistence.SqlAssetStore(db)
     internal val items = SqlItemStore(db)
     internal val locations = SqlLocationStore(db)
     internal val stock = SqlStockStore(db)
@@ -109,22 +113,27 @@ class SabouCore private constructor(
     private val treasuryCapability = registry.issue(ModuleId.TREASURY)
 
     val accounting = ManualAccounting(bus, ledger, registry.issue(ModuleId.LEDGER_MANUAL), periods)
-    internal val treasuryGateway = TreasuryGateway(ledger, treasuryCapability, treasuryAccounts, treasuryMovements)
+    internal val treasuryGateway = TreasuryGateway(ledger, treasuryCapability, treasuryAccounts, treasuryMovements, cheques)
     val treasury = TreasuryOperations(bus, treasuryGateway, treasuryCapability, treasuryAccounts)
+    val chequeOps = ir.sabou.treasury.ChequeOperations(bus, treasuryGateway, treasuryCapability)
+    val budgets = ir.sabou.ledger.BudgetOperations(bus, accounts, budgetStore)
     internal val inventoryGateway = InventoryGateway(ledger, registry.issue(ModuleId.INVENTORY), items, locations, stock)
     val inventory = InventoryOperations(bus, inventoryGateway, items, locations, recipes)
     internal val recipeBook = RecipeBook(recipes)
-    val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases, attachments)
+    val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases, attachments, approvalRules)
+    val approvals = ir.sabou.purchasing.ApprovalOperations(bus, approvalRules, purchases)
     val orders = OrderOperations(bus, inventoryGateway, suppliers, purchases)
     val salesOps = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventoryGateway, recipeBook, treasuryGateway, customers, sales)
     /** Stored policies (entered by the owner) plus any supplied by the caller (tests). */
     val payrollPolicies = PolicyAdministration(bus, SqlPolicyStore(db))
     private val policyRegistry = StatutoryPolicyRegistry { payrollPolicies.policies() + policies }
+    val fixedAssets = ir.sabou.assets.AssetOperations(bus, ledger, registry.issue(ModuleId.ASSETS), treasuryGateway, assetStore)
     val payroll = PayrollOperations(bus, ledger, registry.issue(ModuleId.PAYROLL), treasuryGateway, personnel, payrollStore, policyRegistry)
 
     val overview = Overview(this)
     val reports = Reports(this)
     val buying = Buying(this)
+    val books = Books(this)
 
     /**
      * Startup check: the database must continue the anchored history, and the audit chain must verify

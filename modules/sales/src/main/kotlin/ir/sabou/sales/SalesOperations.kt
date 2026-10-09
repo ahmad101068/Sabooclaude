@@ -81,9 +81,11 @@ data class CollectReceivable(
     val treasuryAccountId: GlobalId,
     val amount: Money,
     val date: BusinessDate,
+    /** The customer's cheque, when collected into a cheque box. */
+    val cheque: ir.sabou.treasury.ChequeDetails? = null,
 ) : Command {
     override val requiredPermission = Permission.RECEIVABLE_COLLECT
-    override fun fingerprint() = "$scope|$receivableId|$treasuryAccountId|${amount.rial}|${date.epochDay}"
+    override fun fingerprint() = "$scope|$receivableId|$treasuryAccountId|${amount.rial}|${date.epochDay}|${cheque?.fingerprint()}"
 }
 
 data class ReverseCollection(
@@ -242,7 +244,7 @@ class SalesOperations(
         ensure(saleDate == null || cmd.date >= saleDate) { DomainError.InvalidInput("date", "تاریخ دریافت قبل از تاریخ فروش است.") }
         val collectionId = GlobalId.new()
         treasury.settle(ctx, capability, cmd.treasuryAccountId, Direction.RECEIPT, cmd.amount, cmd.date, COLLECTION, collectionId, "وصول مطالبات",
-            listOf(LineDraft(StandardAccounts.RECEIVABLE, credit = cmd.amount, by = capability)))
+            listOf(LineDraft(StandardAccounts.RECEIVABLE, credit = cmd.amount, by = capability)), cmd.cheque?.let { ir.sabou.treasury.ChequeInstruction.New(it) })
         sales.saveCollection(Collection(collectionId, r.id, cmd.treasuryAccountId, cmd.amount, cmd.date, reversed = false))
         ctx.audit(AuditDraft("RECEIVABLE_COLLECT", "RECEIVABLE", r.id.value, "amount=${cmd.amount.rial}"))
         collectionId

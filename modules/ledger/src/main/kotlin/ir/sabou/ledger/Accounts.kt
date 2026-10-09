@@ -41,12 +41,19 @@ object StandardAccounts {
     val BANK = AccountCode.of("1102")
     val PETTY_CASH = AccountCode.of("1103")
     val CARD_CLEARING = AccountCode.of("1104")
+    /** Customers' cheques we hold (cheque boxes). */
+    val CHEQUES_RECEIVABLE = AccountCode.of("1105")
+    /** Customers' cheques that bounced: what the drawers owe us until settled. */
+    val BOUNCED_CHEQUES_RECEIVABLE = AccountCode.of("1107")
     val SALES_CLEARING = AccountCode.of("1190")
     val RECEIVABLE = AccountCode.of("1201")
     val INVENTORY = AccountCode.of("1301")
     /** Supplier invoice lines whose item is not known yet; cleared when someone assigns them. */
     val PURCHASES_PENDING_REVIEW = AccountCode.of("1302")
     val EMPLOYEE_ADVANCE = AccountCode.of("1401")
+    val FIXED_ASSETS = AccountCode.of("1501")
+    /** Contra-asset: depreciation taken so far (credit balance). */
+    val ACCUMULATED_DEPRECIATION = AccountCode.of("1509")
     val INTER_BRANCH = AccountCode.of("1901")
     val PAYABLE = AccountCode.of("2101")
     val PAYROLL_PAYABLE = AccountCode.of("2102")
@@ -54,6 +61,10 @@ object StandardAccounts {
     val INSURANCE_PAYABLE = AccountCode.of("2104")
     val GOODS_RECEIVED_NOT_INVOICED = AccountCode.of("2105")
     val PAYROLL_TAX_PAYABLE = AccountCode.of("2106")
+    /** Our cheques not yet cleared by the bank (cheque books). */
+    val CHEQUES_PAYABLE = AccountCode.of("2107")
+    /** Our cheques that bounced: what we still owe the payees. */
+    val BOUNCED_CHEQUES_PAYABLE = AccountCode.of("2108")
     val CAPITAL = AccountCode.of("3101")
     val RETAINED_EARNINGS = AccountCode.of("3201")
     val FOOD_SALES = AccountCode.of("4101")
@@ -68,30 +79,37 @@ object StandardAccounts {
     val INVENTORY_VARIANCE = AccountCode.of("6106")
     val EMPLOYER_INSURANCE = AccountCode.of("6107")
     val CASH_OVER_SHORT = AccountCode.of("6108")
+    val DEPRECIATION = AccountCode.of("6110")
     /** Food given away: complimentary dishes, staff meals, donations (part of food cost, not waste). */
     val COMPS = AccountCode.of("6109")
 
     fun chart(): List<Account> {
         val t = ModuleId.TREASURY; val s = ModuleId.SALES; val p = ModuleId.PURCHASING
-        val i = ModuleId.INVENTORY; val y = ModuleId.PAYROLL
+        val i = ModuleId.INVENTORY; val y = ModuleId.PAYROLL; val f = ModuleId.ASSETS
         fun a(code: AccountCode, name: String, type: AccountType, vararg owners: ModuleId) = Account(code, name, type, owners.toSet())
         return listOf(
             a(CASH, "صندوق", AccountType.ASSET, t),
             a(BANK, "بانک", AccountType.ASSET, t),
             a(PETTY_CASH, "تنخواه‌گردان", AccountType.ASSET, t),
             a(CARD_CLEARING, "وجوه کارت‌خوان", AccountType.ASSET, t),
+            a(CHEQUES_RECEIVABLE, "اسناد دریافتنی (چک‌های نزد صندوق)", AccountType.ASSET, t),
+            a(BOUNCED_CHEQUES_RECEIVABLE, "چک‌های دریافتی برگشتی", AccountType.ASSET, t),
             a(SALES_CLEARING, "حساب واسط تسویه فروش", AccountType.ASSET, s),
             a(RECEIVABLE, "حساب‌های دریافتنی", AccountType.ASSET, s),
             a(INVENTORY, "موجودی مواد و کالا", AccountType.ASSET, i),
             a(PURCHASES_PENDING_REVIEW, "خرید در انتظار بررسی", AccountType.ASSET, p),
             a(EMPLOYEE_ADVANCE, "مساعده پرسنل", AccountType.ASSET, y),
-            a(INTER_BRANCH, "حساب جاری بین شعب", AccountType.ASSET, t, i, p, s, y),
+            a(FIXED_ASSETS, "دارایی‌های ثابت (بهای تمام‌شده)", AccountType.ASSET, f),
+            a(ACCUMULATED_DEPRECIATION, "استهلاک انباشته", AccountType.ASSET, f),
+            a(INTER_BRANCH, "حساب جاری بین شعب", AccountType.ASSET, t, i, p, s, y, f),
             a(PAYABLE, "حساب‌های پرداختنی", AccountType.LIABILITY, p),
             a(PAYROLL_PAYABLE, "حقوق پرداختنی", AccountType.LIABILITY, y),
             a(SALES_TAX_PAYABLE, "مالیات و عوارض فروش پرداختنی", AccountType.LIABILITY, s),
             a(INSURANCE_PAYABLE, "بیمه پرداختنی", AccountType.LIABILITY, y),
             a(GOODS_RECEIVED_NOT_INVOICED, "کالای دریافتی فاکتورنشده", AccountType.LIABILITY, p, i),
             a(PAYROLL_TAX_PAYABLE, "مالیات حقوق پرداختنی", AccountType.LIABILITY, y),
+            a(CHEQUES_PAYABLE, "اسناد پرداختنی (چک‌های صادره)", AccountType.LIABILITY, t),
+            a(BOUNCED_CHEQUES_PAYABLE, "چک‌های پرداختی برگشتی", AccountType.LIABILITY, t),
             a(CAPITAL, "سرمایه", AccountType.EQUITY),
             a(RETAINED_EARNINGS, "سود انباشته", AccountType.EQUITY),
             a(FOOD_SALES, "فروش غذا و نوشیدنی", AccountType.REVENUE, s),
@@ -107,6 +125,7 @@ object StandardAccounts {
             a(EMPLOYER_INSURANCE, "بیمه سهم کارفرما", AccountType.EXPENSE, y),
             a(CASH_OVER_SHORT, "کسر و اضافه صندوق", AccountType.EXPENSE, t),
             a(COMPS, "پذیرایی، غذای پرسنل و اهدایی", AccountType.EXPENSE, i),
+            a(DEPRECIATION, "هزینه استهلاک", AccountType.EXPENSE, f),
         )
     }
 }

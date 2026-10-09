@@ -30,3 +30,8 @@ class InMemoryMovementStore : MovementStore, Transactional {
     @Suppress("UNCHECKED_CAST")
     override fun restore(snapshot: Any) { rows.clear(); rows.addAll(snapshot as List<TreasuryMovement>) }
 }
+class InMemoryChequeStore : Table<GlobalId, ir.sabou.treasury.Cheque>(), ir.sabou.treasury.ChequeStore {
+    override fun byId(id: GlobalId) = get(id)
+    override fun all() = values()
+    override fun save(cheque: ir.sabou.treasury.Cheque) = put(cheque.id, cheque)
+}

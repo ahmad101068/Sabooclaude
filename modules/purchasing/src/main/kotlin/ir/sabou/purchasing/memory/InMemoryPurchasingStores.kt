@@ -64,3 +64,9 @@ class InMemoryPurchaseStore : PurchaseStore, Transactional {
         orders.clear(); orders.putAll(l[4] as Map<GlobalId, PurchaseOrder>)
     }
 }
+
+class InMemoryApprovalRuleStore : ir.sabou.platform.memory.Table<GlobalId, ir.sabou.purchasing.ApprovalRule>(), ir.sabou.purchasing.ApprovalRuleStore {
+    override fun all() = values()
+    override fun byId(id: GlobalId) = get(id)
+    override fun save(rule: ir.sabou.purchasing.ApprovalRule) = put(rule.id, rule)
+}

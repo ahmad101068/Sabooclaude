@@ -115,6 +115,17 @@ object Schema {
                 }
             },
         ),
+        Migration(
+            4,
+            listOf(
+                "CREATE TABLE cheques (id TEXT PRIMARY KEY, scope TEXT NOT NULL, direction TEXT NOT NULL, status TEXT NOT NULL, due INTEGER NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX cheques_due ON cheques(status, due)",
+                "CREATE TABLE approval_rules (id TEXT PRIMARY KEY, doc TEXT NOT NULL)",
+                "CREATE TABLE budgets (id TEXT PRIMARY KEY, scope TEXT NOT NULL, account TEXT NOT NULL, period_from INTEGER NOT NULL, doc TEXT NOT NULL, UNIQUE (scope, account, period_from))",
+                "CREATE TABLE fixed_assets (id TEXT PRIMARY KEY, scope TEXT NOT NULL, doc TEXT NOT NULL)",
+                "CREATE TABLE depreciation_runs (id TEXT PRIMARY KEY, doc TEXT NOT NULL)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }
