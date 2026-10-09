@@ -78,6 +78,7 @@ object Fa {
     /** Decimal quantity such as "۲٫۵" or "0.25" → micro-units. */
     fun parseQuantity(text: String): Quantity? {
         val t = text.trim().replace('٫', '.').replace('/', '.')
+        if (t.isEmpty() || t == ".") return null   // empty means "not entered", never zero
         val parts = t.split('.')
         if (parts.size > 2) return null
         val whole = if (parts[0].isEmpty()) 0L else parseLong(parts[0]) ?: return null

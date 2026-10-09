@@ -147,44 +147,36 @@ object MeScreens {
     @Composable
     fun Users(nav: Nav) {
         val session = LocalSession.current
-        val data by load(session) { identity.listUsers() to overview.branches() }
+        val data by load(session) { overview.users() to overview.allBranches().filter { it.isActive } }
         var username by remember { mutableStateOf("") }
         var display by remember { mutableStateOf("") }
         var role by remember { mutableStateOf(Role.CASHIER) }
         var pin by remember { mutableStateOf("") }
         val grants = remember { mutableStateListOf<BranchId>() }
+        var editing by remember { mutableStateOf<ir.sabou.platform.User?>(null) }
+        var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
         val action = rememberAction()
+        pending?.let { (title, act) -> Confirm(title, "این تغییر در سوابق ممیزی ثبت می‌شود.", "تأیید", act, { pending = null }) }
         Column(Modifier.fillMaxSize()) {
             Header("کاربران", onBack = nav.back)
             Page {
+                action.error?.let { Banner(it) }
                 Loaded(data) { (users, branches) ->
                     users.forEach { u ->
-                        SCard {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("${u.displayName} (${u.username})", style = SabouType.bodyStrong, color = Sabou.colors.ink)
-                                    Text(roleName(u.role) + (if (!u.isActive) " · غیرفعال" else ""), style = SabouType.caption, color = Sabou.colors.muted)
-                                }
-                                if (u.isActive && u.id != session.actor.userId) {
-                                    Text("غیرفعال کن", style = SabouType.label, color = Sabou.colors.danger,
-                                        modifier = Modifier.clickable { action.run({ identity.deactivateUser(u.id) }) }.padding(6.dp))
-                                }
-                            }
+                        SCard(onClick = if (u.id != session.actor.userId) ({ editing = u }) else null) {
+                            Text("${u.displayName} (${u.username})", style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                            Text(roleName(u.role) + (if (!u.isActive) " · غیرفعال" else "") +
+                                (if (u.role != Role.OWNER) " · " + branches.filter { it.id in u.branchGrants }.joinToString("، ") { it.name } else ""),
+                                style = SabouType.caption, color = Sabou.colors.muted)
                         }
                     }
+                    editing?.let { u -> key(u.id) { EditUser(u, branches, { editing = null }) { title, act -> pending = title to act } } }
                     FormCard("کاربر جدید") {
                         TextInput("نام نمایشی", display, { display = it })
                         TextInput("نام کاربری (لاتین)", username, { username = it })
                         Picker("نقش", Role.entries.filter { it != Role.OWNER }.map { Choice(it, roleName(it)) }, role, { role = it })
-                        Text("دسترسی به شعب", style = SabouType.caption, color = Sabou.colors.muted)
-                        branches.forEach { b ->
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { if (b.id in grants) grants.remove(b.id) else grants.add(b.id) }) {
-                                Checkbox(checked = b.id in grants, onCheckedChange = { on -> if (on) grants.add(b.id) else grants.remove(b.id) })
-                                Text(b.name, style = SabouType.body, color = Sabou.colors.ink)
-                            }
-                        }
+                        GrantsPicker(branches, grants)
                         TextInput("رمز اولیه (۶ تا ۱۲ رقم)", pin, { pin = it }, keyboard = KeyboardType.NumberPassword, secret = true)
-                        action.error?.let { Banner(it) }
                         PrimaryButton("ایجاد کاربر", {
                             action.run({ identity.createUser(username, display, role, grants.toSet(), Fa.latinDigits(pin).toCharArray()) }) {
                                 username = ""; display = ""; pin = ""; grants.clear()
@@ -196,6 +188,44 @@ object MeScreens {
         }
     }
 
+    @Composable
+    private fun GrantsPicker(branches: List<ir.sabou.platform.Branch>, grants: MutableList<BranchId>) {
+        Text("دسترسی به شعب", style = SabouType.caption, color = Sabou.colors.muted)
+        branches.forEach { b ->
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { if (b.id in grants) grants.remove(b.id) else grants.add(b.id) }) {
+                Checkbox(checked = b.id in grants, onCheckedChange = { on -> if (on) grants.add(b.id) else grants.remove(b.id) })
+                Text(b.name, style = SabouType.body, color = Sabou.colors.ink)
+            }
+        }
+    }
+
+    /** Edit role and branches (never touches the PIN or active state), reactivate, deactivate, reset PIN. */
+    @Composable
+    private fun EditUser(u: ir.sabou.platform.User, branches: List<ir.sabou.platform.Branch>, close: () -> Unit, confirm: (String, () -> Unit) -> Unit) {
+        var role by remember { mutableStateOf(u.role) }
+        val grants = remember { mutableStateListOf<BranchId>().apply { addAll(u.branchGrants) } }
+        var newPin by remember { mutableStateOf("") }
+        val action = rememberAction()
+        FormCard("ویرایش ${u.displayName}") {
+            Picker("نقش", Role.entries.map { Choice(it, roleName(it)) }, role, { role = it })
+            if (role != Role.OWNER) GrantsPicker(branches, grants)
+            action.error?.let { Banner(it) }
+            PrimaryButton("ذخیره نقش و دسترسی", {
+                action.run({ identity.updateUser(u.id, role, if (role == Role.OWNER) emptySet() else grants.toSet()) }) { close() }
+            }, enabled = role == Role.OWNER || grants.isNotEmpty(), busy = action.busy)
+            TextInput("رمز جدید برای این کاربر", newPin, { newPin = it }, keyboard = KeyboardType.NumberPassword, secret = true)
+            SecondaryButton("تعیین رمز جدید", {
+                confirm("رمز ${u.displayName} عوض شود؟") { action.run({ identity.resetPin(u.id, Fa.latinDigits(newPin).toCharArray()) }) { close() } }
+            }, enabled = newPin.length >= 6)
+            if (u.isActive) {
+                SecondaryButton("غیرفعال کردن", { confirm("${u.displayName} غیرفعال شود؟") { action.run({ identity.deactivateUser(u.id) }) { close() } } }, danger = true)
+            } else {
+                SecondaryButton("فعال کردن دوباره", { confirm("${u.displayName} دوباره فعال شود؟") { action.run({ identity.reactivateUser(u.id) }) { close() } } })
+            }
+            SecondaryButton("بستن", close)
+        }
+    }
+
     // ------------------------------------------------------------ Master data
 
     private val units = StockUnit.entries.map { Choice(it, unitName(it)) }
@@ -203,7 +233,7 @@ object MeScreens {
     @Composable
     fun Items(nav: Nav) {
         val session = LocalSession.current
-        val data by load(session) { items.all() }
+        val data by load(session) { overview.items() }
         var name by remember { mutableStateOf("") }
         var unit by remember { mutableStateOf(StockUnit.KILOGRAM) }
         var minimum by remember { mutableStateOf<Quantity?>(Quantity.ZERO) }
@@ -219,7 +249,7 @@ object MeScreens {
                 FormCard("کالای جدید") {
                     TextInput("نام کالا", name, { name = it })
                     Picker("واحد", units, unit, { unit = it })
-                    QuantityInput("حداقل موجودی", unitName(unit), { minimum = it })
+                    QuantityInput("حداقل موجودی", unitName(unit), { minimum = it }, blankAs = Quantity.ZERO)
                     action.error?.let { Banner(it) }
                     PrimaryButton("افزودن", {
                         action.run({ inventory.createItem(CreateItem(id.value, name, unit, minimum ?: Quantity.ZERO)) }) { name = ""; id.value = GlobalId.new() }
@@ -235,7 +265,7 @@ object MeScreens {
         Column(Modifier.fillMaxSize()) {
             Header("انبارها", onBack = nav.back) { BranchSwitcher() }
             WithBranch { branch ->
-                val data by load(session, branch) { locations.all().filter { it.scope == branch } }
+                val data by load(session, branch) { overview.locations(branch) }
                 var name by remember { mutableStateOf("") }
                 val id = remember { mutableStateOf(GlobalId.new()) }
                 val action = rememberAction()
@@ -262,8 +292,8 @@ object MeScreens {
     fun Menu(nav: Nav) {
         val session = LocalSession.current
         val data by load(session) {
-            val all = items.all().associateBy { it.id }
-            Triple(recipes.menuItems(), all, recipes.menuItems().associate { m -> m.id to recipes.versions(m.id).maxByOrNull { it.version } })
+            val menu = overview.menu()
+            Triple(menu.map { it.item }, overview.items().associateBy { it.id }, menu.associate { it.item.id to it.latest })
         }
         var name by remember { mutableStateOf("") }
         var menuItem by remember { mutableStateOf<GlobalId?>(null) }
@@ -355,7 +385,7 @@ object MeScreens {
         Column(Modifier.fillMaxSize()) {
             Header("مشتریان اعتباری", onBack = nav.back) { BranchSwitcher() }
             WithBranch { branch ->
-                val data by load(session, branch) { customers.all().filter { it.registeredIn == branch }.map { it to salesOps.customerBalance(it.id) } }
+                val data by load(session, branch) { overview.customers(branch).map { it.customer to it.owed } }
                 var name by remember { mutableStateOf("") }
                 var phone by remember { mutableStateOf("") }
                 var type by remember { mutableStateOf(CustomerType.COMPANY) }
@@ -388,7 +418,7 @@ object MeScreens {
     @Composable
     fun Policies(nav: Nav) {
         val session = LocalSession.current
-        val data by load(session) { payrollPolicies.policies() }
+        val data by load(session) { overview.policies() }
         val j = Fa.jalali(session.today)
         var version by remember { mutableStateOf(Fa.digits(j.year.toString())) }
         var fromDate by remember { mutableStateOf(Fa.fromJalali(j.year, 1, 1)) }
@@ -398,6 +428,9 @@ object MeScreens {
         var empIns by remember { mutableStateOf("۷") }
         var erIns by remember { mutableStateOf("۲۰") }
         var unemp by remember { mutableStateOf("۳") }
+        var exemptNum by remember { mutableStateOf("۲") }
+        var exemptDen by remember { mutableStateOf("۷") }
+        var invalid by remember { mutableStateOf<String?>(null) }
         var maxInsurable by remember { mutableStateOf<Money?>(null) }
         val brackets = remember { mutableStateListOf(BracketRow(), BracketRow()) }
         var topRate by remember { mutableStateOf("") }
@@ -421,6 +454,11 @@ object MeScreens {
                         TextInput("سهم کارفرما ٪", erIns, { erIns = it }, Modifier.weight(1f), keyboard = KeyboardType.Decimal)
                         TextInput("بیکاری ٪", unemp, { unemp = it }, Modifier.weight(1f), keyboard = KeyboardType.Decimal)
                     }
+                    Text("سهم معاف از مالیات در بیمه سهم کارگر (کسر)", style = SabouType.caption, color = Sabou.colors.muted)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextInput("صورت", exemptNum, { exemptNum = it }, Modifier.weight(1f), keyboard = KeyboardType.Number)
+                        TextInput("مخرج", exemptDen, { exemptDen = it }, Modifier.weight(1f), keyboard = KeyboardType.Number)
+                    }
                     MoneyInput("سقف دستمزد مشمول بیمه (ماهانه)", maxInsurable, { maxInsurable = it })
                     Text("پله‌های مالیات ماهانه (تا سقف ← نرخ)", style = SabouType.bodyStrong, color = Sabou.colors.ink)
                     brackets.forEach { b ->
@@ -435,16 +473,24 @@ object MeScreens {
                     TextInput("نرخ مازاد بر آخرین پله ٪", topRate, { topRate = it }, keyboard = KeyboardType.Decimal)
                     action.error?.let { Banner(it) }
                     val minutes = Fa.parseLong(hours)?.let { (it * 60).toInt() }
+                    invalid?.let { Banner(it) }
+                    val num = Fa.parseLong(exemptNum)?.toInt()
+                    val den = Fa.parseLong(exemptDen)?.toInt()
                     val ready = minutes != null && Fa.parseLong(overtime) != null && pct(empIns) != null && pct(erIns) != null && pct(unemp) != null &&
+                        num != null && den != null && den > 0 && num in 0..den &&
                         maxInsurable != null && brackets.all { it.upTo != null && pct(it.rate) != null } && pct(topRate) != null
                     PrimaryButton("ثبت پارامترها", {
-                        val policy = StatutoryPolicy(
+                        invalid = null
+                        val policy = try { StatutoryPolicy(
                             version = Fa.latinDigits(version.trim()), from = fromDate, to = toDate, standardMonthlyMinutes = minutes!!,
                             overtimeMultiplierPercent = Fa.parseLong(overtime)!!.toInt(),
                             employeeInsuranceBp = pct(empIns)!!, employerInsuranceBp = pct(erIns)!!, unemploymentInsuranceBp = pct(unemp)!!,
-                            maxInsurableMonthly = maxInsurable!!, insuranceTaxExemptNumerator = 2, insuranceTaxExemptDenominator = 7,
+                            maxInsurableMonthly = maxInsurable!!, insuranceTaxExemptNumerator = num!!, insuranceTaxExemptDenominator = den!!,
                             taxBrackets = brackets.sortedBy { it.upTo!!.rial }.map { TaxBracket(it.upTo, pct(it.rate)!!) } + TaxBracket(null, pct(topRate)!!),
-                        )
+                        ) } catch (e: IllegalArgumentException) {
+                            invalid = "مقادیر با هم سازگار نیستند: نرخ‌ها باید بین ۰ و ۱۰۰٪ باشند، پله‌ها صعودی و بدون تکرار، و جمع بیمه سهم کارگر و بالاترین نرخ مالیات کمتر از ۱۰۰٪."
+                            return@PrimaryButton
+                        }
                         action.run({ payrollPolicies.define(DefinePayrollPolicy(GlobalId.new(), policy)) })
                     }, enabled = ready, busy = action.busy)
                 }
@@ -480,7 +526,7 @@ object MeScreens {
         val create = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
             if (uri != null) {
                 val pw = password.toCharArray()
-                work("پشتیبان با موفقیت ذخیره شد. فایل و رمز را جدا از هم نگه دارید.") { container.backup(pw, uri) }
+                work("پشتیبان با موفقیت ذخیره شد. فایل و رمز را جدا از هم نگه دارید.") { container.backup(session.core, pw, uri) }
                 password = ""; password2 = ""
             }
         }

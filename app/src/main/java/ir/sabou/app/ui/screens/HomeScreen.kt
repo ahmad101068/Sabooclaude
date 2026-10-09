@@ -65,9 +65,12 @@ fun HomeScreen(nav: Nav) {
     val branch = session.branch
     val data by load(session, branch) {
         val date = session.today
-        fun <T> safe(block: () -> T): T? = runCatching(block).getOrNull()   // a role without a permission simply sees less
+        // A role without a permission simply sees less; other failures still surface.
+        fun <T> safe(block: () -> T): T? = try { block() } catch (e: ir.sabou.kernel.DomainException) {
+            if (e.error is ir.sabou.kernel.DomainError.PermissionDenied || e.error is ir.sabou.kernel.DomainError.ScopeDenied) null else throw e
+        }
 
-        val accounts = treasuryAccounts.all().associateBy { it.id }
+        val accounts = (safe { overview.paymentAccounts() } ?: emptyList()).associateBy { it.id }
         val today = branch?.let { b ->
             safe { overview.today(date).firstOrNull { Scope.Branch(it.branch.id) == b } }?.let { day ->
                 val sale = day.sale
@@ -102,17 +105,18 @@ fun HomeScreen(nav: Nav) {
                 add(Todo(R.drawable.ic_alert, "${Fa.number(low.size.toLong())} کالا زیر حداقل موجودی", names, Route.Stock, true))
             }
             safe {
-                purchases.invoices().filter { it.status == InvoiceStatus.POSTED && session.actor.canAccess(it.scope) && it.dueDate <= date.plusDays(7) }
-                    .map { purchasing.outstanding(it.id) }.filter { !it.isZero }
-            }?.takeIf { it.isNotEmpty() && session.actor.role.allows(Permission.PURCHASE_VIEW) }?.let { due ->
+                overview.invoices().filter { it.invoice.status == InvoiceStatus.POSTED && it.invoice.dueDate <= date.plusDays(7) }
+                    .map { it.outstanding }.filter { !it.isZero }
+            }?.takeIf { it.isNotEmpty() }?.let { due ->
                 add(Todo(R.drawable.ic_calendar, "${Fa.number(due.size.toLong())} فاکتور خرید سررسید این هفته", "جمع ${Fa.toman(Money.sum(due))} تومان", Route.Purchases, false))
             }
         }
 
+        val setup = overview.setupStatus()
         val missing = buildList {
-            if (session.actor.role.allows(Permission.TREASURY_ACCOUNT_MANAGE) && accounts.isEmpty()) add("تعریف صندوق و حساب بانکی" to Route.Accounts)
-            if (session.actor.role.allows(Permission.INVENTORY_ITEM_MANAGE) && items.all().isEmpty()) add("تعریف کالاهای انبار" to Route.Items)
-            if (session.actor.role.allows(Permission.RECIPE_MANAGE) && recipes.menuItems().isEmpty()) add("تعریف منو و رسپی" to Route.Menu)
+            if (session.actor.role.allows(Permission.TREASURY_ACCOUNT_MANAGE) && !setup.hasAccounts) add("تعریف صندوق و حساب بانکی" to Route.Accounts)
+            if (session.actor.role.allows(Permission.INVENTORY_ITEM_MANAGE) && !setup.hasItems) add("تعریف کالاهای انبار" to Route.Items)
+            if (session.actor.role.allows(Permission.RECIPE_MANAGE) && !setup.hasMenu) add("تعریف منو و رسپی" to Route.Menu)
         }
         HomeData(today, todos, missing)
     }
@@ -181,12 +185,15 @@ private fun Hero(today: Today?, onClick: () -> Unit) {
 
 @Composable
 private fun QuickActions(nav: Nav) {
+    val session = LocalSession.current
+    // Only actions this role may perform.
     val items = listOf(
-        Triple("ثبت فروش", R.drawable.ic_sales, Route.Sales),
-        Triple("پرداخت", R.drawable.ic_payment, Route.Payment),
-        Triple("دریافت کالا", R.drawable.ic_operations, Route.NewPurchase),
-        Triple("انبارگردانی", R.drawable.ic_count, Route.Count),
-    )
+        Triple("ثبت فروش", R.drawable.ic_sales, Route.Sales) to Permission.SALES_RECORD,
+        Triple("پرداخت", R.drawable.ic_payment, Route.Payment) to Permission.TREASURY_PAYMENT,
+        Triple("دریافت کالا", R.drawable.ic_operations, Route.NewPurchase) to Permission.PURCHASE_RECORD,
+        Triple("انبارگردانی", R.drawable.ic_count, Route.Count) to Permission.INVENTORY_COUNT,
+    ).filter { session.can(it.second) }.map { it.first }
+    if (items.isEmpty()) return
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         items.forEach { (label, icon, route) ->
             Column(

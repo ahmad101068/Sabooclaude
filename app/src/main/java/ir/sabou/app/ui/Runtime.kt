@@ -24,6 +24,7 @@ import ir.sabou.kernel.Scope
 import ir.sabou.platform.Actor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -62,8 +63,11 @@ fun <T> Load<T>.orNull(): T? = (this as? Load.Done<T>)?.value
 @Composable
 fun <T> load(session: AppSession, vararg keys: Any?, block: SabouCore.() -> T): State<Load<T>> =
     produceState<Load<T>>(Load.Loading, session.version, *keys) {
+        value = Load.Loading   // never show the previous branch's or date's data while reloading
         value = try {
             Load.Done(withContext(Dispatchers.IO) { session.core.block() })
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: DomainException) {
             if (e.error == DomainError.AuthenticationRequired) session.signedOut()
             Load.Failed(Messages.of(e))
@@ -84,17 +88,16 @@ class Action internal constructor(private val scope: CoroutineScope, private val
         busy = true
         error = null
         scope.launch {
-            try {
-                val result = withContext(Dispatchers.IO) { session.core.block() }
+            // The write always finishes once started (leaving the screen does not abandon a committed
+            // command), and every other screen is refreshed; only the screen's own reaction is skipped.
+            val result = withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { runCatching { session.core.block() } }
+            busy = false
+            result.onSuccess { value ->
                 session.changed()
-                onSuccess(result)
-            } catch (e: DomainException) {
-                if (e.error == DomainError.AuthenticationRequired) session.signedOut()
+                if (isActive) onSuccess(value)
+            }.onFailure { e ->
+                if (e is DomainException && e.error == DomainError.AuthenticationRequired) session.signedOut()
                 error = Messages.of(e)
-            } catch (e: Exception) {
-                error = Messages.of(e)
-            } finally {
-                busy = false
             }
         }
     }

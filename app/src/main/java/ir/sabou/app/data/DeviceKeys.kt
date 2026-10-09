@@ -52,7 +52,9 @@ class DeviceKeys(private val context: Context) {
         val packed = Base64.decode(value, Base64.NO_WRAP)
         require(packed.size > IV_BYTES) { "bad_wrapped_key" }
         val cipher = Cipher.getInstance(AES_GCM)
-        cipher.init(Cipher.DECRYPT_MODE, aesKey(), GCMParameterSpec(128, packed.copyOfRange(0, IV_BYTES)))
+        // Never generate a fresh key to unwrap: a lost Keystore key must surface as an error, not as a new key.
+        val key = keyStore().getKey(AES_ALIAS, null) as? SecretKey ?: error("KEYSTORE_KEY_MISSING")
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, packed.copyOfRange(0, IV_BYTES)))
         return cipher.doFinal(packed.copyOfRange(IV_BYTES, packed.size))
     }
 
