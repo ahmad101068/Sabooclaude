@@ -111,3 +111,14 @@ class InMemoryBranchStore : Table<ir.sabou.kernel.BranchId, ir.sabou.platform.Br
     override fun all() = values()
     override fun save(branch: ir.sabou.platform.Branch) = put(branch.id, branch)
 }
+
+class InMemoryAttachmentStore : Table<ir.sabou.kernel.GlobalId, Pair<ir.sabou.platform.Attachment, ByteArray>>(), ir.sabou.platform.AttachmentStore {
+    override fun save(attachment: ir.sabou.platform.Attachment, bytes: ByteArray) {
+        check(get(attachment.id) == null) { "attachment_immutable" }
+        put(attachment.id, attachment to bytes.copyOf())
+    }
+    override fun of(ownerType: String, ownerId: ir.sabou.kernel.GlobalId) =
+        values().map { it.first }.filter { it.ownerType == ownerType && it.ownerId == ownerId }
+    override fun meta(id: ir.sabou.kernel.GlobalId) = get(id)?.first
+    override fun content(id: ir.sabou.kernel.GlobalId) = get(id)?.second?.copyOf()
+}

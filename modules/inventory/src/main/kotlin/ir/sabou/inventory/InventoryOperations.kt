@@ -98,7 +98,11 @@ data class RecordOpeningStock(
     override fun fingerprint() = "$scope|$locationId|${date.epochDay}|" + lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}:${it.value.rial}" }
 }
 
-enum class WasteReason { SPOILAGE, EXPIRED, PREPARATION, DAMAGE, OTHER }
+enum class WasteReason(val givenAway: Boolean = false) {
+    SPOILAGE, EXPIRED, PREPARATION, DAMAGE, OTHER,
+    /** Food given away rather than lost: booked to 6109 and shown apart from waste in usage reports. */
+    COMPLIMENTARY(true), STAFF_MEAL(true), DONATION(true),
+}
 
 data class RecordWaste(
     override val commandId: GlobalId,
@@ -275,11 +279,12 @@ class InventoryOperations(
         ensure(cmd.reason != WasteReason.OTHER || cmd.note.trim().length >= 3) { DomainError.InvalidInput("note", "برای «سایر» توضیح لازم است.") }
         val docId = GlobalId.new()
         val value = gateway.valueOf(gateway.balance(cmd.itemId, location.id), cmd.quantity)
-        val journal = if (value.isZero) null else gateway.postOwn(ctx, JournalDraft(cmd.date, location.scope, WASTE, docId, "ضایعات: ${cmd.reason}", listOf(
-            LineDraft(StandardAccounts.WASTE, debit = value, memo = cmd.note, by = cap),
+        val (type, account, title) = if (cmd.reason.givenAway) Triple(COMP, StandardAccounts.COMPS, "پذیرایی و اهدایی") else Triple(WASTE, StandardAccounts.WASTE, "ضایعات")
+        val journal = if (value.isZero) null else gateway.postOwn(ctx, JournalDraft(cmd.date, location.scope, type, docId, "$title: ${cmd.reason}", listOf(
+            LineDraft(account, debit = value, memo = cmd.note, by = cap),
             LineDraft(StandardAccounts.INVENTORY, credit = value, memo = location.name, by = cap),
         )))
-        gateway.stockOut(ctx, cmd.itemId, location, cmd.quantity, value, MovementKind.WASTE, cmd.date, journal?.id, SourceDocument(ModuleId.INVENTORY, WASTE, docId), null)
+        gateway.stockOut(ctx, cmd.itemId, location, cmd.quantity, value, MovementKind.WASTE, cmd.date, journal?.id, SourceDocument(ModuleId.INVENTORY, type, docId), null)
         docId
     }
 
@@ -383,6 +388,7 @@ class InventoryOperations(
     companion object {
         const val OPENING = "INVENTORY_OPENING"
         const val WASTE = "INVENTORY_WASTE"
+        const val COMP = "INVENTORY_COMP"
         const val COUNT = "INVENTORY_COUNT"
         const val TRANSFER = "INVENTORY_TRANSFER"
         const val PRODUCTION = "INVENTORY_PRODUCTION"

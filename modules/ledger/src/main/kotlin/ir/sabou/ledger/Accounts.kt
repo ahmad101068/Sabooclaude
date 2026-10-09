@@ -44,6 +44,8 @@ object StandardAccounts {
     val SALES_CLEARING = AccountCode.of("1190")
     val RECEIVABLE = AccountCode.of("1201")
     val INVENTORY = AccountCode.of("1301")
+    /** Supplier invoice lines whose item is not known yet; cleared when someone assigns them. */
+    val PURCHASES_PENDING_REVIEW = AccountCode.of("1302")
     val EMPLOYEE_ADVANCE = AccountCode.of("1401")
     val INTER_BRANCH = AccountCode.of("1901")
     val PAYABLE = AccountCode.of("2101")
@@ -66,6 +68,8 @@ object StandardAccounts {
     val INVENTORY_VARIANCE = AccountCode.of("6106")
     val EMPLOYER_INSURANCE = AccountCode.of("6107")
     val CASH_OVER_SHORT = AccountCode.of("6108")
+    /** Food given away: complimentary dishes, staff meals, donations (part of food cost, not waste). */
+    val COMPS = AccountCode.of("6109")
 
     fun chart(): List<Account> {
         val t = ModuleId.TREASURY; val s = ModuleId.SALES; val p = ModuleId.PURCHASING
@@ -79,6 +83,7 @@ object StandardAccounts {
             a(SALES_CLEARING, "حساب واسط تسویه فروش", AccountType.ASSET, s),
             a(RECEIVABLE, "حساب‌های دریافتنی", AccountType.ASSET, s),
             a(INVENTORY, "موجودی مواد و کالا", AccountType.ASSET, i),
+            a(PURCHASES_PENDING_REVIEW, "خرید در انتظار بررسی", AccountType.ASSET, p),
             a(EMPLOYEE_ADVANCE, "مساعده پرسنل", AccountType.ASSET, y),
             a(INTER_BRANCH, "حساب جاری بین شعب", AccountType.ASSET, t, i, p, s, y),
             a(PAYABLE, "حساب‌های پرداختنی", AccountType.LIABILITY, p),
@@ -101,6 +106,7 @@ object StandardAccounts {
             a(INVENTORY_VARIANCE, "مغایرت انبار", AccountType.EXPENSE, i),
             a(EMPLOYER_INSURANCE, "بیمه سهم کارفرما", AccountType.EXPENSE, y),
             a(CASH_OVER_SHORT, "کسر و اضافه صندوق", AccountType.EXPENSE, t),
+            a(COMPS, "پذیرایی، غذای پرسنل و اهدایی", AccountType.EXPENSE, i),
         )
     }
 }

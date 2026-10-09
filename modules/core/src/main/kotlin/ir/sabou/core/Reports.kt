@@ -1,6 +1,7 @@
 package ir.sabou.core
 
 import ir.sabou.inventory.Item
+import ir.sabou.inventory.InventoryOperations
 import ir.sabou.inventory.MovementKind
 import ir.sabou.inventory.RecipeBook
 import ir.sabou.kernel.BusinessDate
@@ -38,7 +39,7 @@ data class PnlTotals(val revenue: Long, val cogs: Long, val expenses: Long) {
 data class PnlLine(val account: Account, val amount: Long)
 
 /**
- * Restaurant cost ratios on food and beverage sales (4101): food cost = cost of sales + waste + stock
+ * Restaurant cost ratios on food and beverage sales (4101): food cost = cost of sales + waste + comps + stock
  * variance; labour = salaries + employer insurance; prime cost = both. Basis points (1/100 of a percent).
  * Labour is booked when a payroll month is approved, so short periods show it in the month's last days.
  */
@@ -152,6 +153,8 @@ data class UsageRow(
     val theoretical: QV,
     val waste: QV,
     val unexplained: QV,
+    /** Given away: complimentary dishes, staff meals, donations (recorded with a reason). */
+    val comps: QV = QV.ZERO,
 ) {
     val actual: QV get() = opening + purchases + transfers + production - closing
     /** Basis points; null when nothing was used. */
@@ -162,6 +165,7 @@ data class UsageReport(val from: BusinessDate, val to: BusinessDate, val place: 
     val theoreticalValue: Long get() = rows.sumOf { it.theoretical.value }
     val actualValue: Long get() = rows.sumOf { it.actual.value }
     val wasteValue: Long get() = rows.sumOf { it.waste.value }
+    val compsValue: Long get() = rows.sumOf { it.comps.value }
     val unexplainedValue: Long get() = rows.sumOf { it.unexplained.value }
 }
 
@@ -245,7 +249,7 @@ class Reports internal constructor(private val core: SabouCore) {
             byDay = totals.groupBy { it.date }.map { (d, rows) -> d to totalsOf(rows) }.sortedBy { it.first },
             ratios = CostRatios(
                 sales = sumOf(listOf(StandardAccounts.FOOD_SALES)),
-                foodCost = sumOf(listOf(StandardAccounts.COGS, StandardAccounts.WASTE, StandardAccounts.INVENTORY_VARIANCE)),
+                foodCost = sumOf(listOf(StandardAccounts.COGS, StandardAccounts.WASTE, StandardAccounts.COMPS, StandardAccounts.INVENTORY_VARIANCE)),
                 labor = sumOf(listOf(StandardAccounts.SALARIES, StandardAccounts.EMPLOYER_INSURANCE)),
             ),
         )
@@ -327,7 +331,7 @@ class Reports internal constructor(private val core: SabouCore) {
         if (locationId != null && locations.isEmpty()) throw DomainException(DomainError.NotFound("LOCATION"))
         val items = core.items.all().associateBy { it.id }
         class Acc { var opening = QV.ZERO; var purchases = QV.ZERO; var transfers = QV.ZERO; var production = QV.ZERO
-            var theoretical = QV.ZERO; var waste = QV.ZERO; var unexplained = QV.ZERO; var movement = QV.ZERO }
+            var theoretical = QV.ZERO; var waste = QV.ZERO; var comps = QV.ZERO; var unexplained = QV.ZERO; var movement = QV.ZERO }
         val acc = HashMap<GlobalId, Acc>()
         locations.forEach { loc ->
             core.stock.totalsBefore(loc.id, from).forEach { t -> acc.getOrPut(t.itemId) { Acc() }.opening += QV(t.quantity, t.value) }
@@ -339,7 +343,7 @@ class Reports internal constructor(private val core: SabouCore) {
                     MovementKind.RECEIPT, MovementKind.OPENING -> r.purchases += qv
                     MovementKind.TRANSFER_IN, MovementKind.TRANSFER_OUT -> r.transfers += qv
                     MovementKind.PRODUCTION_IN, MovementKind.PRODUCTION_OUT -> r.production += qv
-                    MovementKind.WASTE -> r.waste -= qv
+                    MovementKind.WASTE -> if (m.source.type == InventoryOperations.COMP) r.comps -= qv else r.waste -= qv
                     MovementKind.COUNT_LOSS, MovementKind.COUNT_GAIN -> r.unexplained -= qv
                     // Issues: sales consumption is the theoretical usage; a return to the supplier undoes a purchase.
                     MovementKind.ISSUE -> if (m.source.module == ModuleId.SALES) r.theoretical -= qv else r.purchases += qv
@@ -350,7 +354,7 @@ class Reports internal constructor(private val core: SabouCore) {
             val item = items[id] ?: return@mapNotNull null
             val closing = r.opening + r.movement
             if (r.opening.isZero && r.movement.isZero) null
-            else UsageRow(item, r.opening, r.purchases, r.transfers, r.production, closing, r.theoretical, r.waste, r.unexplained)
+            else UsageRow(item, r.opening, r.purchases, r.transfers, r.production, closing, r.theoretical, r.waste, r.unexplained, r.comps)
         }.sortedBy { it.item.name }
         val place = if (locationId != null) locations.single().name else "همه‌ی انبارهای ${scopeName(branch)}"
         return UsageReport(from, to, place, rows)

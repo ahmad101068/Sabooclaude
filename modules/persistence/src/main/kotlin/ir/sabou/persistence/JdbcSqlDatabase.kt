@@ -22,6 +22,7 @@ class JdbcSqlDatabase(private val connection: Connection) : SqlDatabase, AutoClo
             is String -> st.setString(i + 1, a)
             is Long -> st.setLong(i + 1, a)
             is Int -> st.setLong(i + 1, a.toLong())
+            is ByteArray -> st.setBytes(i + 1, a)
             else -> error("sql_arg_unsupported:${a::class.simpleName}")
         }
     }

@@ -54,12 +54,17 @@ object KitchenScreens {
     @Composable
     fun ItemEdit(nav: Nav, itemId: GlobalId) {
         val session = LocalSession.current
-        val data by load(session, itemId) { overview.items().first { it.id == itemId } }
+        val data by load(session, itemId) {
+            val suppliers = if (session.can(Permission.PURCHASE_VIEW) || session.can(Permission.SUPPLIER_MANAGE)) overview.suppliers().map { it.supplier } else emptyList()
+            overview.items().first { it.id == itemId } to suppliers
+        }
         Column(Modifier.fillMaxSize()) {
             Header("مشخصات کالا", onBack = nav.back)
             Page {
-                Loaded(data) { item ->
+                Loaded(data) { (item, suppliers) ->
                     var name by rememberSaveable { mutableStateOf(item.name) }
+                    var preferred by rememberSaveable { mutableStateOf(item.preferredSupplierId) }
+                    val approved = ir.sabou.app.ui.rememberValueList { item.approvedSupplierIds.toList() }
                     var minimum by rememberSaveable { mutableStateOf<Quantity?>(item.minimumStock) }
                     var par by rememberSaveable { mutableStateOf<Quantity?>(item.parLevel) }
                     var shelf by rememberSaveable { mutableStateOf(item.shelf) }
@@ -79,14 +84,30 @@ object KitchenScreens {
                             Checkbox(checked = active, onCheckedChange = { active = it })
                             Text("فعال (در فهرست‌ها نمایش داده شود)", style = SabouType.body, color = Sabou.colors.ink)
                         }
+                        if (suppliers.isNotEmpty() && !item.prepared) {
+                            Divider()
+                            Text("تأمین‌کنندگان", style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                            Picker("تأمین‌کننده‌ی ترجیحی (پیشنهاد خرید با او)", suppliers.filter { it.isActive }.map { Choice(it.id, it.name) }, preferred, { preferred = it })
+                            if (preferred != null) Text("حذف تأمین‌کننده‌ی ترجیحی", style = SabouType.label, color = Sabou.colors.danger,
+                                modifier = Modifier.clickable { preferred = null })
+                            Text("فهرست مجاز: اگر خالی باشد از هر تأمین‌کننده‌ای می‌توان سفارش داد.", style = SabouType.caption, color = Sabou.colors.muted)
+                            suppliers.forEach { sup ->
+                                Row(Modifier.clickable { if (sup.id in approved) approved.remove(sup.id) else approved.add(sup.id) }, verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(checked = sup.id in approved, onCheckedChange = { if (it) approved.add(sup.id) else approved.remove(sup.id) })
+                                    Text(sup.name, style = SabouType.body, color = Sabou.colors.ink)
+                                }
+                            }
+                        }
+                        val preferredBad = preferred != null && approved.isNotEmpty() && preferred !in approved
+                        if (preferredBad) Banner("تأمین‌کننده‌ی ترجیحی باید در فهرست مجاز باشد.", ChipKind.ACCENT)
                         val parBad = par != null && minimum != null && !par!!.isZero && par!! < minimum!!
                         if (parBad) Banner("سطح مطلوب نباید کمتر از حداقل موجودی باشد.", ChipKind.ACCENT)
                         action.error?.let { Banner(it) }
                         PrimaryButton("ذخیره", {
                             action.run({
-                                inventory.updateItem(UpdateItem(id.value, item.id, name, minimum!!, par!!, shelf, allergens, item.preferredSupplierId, item.approvedSupplierIds, active))
+                                inventory.updateItem(UpdateItem(id.value, item.id, name, minimum!!, par!!, shelf, allergens, preferred, approved.toSet(), active))
                             }) { nav.back() }
-                        }, enabled = session.can(Permission.INVENTORY_ITEM_MANAGE) && name.trim().length >= 2 && minimum != null && par != null && !parBad, busy = action.busy)
+                        }, enabled = session.can(Permission.INVENTORY_ITEM_MANAGE) && name.trim().length >= 2 && minimum != null && par != null && !parBad && !preferredBad, busy = action.busy)
                     }
                 }
             }

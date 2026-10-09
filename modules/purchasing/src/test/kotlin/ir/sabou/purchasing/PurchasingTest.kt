@@ -44,6 +44,7 @@ import ir.sabou.treasury.TreasuryOperations
 import ir.sabou.treasury.memory.InMemoryMovementStore
 import ir.sabou.treasury.memory.InMemoryTreasuryAccountStore
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
@@ -67,10 +68,12 @@ class PurchasingTest {
     private val treasuryCap = registry.issue(ModuleId.TREASURY)
     private val treasury = TreasuryGateway(ledger, treasuryCap, tAccounts, movements)
     private val treasuryOps = TreasuryOperations(bus, treasury, treasuryCap, tAccounts)
-    private val ops = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventory, treasury, suppliers, purchases)
+    private val attachments = ir.sabou.platform.memory.InMemoryAttachmentStore()
+    private val ops = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventory, treasury, suppliers, purchases, attachments)
+    private val orders = OrderOperations(bus, inventory, suppliers, purchases)
     private val day = BusinessDate(20_000)
 
-    init { uow.register(journals, items, locations, stock, recipes, tAccounts, movements, suppliers, purchases) }
+    init { uow.register(journals, items, locations, stock, recipes, tAccounts, movements, suppliers, purchases, attachments) }
 
     private fun code(block: () -> Unit) = assertFailsWith<DomainException> { block() }.error.code
     private fun rial(v: Long) = Money.of(v)
@@ -209,5 +212,158 @@ class PurchasingTest {
         session.actor = Actor(GlobalId.new(), "manager-A", Role.MANAGER, setOf(branchA.branchId))
         assertTrue(code { ops.payInvoice(PaySupplierInvoice(GlobalId.new(), branchB, invB, cashA, rial(1), day)) }.startsWith("SCOPE_DENIED"))
         assertTrue(code { ops.payInvoice(PaySupplierInvoice(GlobalId.new(), branchA, invB, cashA, rial(1), day)) }.startsWith("INVALID_INPUT:scope"))
+    }
+
+    // ------------------------------------------------------------ Stage B: richer invoices
+
+
+    @Test fun accountLinesBookExpensesAndOtherBranchShares() {
+        val inv = ops.postInvoice(PostPurchaseInvoice(GlobalId.new(), branchA, supplier, "M-1", storeA, day, day.plusDays(10),
+            listOf(InvoiceLine(cheese, kg(2), rial(400_000))),
+            accountLines = listOf(AccountLine(StandardAccounts.RENT, rial(300_000), null, "اجاره انبار"),
+                AccountLine(StandardAccounts.UTILITIES, rial(100_000), branchB, "قبض گاز شعبه B")))).resultId
+        assertEquals(800_000, ops.outstanding(inv).rial)
+        assertEquals(-800_000, ledger.balance(StandardAccounts.PAYABLE, branchA).rial)
+        assertEquals(300_000, ledger.balance(StandardAccounts.RENT, branchA).rial)
+        assertEquals(100_000, ledger.balance(StandardAccounts.UTILITIES, branchB).rial)
+        assertEquals(0, ledger.balance(StandardAccounts.UTILITIES, branchA).rial)
+        assertEquals(0, ledger.balance(StandardAccounts.INTER_BRANCH).rial)     // nets out across branches
+        apMatchesSubLedger()
+        ops.reverseInvoice(ReversePurchaseInvoice(GlobalId.new(), branchA, inv, day, "ورود اشتباه"))
+        assertEquals(0, ledger.balance(StandardAccounts.UTILITIES, branchB).rial)
+        assertEquals(0, ledger.balance(StandardAccounts.PAYABLE).rial)
+        assertEquals(0, ledger.balance(StandardAccounts.INVENTORY).rial)
+    }
+
+    @Test fun accountLinesMayOnlyUseOpenExpenseAccounts() {
+        for (code in listOf(StandardAccounts.SALARIES, StandardAccounts.INVENTORY, StandardAccounts.CASH)) {
+            assertEquals("INVALID_INPUT:account", code {
+                ops.postInvoice(PostPurchaseInvoice(GlobalId.new(), branchA, supplier, "X-$code", null, day, day, emptyList(),
+                    accountLines = listOf(AccountLine(code, rial(1_000)))))
+            })
+        }
+    }
+
+    @Test fun anInvoiceWithoutGoodsNeedsNoLocation() {
+        val inv = ops.postInvoice(PostPurchaseInvoice(GlobalId.new(), branchA, supplier, "S-1", null, day, day,
+            emptyList(), accountLines = listOf(AccountLine(StandardAccounts.OTHER_EXPENSE, rial(250_000), memo = "تعمیر یخچال")))).resultId
+        assertEquals(250_000, ops.outstanding(inv).rial)
+        assertEquals("INVALID_INPUT:location", code {
+            ops.postInvoice(PostPurchaseInvoice(GlobalId.new(), branchA, supplier, "S-2", null, day, day, listOf(InvoiceLine(cheese, kg(1), rial(1)))))
+        })
+        apMatchesSubLedger()
+    }
+
+    @Test fun unknownLinesAreHeldUntilAssignedToAnItemOrAnAccount() {
+        val inv = ops.postInvoice(PostPurchaseInvoice(GlobalId.new(), branchA, supplier, "R-1", null, day, day, emptyList(),
+            reviewLines = listOf(ReviewLine("پنیر پیتزا رنده ۲ کیلویی", "۲ بسته", rial(600_000)), ReviewLine("دستکش", "", rial(50_000))))).resultId
+        assertEquals(650_000, ledger.balance(StandardAccounts.PURCHASES_PENDING_REVIEW, branchA).rial)
+        assertEquals(650_000, ops.outstanding(inv).rial)
+        assertEquals("INVALID_INPUT:target", code {
+            ops.resolveReviewLine(ResolveReviewLine(GlobalId.new(), branchA, inv, 0, cheese, kg(1), storeA, StandardAccounts.RENT, day))
+        })
+        ops.resolveReviewLine(ResolveReviewLine(GlobalId.new(), branchA, inv, 0, cheese, kg(4), storeA, null, day))
+        assertEquals(4, inventory.balance(cheese, storeA).quantity.micros / Quantity.SCALE)
+        assertEquals(600_000, inventory.balance(cheese, storeA).value.rial)
+        assertEquals(cheese, suppliers.aliases(supplier)[SupplierNames.normalize("پنير  پیتزا رنده ۲ كیلویی")])  // Arabic letters, extra space
+        ops.resolveReviewLine(ResolveReviewLine(GlobalId.new(), branchA, inv, 1, null, null, null, StandardAccounts.OTHER_EXPENSE, day))
+        assertEquals(0, ledger.balance(StandardAccounts.PURCHASES_PENDING_REVIEW, branchA).rial)
+        assertEquals(50_000, ledger.balance(StandardAccounts.OTHER_EXPENSE, branchA).rial)
+        assertEquals("INVALID_STATE:REVIEW_LINE:ALREADY_RESOLVED", code {
+            ops.resolveReviewLine(ResolveReviewLine(GlobalId.new(), branchA, inv, 1, null, null, null, StandardAccounts.RENT, day))
+        })
+        assertEquals("INVALID_STATE:PURCHASE_INVOICE:HAS_RESOLVED_LINES", code {
+            ops.reverseInvoice(ReversePurchaseInvoice(GlobalId.new(), branchA, inv, day, "اشتباه"))
+        })
+        apMatchesSubLedger()
+    }
+
+    @Test fun supplierItemNamesOnGoodsLinesAreRemembered() {
+        ops.postInvoice(PostPurchaseInvoice(GlobalId.new(), branchA, supplier, "N-1", storeA, day, day,
+            listOf(InvoiceLine(cheese, kg(1), rial(100_000), supplierItemName = "Mozzarella 1kg"))))
+        assertEquals(cheese, suppliers.aliases(supplier)["mozzarella 1kg"])
+    }
+
+    @Test fun returnCreditSettlesOtherInvoicesThenStaysAsSupplierCredit() {
+        fund(cashA, branchA, 10_000_000)
+        val paid = invoice(no = "P-1", qty = 10, value = 2_000_000, payNow = ImmediatePayment(cashA, rial(2_000_000)))
+        val open = invoice(no = "P-2", qty = 1, value = 500_000)
+        ops.returnGoods(ReturnToSupplier(GlobalId.new(), branchA, paid, listOf(IssueLine(cheese, kg(10))), day, "کیفیت نامناسب"))
+        assertEquals(0, ops.outstanding(paid).rial)
+        assertEquals(0, ops.outstanding(open).rial)                      // credit settled the other open invoice
+        assertEquals(1_500_000, ops.unappliedCredit(supplier, branchA).rial)
+        assertEquals(-1_500_000, ops.supplierBalance(supplier, branchA).rial)
+        apMatchesSubLedger()
+        val later = invoice(no = "P-3", qty = 1, value = 1_000_000)
+        assertEquals("INVALID_STATE:SUPPLIER_CREDIT:EXCEEDS_AVAILABLE", code {
+            ops.applyCredit(ApplySupplierCredit(GlobalId.new(), branchA, later, rial(1_500_001), day))
+        })
+        val applied = ops.applyCredit(ApplySupplierCredit(GlobalId.new(), branchA, later, rial(1_000_000), day)).resultId
+        assertEquals(0, ops.outstanding(later).rial)
+        assertEquals(500_000, ops.unappliedCredit(supplier, branchA).rial)
+        apMatchesSubLedger()
+        assertEquals("INVALID_STATE:PURCHASE_INVOICE:HAS_CREDITS", code {
+            ops.reverseInvoice(ReversePurchaseInvoice(GlobalId.new(), branchA, later, day, "اشتباه"))
+        })
+        ops.releaseAllocation(ReleaseCreditAllocation(GlobalId.new(), branchA, applied, "اصلاح فاکتور"))
+        ops.reverseInvoice(ReversePurchaseInvoice(GlobalId.new(), branchA, later, day, "اشتباه"))
+        assertEquals(1_500_000, ops.unappliedCredit(supplier, branchA).rial)
+        apMatchesSubLedger()
+    }
+
+    @Test fun ordersCheckApprovedSuppliersAndCloseWhenTheInvoiceArrives() {
+        val other = ops.registerSupplier(RegisterSupplier(GlobalId.new(), "کاله", "")).resultId
+        inventoryOps.updateItem(ir.sabou.inventory.UpdateItem(GlobalId.new(), cheese, "پنیر", kg(1), kg(5), "", "", supplier, setOf(supplier), true))
+        assertEquals("INVALID_STATE:ITEM:SUPPLIER_NOT_APPROVED", code {
+            orders.create(CreatePurchaseOrder(GlobalId.new(), branchA, other, storeA, day, day.plusDays(1), listOf(OrderLine(cheese, kg(3), rial(200_000)))))
+        }.substringBeforeLast(':'))
+        val order = orders.create(CreatePurchaseOrder(GlobalId.new(), branchA, supplier, storeA, day, day.plusDays(1), listOf(OrderLine(cheese, kg(3), rial(200_000))))).resultId
+        assertEquals(600_000, purchases.order(order)!!.total.rial)
+        assertEquals(1, purchases.order(order)!!.number)
+        val inv = ops.postInvoice(PostPurchaseInvoice(GlobalId.new(), branchA, supplier, "O-1", storeA, day, day,
+            listOf(InvoiceLine(cheese, kg(3), rial(630_000))), orderId = order)).resultId
+        assertEquals(OrderStatus.RECEIVED, purchases.order(order)!!.status)
+        assertEquals(inv, purchases.order(order)!!.invoiceId)
+        assertEquals("INVALID_STATE:PURCHASE_ORDER:RECEIVED", code {
+            ops.postInvoice(PostPurchaseInvoice(GlobalId.new(), branchA, supplier, "O-2", storeA, day, day, listOf(InvoiceLine(cheese, kg(1), rial(1))), orderId = order))
+        })
+        ops.reverseInvoice(ReversePurchaseInvoice(GlobalId.new(), branchA, inv, day, "مبلغ اشتباه"))
+        assertEquals(OrderStatus.OPEN, purchases.order(order)!!.status)       // open again for the corrected invoice
+        orders.cancel(CancelPurchaseOrder(GlobalId.new(), branchA, order, "تأمین‌کننده نیاورد"))
+        assertEquals(OrderStatus.CANCELLED, purchases.order(order)!!.status)
+        assertEquals("INVALID_STATE:PURCHASE_ORDER:CANCELLED", code { orders.cancel(CancelPurchaseOrder(GlobalId.new(), branchA, order, "دوباره")) })
+    }
+
+    @Test fun storekeeperMayOrderButNotForAnotherBranch() {
+        session.actor = Actor(GlobalId.new(), "store", Role.STOREKEEPER, setOf(branchA.branchId))
+        orders.create(CreatePurchaseOrder(GlobalId.new(), branchA, supplier, storeA, day, day, listOf(OrderLine(cheese, kg(1), rial(1)))))
+        assertTrue(code { orders.create(CreatePurchaseOrder(GlobalId.new(), branchB, supplier, storeB, day, day, listOf(OrderLine(cheese, kg(1), rial(1))))) }.startsWith("SCOPE_DENIED"))
+        session.actor = Actor(GlobalId.new(), "cashier", Role.CASHIER, setOf(branchA.branchId))
+        assertEquals("PERMISSION_DENIED:PURCHASE_ORDER", code { orders.create(CreatePurchaseOrder(GlobalId.new(), branchA, supplier, storeA, day, day, listOf(OrderLine(cheese, kg(1), rial(1))))) })
+    }
+
+    @Test fun nextDeliveryRespectsLeadTimeAndCutoff() {
+        val saturday = generateSequence(day) { it.plusDays(1) }.first { Weekdays.index(it) == 0 }
+        val s = Supplier(GlobalId.new(), "x", "", deliveryDays = setOf(1, 4), cutoffMinutes = 14 * 60, leadDays = 1)   // Sunday, Wednesday
+        assertEquals(saturday.plusDays(1), s.nextDelivery(saturday, 13 * 60)!!.date)      // order Saturday before 14:00 for Sunday
+        assertEquals(saturday.plusDays(4), s.nextDelivery(saturday, 15 * 60)!!.date)      // too late: next is Wednesday
+        assertEquals(saturday.plusDays(3), s.nextDelivery(saturday, 15 * 60)!!.orderBy)
+        assertEquals(null, s.copy(deliveryDays = emptySet()).nextDelivery(saturday, 0))
+    }
+
+    @Test fun attachmentsAreStoredOnceAndChecked() {
+        val photo = ir.sabou.platform.AttachmentInput("invoice.jpg", "image/jpeg", ByteArray(2_000) { it.toByte() })
+        val inv = ops.postInvoice(PostPurchaseInvoice(GlobalId.new(), branchA, supplier, "A-1", storeA, day, day,
+            listOf(InvoiceLine(cheese, kg(1), rial(1_000))), attachments = listOf(photo, photo))).resultId
+        assertEquals(1, attachments.of(PurchasingOperations.INVOICE, inv).size)
+        ops.attach(AttachToInvoice(GlobalId.new(), branchA, inv, listOf(photo)))                // same file again: nothing new
+        assertEquals(1, attachments.of(PurchasingOperations.INVOICE, inv).size)
+        assertEquals("INVALID_INPUT:attachment", code {
+            ops.attach(AttachToInvoice(GlobalId.new(), branchA, inv, listOf(ir.sabou.platform.AttachmentInput("x.exe", "application/octet-stream", ByteArray(10)))))
+        })
+        assertEquals("INVALID_INPUT:attachment", code {
+            ops.attach(AttachToInvoice(GlobalId.new(), branchA, inv, listOf(ir.sabou.platform.AttachmentInput("big.pdf", "application/pdf", ByteArray(ir.sabou.platform.Attachments.MAX_BYTES + 1)))))
+        })
+        assertContentEquals(photo.bytes, attachments.content(attachments.of(PurchasingOperations.INVOICE, inv).single().id))
     }
 }

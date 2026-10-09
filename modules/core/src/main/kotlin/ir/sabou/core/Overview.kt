@@ -43,8 +43,21 @@ data class SalesDayView(val sale: DailySale?, val day: SalesDay?, val customers:
 data class CustomerBalance(val customer: Customer, val owed: Money)
 data class OpenReceivable(val receivable: Receivable, val customer: String, val outstanding: Money)
 data class InvoiceRow(val invoice: PurchaseInvoice, val supplier: String, val outstanding: Money)
-data class InvoiceView(val invoice: PurchaseInvoice, val supplier: String, val outstanding: Money, val payments: List<SupplierPayment>, val returns: List<PurchaseReturn>)
-data class SupplierBalance(val supplier: Supplier, val owed: Money)
+data class InvoiceView(
+    val invoice: PurchaseInvoice,
+    val supplier: String,
+    val outstanding: Money,
+    val payments: List<SupplierPayment>,
+    val returns: List<PurchaseReturn>,
+    /** Return credit set against this invoice (from its own or another invoice's returns, or applied later). */
+    val credits: List<ir.sabou.purchasing.CreditAllocation> = emptyList(),
+    val attachments: List<ir.sabou.platform.Attachment> = emptyList(),
+    /** The supplier's unapplied return credit in this branch (can be applied to this invoice). */
+    val supplierCredit: Money = Money.ZERO,
+    val order: ir.sabou.purchasing.PurchaseOrder? = null,
+)
+/** [owed] = open invoices; [credit] = unapplied return credit (the supplier owes us). */
+data class SupplierBalance(val supplier: Supplier, val owed: Money, val credit: Money = Money.ZERO)
 data class PayrollView(
     val runs: List<PayrollRun>,
     val names: Map<GlobalId, String>,
@@ -248,16 +261,20 @@ class Overview internal constructor(private val core: SabouCore) {
         a.require(inv.scope)
         return InvoiceView(
             inv, core.suppliers.byId(inv.supplierId)?.name.orEmpty(), core.purchasing.outstanding(inv.id),
-            core.purchases.payments(inv.id), core.purchases.returns(inv.id),
+            core.purchases.payments(inv.id), core.purchases.returns(inv.id), core.purchases.allocationsTo(inv.id),
+            core.attachments.of(ir.sabou.purchasing.PurchasingOperations.INVOICE, inv.id),
+            core.purchasing.unappliedCredit(inv.supplierId, inv.scope), inv.orderId?.let { core.purchases.order(it) },
         )
     }
 
     /** Suppliers with what the visible branches owe them (never other branches' debts). */
     fun suppliers(): List<SupplierBalance> {
         val a = actor(Permission.PURCHASE_VIEW, Permission.SUPPLIER_MANAGE)
-        val owed = core.purchases.invoices().filter { it.status == InvoiceStatus.POSTED && a.canAccess(it.scope) }
+        val visible = core.purchases.invoices().filter { a.canAccess(it.scope) }
+        val owed = visible.filter { it.status == InvoiceStatus.POSTED }
             .groupBy { it.supplierId }.mapValues { (_, l) -> Money.sum(l.map { core.purchasing.outstanding(it.id) }) }
-        return core.suppliers.all().map { SupplierBalance(it, owed[it.id] ?: Money.ZERO) }
+        val credit = visible.groupBy { it.supplierId }.mapValues { (id, l) -> Money.sum(l.map { it.scope }.distinct().map { core.purchasing.unappliedCredit(id, it) }) }
+        return core.suppliers.all().map { SupplierBalance(it, owed[it.id] ?: Money.ZERO, credit[it.id] ?: Money.ZERO) }
     }
 
     /** What the visible branches owe suppliers (equals GL 2101 for those branches). */
