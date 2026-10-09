@@ -52,7 +52,8 @@ enum class Role(val permissions: Set<Permission>) {
         setOf(
             Permission.INVENTORY_VIEW, Permission.INVENTORY_ITEM_MANAGE, Permission.INVENTORY_TRANSFER,
             Permission.INVENTORY_WASTE, Permission.INVENTORY_COUNT,
-            Permission.PURCHASE_VIEW, Permission.PURCHASE_RECORD, Permission.SUPPLIER_MANAGE,
+            // Records invoices but does not create suppliers: creating a payee and billing it are kept apart.
+            Permission.PURCHASE_VIEW, Permission.PURCHASE_RECORD,
         ),
     ),
     RESTRICTED(emptySet());

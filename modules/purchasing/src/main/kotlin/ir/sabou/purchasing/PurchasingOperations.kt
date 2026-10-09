@@ -204,9 +204,10 @@ class PurchasingOperations(
             val returnedValue = previous[line.itemId].orEmpty().sumOf { it.value.rial }
             val remaining = qty - returnedQty
             ensure(!line.quantity.isZero && line.quantity.micros <= remaining) { DomainError.InvalidInput("quantity", "مقدار مرجوعی از مقدار خریداری‌شده بیشتر است.") }
-            // The last unit takes the remainder, so returning everything credits exactly the invoice value.
-            val credit = if (line.quantity.micros == remaining) value - returnedValue
-            else Ratio.mulDiv(value, line.quantity.micros, qty)
+            // Cumulative pricing: after this return, the total credited is value × returned/bought (rounded).
+            // Each step is never negative, never exceeds what is left, and returning everything credits
+            // exactly the invoice value — however small the price per unit.
+            val credit = maxOf(0L, Ratio.mulDiv(value, returnedQty + line.quantity.micros, qty) - returnedValue)
             InvoiceLine(line.itemId, line.quantity, Money.of(credit))
         }
         val credit = Money.sum(priced.map { it.value })
@@ -214,7 +215,7 @@ class PurchasingOperations(
         val returnId = GlobalId.new()
         inventory.issueWithCounter(
             ctx, capability, invoice.locationId, cmd.lines, cmd.date, RETURN, returnId, "مرجوعی به تأمین‌کننده: ${cmd.reason.trim()}",
-            listOf(LineDraft(StandardAccounts.PAYABLE, debit = credit, memo = "مرجوعی", by = capability)),
+            if (credit.isZero) emptyList() else listOf(LineDraft(StandardAccounts.PAYABLE, debit = credit, memo = "مرجوعی", by = capability)),
         )
         purchases.saveReturn(PurchaseReturn(returnId, invoice.id, priced, credit, cmd.date))
         ctx.audit(AuditDraft("PURCHASE_RETURN", "PURCHASE_INVOICE", invoice.id.value, "return=$returnId;credit=${credit.rial}"))

@@ -71,4 +71,12 @@ class IdentityTest {
         identity.logout()
         identity.login("ali", "333333".toCharArray())
     }
+
+    @Test fun guessingTheCurrentPinLocksTheAccount() {
+        identity.bootstrapOwner("owner", "مالک", "123456".toCharArray())
+        repeat(4) { assertEquals("INVALID_INPUT:pin", code { identity.changeOwnPin("000000".toCharArray(), "333333".toCharArray()) }) }
+        assertEquals("INVALID_STATE:USER:LOCKED", code { identity.changeOwnPin("000000".toCharArray(), "333333".toCharArray()) })
+        assertNull(session.currentActor())                                   // signed out
+        assertEquals("INVALID_STATE:USER:LOCKED", code { identity.login("owner", "123456".toCharArray()) })
+    }
 }

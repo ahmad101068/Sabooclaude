@@ -123,6 +123,14 @@ class PurchasingTest {
         apMatchesSubLedger()
     }
 
+    @Test fun tinyUnitPricesStillLetEveryUnitBeReturned() {
+        val inv = invoice(no = "T-1", qty = 8, value = 5)
+        repeat(8) { ops.returnGoods(ReturnToSupplier(GlobalId.new(), branchA, inv, listOf(IssueLine(cheese, kg(1))), day, "خراب")) }
+        assertEquals(0, ops.outstanding(inv).rial)
+        assertEquals(0, ledger.balance(StandardAccounts.INVENTORY, branchA).rial)
+        apMatchesSubLedger()
+    }
+
     @Test fun payingWhileRecordingNeedsThePaymentPermission() {
         fund(cashA, branchA, 5_000_000)
         session.actor = Actor(GlobalId.new(), "store", Role.STOREKEEPER, setOf(branchA.branchId))

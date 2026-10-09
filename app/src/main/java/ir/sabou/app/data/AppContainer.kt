@@ -121,8 +121,16 @@ class AppContainer(private val context: Context) {
                 candidateHelper.close()
             }
 
-            // 2. Copy into a new database encrypted with the device key.
-            val stagedHelper = openHelper(RESTORE_STAGED, keys.databasePassphrase())
+            // 2. Copy into a new database encrypted with the device key. When the app could not even open
+            //    (no signed-in core, e.g. the Keystore key was lost), the old key is replaced by a new one.
+            val passphrase = try {
+                keys.databasePassphrase()
+            } catch (e: DeviceKeyUnavailableException) {
+                if (current != null) throw e
+                keys.forgetDatabaseKey()
+                keys.databasePassphrase()
+            }
+            val stagedHelper = openHelper(RESTORE_STAGED, passphrase)
             try {
                 val db = stagedHelper.writableDatabase
                 db.execSQL("ATTACH DATABASE ? AS plaintext KEY ''", arrayOf<Any?>(plain.absolutePath))
@@ -168,6 +176,7 @@ class AppContainer(private val context: Context) {
         try {
             close()
             context.deleteDatabase(DB_NAME)
+            keys.forgetDatabaseKey()   // the new database gets a new key (also recovers from a lost Keystore key)
         } finally {
             open(newEpoch = epoch)
         }

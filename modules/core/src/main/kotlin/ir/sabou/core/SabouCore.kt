@@ -131,9 +131,14 @@ class SabouCore private constructor(
         if (verdict != StartupVerdict.Healthy) return verdict
         return try {
             val anchor = anchors.latest()
-            val from = anchor?.takeIf { it.kind == ir.sabou.platform.AnchorKind.CHECKPOINT && it.epoch == epoch && it.position > 0 }
+            // Incremental from the signed checkpoint, but the whole chain is re-verified at least every
+            // FULL_VERIFY_DAYS, so editing old events behind the app's back cannot stay hidden.
+            val lastFull = meta.get(LAST_FULL_VERIFY)?.toLongOrNull() ?: 0L
+            val fullDue = clock.nowEpochMillis() - lastFull >= FULL_VERIFY_DAYS * 86_400_000L
+            val from = anchor?.takeIf { !fullDue && it.kind == ir.sabou.platform.AnchorKind.CHECKPOINT && it.epoch == epoch && it.position > 0 }
                 ?.let { ir.sabou.platform.AuditCheckpoint(it.epoch, it.sequence, it.hash, it.position) }
             AuditTrail(auditStore).verify(from)
+            if (from == null) unitOfWork.transaction { meta.put(LAST_FULL_VERIFY, clock.nowEpochMillis().toString()) }
             integrity.recordCheckpoint(epoch, clock.nowEpochMillis())
             applyEventRetention()
             StartupVerdict.Healthy
@@ -227,6 +232,8 @@ class SabouCore private constructor(
         fun newEpoch(): String = java.util.UUID.randomUUID().toString()
 
         const val SYNC_ENABLED = "sync_enabled"
+        const val LAST_FULL_VERIFY = "audit_full_verified_at"
+        const val FULL_VERIFY_DAYS = 7L
         const val LOCAL_EVENT_DAYS = 90L
         const val SYNCED_EVENT_DAYS = 30L
     }

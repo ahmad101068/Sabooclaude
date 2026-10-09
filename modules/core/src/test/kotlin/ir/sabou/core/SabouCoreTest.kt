@@ -211,6 +211,10 @@ class SabouCoreTest {
         val full = core.verifyAuditFull()
         assertIs<StartupVerdict.RollbackDetected>(full)
         assertTrue(full.detail.contains("AUDIT_EVENT_TAMPERED"))
+        // The periodic full verification at startup finds it too, at the latest a week later.
+        now += SabouCore.FULL_VERIFY_DAYS * 86_400_000L
+        assertIs<StartupVerdict.RollbackDetected>(boot().verifyStartup())
+        now -= SabouCore.FULL_VERIFY_DAYS * 86_400_000L
         core.treasury.receipt(RecordReceipt(id(), w.branch, w.cash, ReceiptPurpose.OTHER_INCOME, rial(2), day, "y"))
         core.db.execute("UPDATE audit_events SET detail = 'forged' WHERE position = ?", last + 1)
         assertIs<StartupVerdict.RollbackDetected>(boot().verifyStartup())

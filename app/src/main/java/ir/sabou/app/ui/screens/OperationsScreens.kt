@@ -654,7 +654,7 @@ object OperationsScreens {
             }
             action.error?.let { Banner(it) }
             val w = minutes(worked); val o = minutes(overtime); val a = minutes(absent)
-            SecondaryButton(if (record == null) "ثبت" else "اصلاح", {
+            if (LocalSession.current.can(Permission.ATTENDANCE_RECORD)) SecondaryButton(if (record == null) "ثبت" else "اصلاح", {
                 action.run({ payroll.recordAttendance(RecordAttendance(GlobalId.new(), branch, employeeId, date, w!!, o!!, a!!)) })
             }, enabled = w != null && o != null && a != null && !action.busy)
         }

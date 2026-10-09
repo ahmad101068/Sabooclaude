@@ -172,13 +172,30 @@ class IdentityService(
     }
 
     /** Any signed-in user changes their own PIN by proving the current one. */
-    fun changeOwnPin(current: CharArray, next: CharArray) = unitOfWork.transaction {
-        val actor = session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
-        val user = users.byId(actor.userId)!!
-        ensure(PinHasher.verify(current, user.pinHash)) { DomainError.InvalidInput("pin", "رمز فعلی درست نیست.") }
-        users.save(user.copy(pinHash = hashValidPin(next)))
-        trail.append(AuditDraft("USER_PIN_CHANGE", "USER", user.id.value, user.username), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, clock.nowEpochMillis(), epochProvider())
-        user.id
+    fun changeOwnPin(current: CharArray, next: CharArray): GlobalId {
+        // Wrong guesses count like failed logins (and survive the failure), so an unlocked phone
+        // cannot be used to guess the PIN; after the limit the account locks and the session ends.
+        val (id, error) = unitOfWork.transaction {
+            val actor = session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
+            val user = users.byId(actor.userId)!!
+            val now = clock.nowEpochMillis()
+            if (now < user.lockedUntilEpochMillis) return@transaction null to DomainError.InvalidState("USER", "LOCKED")
+            if (!PinHasher.verify(current, user.pinHash)) {
+                val attempts = user.failedAttempts + 1
+                val lock = if (attempts >= 5) now + minOf(15 * 60_000L, 30_000L shl minOf(attempts - 5, 5)) else 0L
+                users.save(user.copy(failedAttempts = attempts, lockedUntilEpochMillis = lock))
+                trail.append(AuditDraft("PIN_CHANGE_FAILURE", "USER", user.id.value, "attempts=$attempts"), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
+                return@transaction null to (if (lock > 0) DomainError.InvalidState("USER", "LOCKED") else DomainError.InvalidInput("pin", "رمز فعلی درست نیست."))
+            }
+            users.save(user.copy(pinHash = hashValidPin(next), failedAttempts = 0, lockedUntilEpochMillis = 0))
+            trail.append(AuditDraft("USER_PIN_CHANGE", "USER", user.id.value, user.username), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
+            user.id to null
+        }
+        if (id == null) {
+            if (error is DomainError.InvalidState) session.end()
+            throw DomainException(error!!)
+        }
+        return id
     }
 
     private fun isLastActiveOwner(user: User) = user.isActive && users.all().count { it.role == Role.OWNER && it.isActive } == 1

@@ -37,6 +37,16 @@ class DeviceKeys(private val context: Context) {
         throw DeviceKeyUnavailableException(e)
     }
 
+    /**
+     * Forgets the wrapped database key so the next open creates a new one. Only for a database that is
+     * being erased or replaced (factory reset, restore when the old key is unusable).
+     */
+    @Synchronized
+    fun forgetDatabaseKey() {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        check(prefs.edit().remove(WRAPPED_DB_KEY).commit()) { "key_not_removed" }
+    }
+
     fun hmac(data: ByteArray): ByteArray = Mac.getInstance(HMAC).run {
         init(hmacKey())
         doFinal(data)
