@@ -30,6 +30,7 @@ import ir.sabou.treasury.TreasuryGateway
 data class RegisterSupplier(override val commandId: GlobalId, val name: String, val phone: String) : Command {
     override val requiredPermission = Permission.SUPPLIER_MANAGE
     override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
     override fun fingerprint() = "$name|$phone"
 }
 
@@ -48,6 +49,7 @@ data class PostPurchaseInvoice(
     val payNow: ImmediatePayment? = null,
 ) : Command {
     override val requiredPermission = Permission.PURCHASE_RECORD
+    override val additionalPermissions = if (payNow != null) setOf(Permission.PURCHASE_PAY) else emptySet()
     override fun fingerprint() = "$scope|$supplierId|$supplierInvoiceNo|$locationId|${date.epochDay}|${dueDate.epochDay}|" +
         lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}:${it.value.rial}" } + "|${payNow?.treasuryAccountId}:${payNow?.amount?.rial}"
 }

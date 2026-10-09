@@ -202,12 +202,18 @@ class SabouCoreTest {
         // Swapping in the old copy is detected.
         assertIs<StartupVerdict.RollbackDetected>(boot(old).verifyStartup())
 
-        // Editing an audit row behind the app's back (dropping the trigger first) is detected.
+        // Editing an audit row behind the app's back (dropping the trigger first): an edit after the last
+        // anchored checkpoint is caught at startup; an older one is caught by the full verification.
         core.db.execute("DROP TRIGGER audit_events_no_update")
+        val last = core.db.query("SELECT MAX(position) AS p FROM audit_events").single().long("p")
         core.db.execute("UPDATE audit_events SET detail = 'forged' WHERE position = 2")
-        val verdict = boot().verifyStartup()
-        assertIs<StartupVerdict.RollbackDetected>(verdict)
-        assertTrue(verdict.detail.contains("AUDIT_EVENT_TAMPERED"))
+        assertEquals(StartupVerdict.Healthy, boot().verifyStartup())
+        val full = core.verifyAuditFull()
+        assertIs<StartupVerdict.RollbackDetected>(full)
+        assertTrue(full.detail.contains("AUDIT_EVENT_TAMPERED"))
+        core.treasury.receipt(RecordReceipt(id(), w.branch, w.cash, ReceiptPurpose.OTHER_INCOME, rial(2), day, "y"))
+        core.db.execute("UPDATE audit_events SET detail = 'forged' WHERE position = ?", last + 1)
+        assertIs<StartupVerdict.RollbackDetected>(boot().verifyStartup())
     }
 
     @Test fun aFactoryResetAnnouncedBeforehandStartsCleanButASilentSwapDoesNot() {

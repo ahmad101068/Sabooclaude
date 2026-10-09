@@ -28,6 +28,7 @@ data class CreateItem(
     override val requiredPermission = Permission.INVENTORY_ITEM_MANAGE
     // The item catalogue is shared by all branches.
     override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
     override fun fingerprint() = "$name|$unit|${minimumStock.micros}"
 }
 
@@ -94,6 +95,7 @@ data class TransferStock(
 data class DefineMenuItem(override val commandId: GlobalId, val name: String) : Command {
     override val requiredPermission = Permission.RECIPE_MANAGE
     override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
     override fun fingerprint() = name
 }
 
@@ -105,6 +107,7 @@ data class PublishRecipe(
 ) : Command {
     override val requiredPermission = Permission.RECIPE_MANAGE
     override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
     override fun fingerprint() = "$menuItemId|${effectiveFrom.epochDay}|" + lines.joinToString(";") { "${it.itemId}:${it.quantityPerPortion.micros}" }
 }
 

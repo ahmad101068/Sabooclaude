@@ -34,6 +34,8 @@ enum class Role(val permissions: Set<Permission>) {
             Permission.USER_MANAGE, Permission.BACKUP_RESTORE, Permission.FACTORY_RESET,
             Permission.PERIOD_REOPEN, Permission.PAYROLL_APPROVE, Permission.ORGANIZATION_DATA,
             Permission.SALES_DAY_REOPEN, Permission.CREDIT_OVERRIDE,
+            // Organization-wide: closing the books and full-data backups stay with the owner/accountant.
+            Permission.PERIOD_CLOSE, Permission.BACKUP_CREATE,
         ),
     ),
     ACCOUNTANT(
@@ -42,7 +44,7 @@ enum class Role(val permissions: Set<Permission>) {
             Permission.TREASURY_VIEW, Permission.TREASURY_RECEIPT, Permission.TREASURY_PAYMENT, Permission.TREASURY_TRANSFER,
             Permission.TREASURY_RECONCILE, Permission.TREASURY_REVERSE, Permission.SALES_VIEW, Permission.RECEIVABLE_COLLECT,
             Permission.PURCHASE_VIEW, Permission.PURCHASE_PAY, Permission.PERSONNEL_VIEW, Permission.PAYROLL_CALCULATE,
-            Permission.PAYROLL_PAY, Permission.AUDIT_VIEW, Permission.BACKUP_CREATE, Permission.ORGANIZATION_DATA,
+            Permission.PAYROLL_PAY, Permission.AUDIT_VIEW, Permission.ORGANIZATION_DATA,
         ),
     ),
     CASHIER(setOf(Permission.SALES_VIEW, Permission.SALES_RECORD, Permission.TREASURY_VIEW)),

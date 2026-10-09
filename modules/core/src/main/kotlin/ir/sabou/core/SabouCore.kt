@@ -121,20 +121,32 @@ class SabouCore private constructor(
     val overview = Overview(this)
 
     /**
-     * Startup check: the database must continue the anchored history and the whole audit chain
-     * must verify. On success a new checkpoint anchor is written. A failure is returned, never
-     * thrown, so the app can show a recovery screen instead of crashing.
+     * Startup check: the database must continue the anchored history, and the audit chain must verify
+     * from the last anchored checkpoint onward (incremental, so startup time does not grow with history,
+     * AUD-007). On success a new checkpoint anchor is written. A failure is returned, never thrown, so
+     * the app can show a recovery screen instead of crashing. [verifyAuditFull] re-checks everything.
      */
     fun verifyStartup(): StartupVerdict {
         val verdict = integrity.verify(epoch)
         if (verdict != StartupVerdict.Healthy) return verdict
         return try {
-            AuditTrail(auditStore).verify()
+            val anchor = anchors.latest()
+            val from = anchor?.takeIf { it.kind == ir.sabou.platform.AnchorKind.CHECKPOINT && it.epoch == epoch && it.position > 0 }
+                ?.let { ir.sabou.platform.AuditCheckpoint(it.epoch, it.sequence, it.hash, it.position) }
+            AuditTrail(auditStore).verify(from)
             integrity.recordCheckpoint(epoch, clock.nowEpochMillis())
             StartupVerdict.Healthy
         } catch (e: ir.sabou.kernel.DomainException) {
             StartupVerdict.RollbackDetected(e.error.code)
         }
+    }
+
+    /** Verifies the whole audit chain from its first event (before a backup, or on demand). */
+    fun verifyAuditFull(): StartupVerdict = try {
+        AuditTrail(auditStore).verify()
+        StartupVerdict.Healthy
+    } catch (e: ir.sabou.kernel.DomainException) {
+        StartupVerdict.RollbackDetected(e.error.code)
     }
 
     /** Records the rebase anchor for a database that is about to replace this one (restore / reset). */

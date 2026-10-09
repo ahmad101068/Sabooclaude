@@ -32,7 +32,7 @@ class SqlAuditStore(private val db: SqlDatabase) : AuditStore {
     private fun read(r: SqlRow) = AuditEvent(
         r.str("epoch"), r.long("sequence"), r.str("previous_hash"), r.str("hash"), r.long("occurred_at"), r.str("actor_id"),
         r.str("actor_name"), ModuleId.valueOf(r.str("module")), r.str("action"), r.str("entity_type"), r.str("entity_id"),
-        r.str("scope"), r.str("command_id"), r.str("detail"),
+        r.str("scope"), r.str("command_id"), r.str("detail"), r.long("position"),
     )
 
     override fun head(): AuditEvent? = db.query("SELECT * FROM audit_events ORDER BY position DESC LIMIT 1").firstOrNull()?.let(::read)
@@ -46,6 +46,9 @@ class SqlAuditStore(private val db: SqlDatabase) : AuditStore {
 
     override fun page(afterPosition: Long, limit: Int): List<AuditEvent> =
         db.query("SELECT * FROM audit_events WHERE position > ? ORDER BY position LIMIT ?", afterPosition, limit).map(::read)
+
+    override fun at(position: Long): AuditEvent? =
+        db.query("SELECT * FROM audit_events WHERE position = ?", position).firstOrNull()?.let(::read)
 
     override fun contains(epoch: String, sequence: Long, hash: String): Boolean =
         db.query("SELECT 1 AS x FROM audit_events WHERE epoch = ? AND sequence = ? AND hash = ?", epoch, sequence, hash).isNotEmpty()
