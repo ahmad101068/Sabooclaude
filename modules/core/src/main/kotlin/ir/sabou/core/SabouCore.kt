@@ -59,35 +59,35 @@ import ir.sabou.treasury.TreasuryOperations
  * database with an older copy is detected at startup (ADR-0004).
  */
 class SabouCore private constructor(
-    val db: SqlDatabase,
+    internal val db: SqlDatabase,
     private val anchors: AnchorStore,
     val clock: Clock,
     policies: List<StatutoryPolicy>,
     newDatabaseEpoch: String?,
 ) {
     private val meta = DatabaseMeta(db)
-    val unitOfWork = SqlUnitOfWork(db)
+    internal val unitOfWork = SqlUnitOfWork(db)
 
     // Stores
     private val auditStore = SqlAuditStore(db)
-    val events = SqlEventLog(db)
+    internal val events = SqlEventLog(db)
     private val users = SqlUserStore(db)
-    val branches = SqlBranchStore(db)
-    val accounts = SqlAccountStore(db)
-    val journals = SqlJournalStore(db)
-    val periods = SqlPeriodStore(db)
-    val treasuryAccounts = SqlTreasuryAccountStore(db)
-    val treasuryMovements = SqlMovementStore(db)
-    val items = SqlItemStore(db)
-    val locations = SqlLocationStore(db)
-    val stock = SqlStockStore(db)
-    val recipes = SqlRecipeStore(db)
-    val suppliers = SqlSupplierStore(db)
-    val purchases = SqlPurchaseStore(db)
-    val customers = SqlCustomerStore(db)
-    val sales = SqlSalesStore(db)
-    val personnel = SqlPersonnelStore(db)
-    val payrollStore = SqlPayrollStore(db)
+    internal val branches = SqlBranchStore(db)
+    internal val accounts = SqlAccountStore(db)
+    internal val journals = SqlJournalStore(db)
+    internal val periods = SqlPeriodStore(db)
+    internal val treasuryAccounts = SqlTreasuryAccountStore(db)
+    internal val treasuryMovements = SqlMovementStore(db)
+    internal val items = SqlItemStore(db)
+    internal val locations = SqlLocationStore(db)
+    internal val stock = SqlStockStore(db)
+    internal val recipes = SqlRecipeStore(db)
+    internal val suppliers = SqlSupplierStore(db)
+    internal val purchases = SqlPurchaseStore(db)
+    internal val customers = SqlCustomerStore(db)
+    internal val sales = SqlSalesStore(db)
+    internal val personnel = SqlPersonnelStore(db)
+    internal val payrollStore = SqlPayrollStore(db)
 
     val epoch: String = unitOfWork.transaction {
         accounts.seed(StandardAccounts.chart())
@@ -102,15 +102,15 @@ class SabouCore private constructor(
 
     // Capabilities: issued here and nowhere else.
     private val registry = LedgerAccessRegistry()
-    val ledger = Ledger(registry, accounts, journals, periods)
+    internal val ledger = Ledger(registry, accounts, journals, periods)
     private val treasuryCapability = registry.issue(ModuleId.TREASURY)
 
     val accounting = ManualAccounting(bus, ledger, registry.issue(ModuleId.LEDGER_MANUAL), periods)
-    val treasuryGateway = TreasuryGateway(ledger, treasuryCapability, treasuryAccounts, treasuryMovements)
+    internal val treasuryGateway = TreasuryGateway(ledger, treasuryCapability, treasuryAccounts, treasuryMovements)
     val treasury = TreasuryOperations(bus, treasuryGateway, treasuryCapability, treasuryAccounts)
-    val inventoryGateway = InventoryGateway(ledger, registry.issue(ModuleId.INVENTORY), items, locations, stock)
+    internal val inventoryGateway = InventoryGateway(ledger, registry.issue(ModuleId.INVENTORY), items, locations, stock)
     val inventory = InventoryOperations(bus, inventoryGateway, items, locations, recipes)
-    val recipeBook = RecipeBook(recipes)
+    private val recipeBook = RecipeBook(recipes)
     val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases)
     val salesOps = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventoryGateway, recipeBook, treasuryGateway, customers, sales)
     /** Stored policies (entered by the owner) plus any supplied by the caller (tests). */
@@ -135,10 +135,21 @@ class SabouCore private constructor(
                 ?.let { ir.sabou.platform.AuditCheckpoint(it.epoch, it.sequence, it.hash, it.position) }
             AuditTrail(auditStore).verify(from)
             integrity.recordCheckpoint(epoch, clock.nowEpochMillis())
+            applyEventRetention()
             StartupVerdict.Healthy
         } catch (e: ir.sabou.kernel.DomainException) {
             StartupVerdict.RollbackDetected(e.error.code)
         }
+    }
+
+    /**
+     * Domain events are the future sync stream (ADR-0001). Until sync is switched on they are kept
+     * for [LOCAL_EVENT_DAYS] days; once it is on, only events already delivered are pruned (AUD-022).
+     */
+    private fun applyEventRetention() {
+        val day = 86_400_000L
+        val syncOn = meta.get(SYNC_ENABLED) == "true"
+        events.prune(clock.nowEpochMillis() - (if (syncOn) SYNCED_EVENT_DAYS else LOCAL_EVENT_DAYS) * day, onlySynced = syncOn)
     }
 
     /** Verifies the whole audit chain from its first event (before a backup, or on demand). */
@@ -149,8 +160,51 @@ class SabouCore private constructor(
         StartupVerdict.RollbackDetected(e.error.code)
     }
 
-    /** Records the rebase anchor for a database that is about to replace this one (restore / reset). */
-    fun acceptReplacement(newEpoch: String, reason: String) = integrity.recordRebase(newEpoch, reason, clock.nowEpochMillis())
+    /**
+     * Records the rebase anchor for a database that is about to replace this one. Only a signed-in user
+     * holding the matching permission may announce a restore or reset; the decision is audited first.
+     */
+    fun acceptReplacement(newEpoch: String, reason: String) {
+        val permission = if (reason == "FACTORY_RESET") ir.sabou.platform.Permission.FACTORY_RESET else ir.sabou.platform.Permission.BACKUP_RESTORE
+        administrative(permission, "DATABASE_REPLACE", "$reason:$newEpoch")
+        integrity.recordRebase(newEpoch, reason, clock.nowEpochMillis())
+    }
+
+    /** Checks and audits taking a full backup. Call before exporting the database. */
+    fun authorizeBackup() {
+        administrative(ir.sabou.platform.Permission.BACKUP_CREATE, "BACKUP_CREATE", "")
+        val full = verifyAuditFull()
+        if (full is StartupVerdict.RollbackDetected) throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.IntegrityViolation(full.detail))
+    }
+
+    private fun administrative(permission: ir.sabou.platform.Permission, action: String, detail: String) = unitOfWork.transaction {
+        val actor = session.currentActor() ?: throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.AuthenticationRequired)
+        if (!actor.role.allows(permission)) throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.PermissionDenied(permission.name))
+        AuditTrail(auditStore).append(
+            ir.sabou.platform.AuditDraft(action, "DATABASE", epoch, detail), actor, ModuleId.PLATFORM, "ORG",
+            ir.sabou.kernel.GlobalId.new().value, clock.nowEpochMillis(), epoch,
+        )
+    }
+
+    /**
+     * First run in one transaction: the owner, the first branch, a cash box and a kitchen. Either all
+     * of it exists afterwards or none of it (a failed attempt can simply be retried).
+     */
+    fun bootstrap(branchName: String, ownerName: String, username: String, pin: CharArray) {
+        val name = branchName.trim()
+        if (name.length !in 2..80) throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.InvalidInput("name", "نام شعبه باید ۲ تا ۸۰ حرف باشد."))
+        try {
+            unitOfWork.transaction {
+                identity.bootstrapOwner(username, ownerName, pin)
+                val branch = ir.sabou.kernel.Scope.Branch(identity.createBranch(name))
+                treasury.openAccount(ir.sabou.treasury.OpenTreasuryAccount(ir.sabou.kernel.GlobalId.new(), branch, "صندوق $name", ir.sabou.treasury.TreasuryKind.CASH))
+                inventory.createLocation(ir.sabou.inventory.CreateLocation(ir.sabou.kernel.GlobalId.new(), branch, "آشپزخانه"))
+            }
+        } catch (e: Throwable) {
+            session.end()
+            throw e
+        }
+    }
 
     companion object {
         /**
@@ -171,5 +225,9 @@ class SabouCore private constructor(
         }
 
         fun newEpoch(): String = java.util.UUID.randomUUID().toString()
+
+        const val SYNC_ENABLED = "sync_enabled"
+        const val LOCAL_EVENT_DAYS = 90L
+        const val SYNCED_EVENT_DAYS = 30L
     }
 }

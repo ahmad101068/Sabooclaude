@@ -60,6 +60,12 @@ class SqlEventLog(private val db: SqlDatabase) : EventLog {
         event.eventId, event.commandId, event.module.name, event.type, event.scope, event.occurredAtEpochMillis, Json.encode(event.payload),
     )
 
+    fun markSynced(eventIds: List<String>) = eventIds.forEach { db.execute("UPDATE domain_events SET synced = 1 WHERE event_id = ?", it) }
+
+    /** Removes events older than [beforeMillis]; with [onlySynced], undelivered events are always kept. */
+    fun prune(beforeMillis: Long, onlySynced: Boolean) =
+        db.execute("DELETE FROM domain_events WHERE occurred_at < ? AND (? = 0 OR synced = 1)", beforeMillis, if (onlySynced) 1L else 0L)
+
     /** Events not yet delivered to a server (ADR-0001). */
     fun unsynced(limit: Int): List<DomainEvent> =
         db.query("SELECT * FROM domain_events WHERE synced = 0 ORDER BY rowid LIMIT ?", limit).map {

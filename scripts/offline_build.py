@@ -54,7 +54,8 @@ def main():
         if r.returncode: sys.exit(r.returncode)
         tests = sorted(str(p) for p in (ROOT / 'modules' / m / 'src/test/kotlin').rglob('*.kt'))
         if tests:
-            r = subprocess.run(kotlinc + ['-classpath', ':'.join([str(out / f'{m}.jar')] + deps + jars), '-d', str(out / f'{m}-test.jar')] + tests,
+            # Tests see the module's `internal` declarations, as in Gradle.
+            r = subprocess.run(kotlinc + [f"-Xfriend-paths={out / f'{m}.jar'}", '-classpath', ':'.join([str(out / f'{m}.jar')] + deps + jars), '-d', str(out / f'{m}-test.jar')] + tests,
                                capture_output=True, text=True, env=env)
             print(f'[compile-test] {m}: exit={r.returncode}'); print(r.stdout + r.stderr, end='')
             if r.returncode: sys.exit(r.returncode)
