@@ -110,6 +110,20 @@ fun HomeScreen(nav: Nav) {
             }?.takeIf { it.isNotEmpty() }?.let { due ->
                 add(Todo(R.drawable.ic_calendar, "${Fa.number(due.size.toLong())} فاکتور خرید سررسید این هفته", "جمع ${Fa.toman(Money.sum(due))} تومان", Route.Purchases, false))
             }
+            safe { books.chequesDue(date, 7) }?.takeIf { it.isNotEmpty() }?.let { cheques ->
+                val overdue = cheques.count { it.cheque.dueDate < date }
+                add(Todo(R.drawable.ic_payment, "${Fa.number(cheques.size.toLong())} چک سررسید این هفته" + if (overdue > 0) " (${Fa.number(overdue.toLong())} گذشته)" else "",
+                    "جمع ${Fa.toman(cheques.sumOf { it.cheque.amount.rial })} تومان", Route.Cheques, overdue > 0))
+            }
+            if (session.actor.role.allows(Permission.PURCHASE_APPROVE)) safe { books.pendingApprovals() }?.takeIf { it.isNotEmpty() }?.let { list ->
+                add(Todo(R.drawable.ic_check, "${Fa.number(list.size.toLong())} فاکتور در انتظار تأیید شما", "پیش از پرداخت تأیید لازم است", Route.PendingApprovals, false))
+            }
+            safe { buying.reviewQueue() }?.takeIf { it.isNotEmpty() }?.let { list ->
+                add(Todo(R.drawable.ic_alert, "${Fa.number(list.size.toLong())} ردیف فاکتور در انتظار بررسی", "کالای ناشناخته را به کالا یا هزینه وصل کنید", Route.ReviewQueue, false))
+            }
+            safe { buying.priceChanges(date.plusDays(-7), date, 1_000) }?.takeIf { it.isNotEmpty() }?.let { list ->
+                add(Todo(R.drawable.ic_alert, "${Fa.number(list.size.toLong())} تغییر قیمت بیش از ۱۰٪", list.take(2).joinToString("، ") { it.item.name }, Route.PriceChanges, false))
+            }
         }
 
         val setup = overview.setupStatus()

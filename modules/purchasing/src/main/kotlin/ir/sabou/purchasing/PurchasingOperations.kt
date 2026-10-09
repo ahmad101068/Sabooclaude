@@ -31,7 +31,10 @@ import ir.sabou.platform.CommandContext
 import ir.sabou.platform.CommandOutcome
 import ir.sabou.platform.ModuleId
 import ir.sabou.platform.Permission
+import ir.sabou.treasury.ChequeDetails
+import ir.sabou.treasury.ChequeInstruction
 import ir.sabou.treasury.Direction
+import ir.sabou.treasury.paymentCheque
 import ir.sabou.treasury.TreasuryGateway
 
 data class RegisterSupplier(override val commandId: GlobalId, val name: String, val phone: String) : Command {
@@ -59,7 +62,10 @@ data class UpdateSupplier(
     override fun fingerprint() = "$supplierId|$name|$phone|$isActive|${deliveryDays.sorted()}|$cutoffMinutes|$leadDays|$note"
 }
 
-data class ImmediatePayment(val treasuryAccountId: GlobalId, val amount: Money)
+/** [cheque]: our new cheque from a cheque book; [chequeId]: a customer's cheque passed on from a cheque box. */
+data class ImmediatePayment(val treasuryAccountId: GlobalId, val amount: Money, val cheque: ChequeDetails? = null, val chequeId: GlobalId? = null) {
+    fun fingerprint() = "$treasuryAccountId:${amount.rial}:${cheque?.fingerprint()}:$chequeId"
+}
 
 /**
  * A supplier invoice: goods into a location, lines booked to expense accounts (any granted branch),
@@ -85,7 +91,7 @@ data class PostPurchaseInvoice(
     override val requiredPermission = Permission.PURCHASE_RECORD
     override val additionalPermissions = if (payNow != null) setOf(Permission.PURCHASE_PAY) else emptySet()
     override fun fingerprint() = "$scope|$supplierId|$supplierInvoiceNo|$locationId|${date.epochDay}|${dueDate.epochDay}|" +
-        lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}:${it.value.rial}:${it.supplierItemName}" } + "|${payNow?.treasuryAccountId}:${payNow?.amount?.rial}|" +
+        lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}:${it.value.rial}:${it.supplierItemName}" } + "|${payNow?.fingerprint()}|" +
         accountLines.joinToString(";") { "${it.account}:${it.amount.rial}:${it.branch}:${it.memo}" } + "|" +
         reviewLines.joinToString(";") { "${it.supplierItemName}:${it.quantityNote}:${it.amount.rial}" } + "|$note|$orderId|" +
         attachments.joinToString(";") { it.fingerprint() }
@@ -128,9 +134,11 @@ data class PaySupplierInvoice(
     val treasuryAccountId: GlobalId,
     val amount: Money,
     val date: BusinessDate,
+    val cheque: ChequeDetails? = null,
+    val chequeId: GlobalId? = null,
 ) : Command {
     override val requiredPermission = Permission.PURCHASE_PAY
-    override fun fingerprint() = "$scope|$invoiceId|$treasuryAccountId|${amount.rial}|${date.epochDay}"
+    override fun fingerprint() = "$scope|$invoiceId|$treasuryAccountId|${amount.rial}|${date.epochDay}|${cheque?.fingerprint()}|$chequeId"
 }
 
 data class ReverseSupplierPayment(
@@ -205,6 +213,7 @@ class PurchasingOperations(
     private val suppliers: SupplierStore,
     private val purchases: PurchaseStore,
     private val attachments: AttachmentStore,
+    private val approvalRules: ApprovalRuleStore = ir.sabou.purchasing.memory.InMemoryApprovalRuleStore(),
 ) {
     init {
         require(capability.module == ModuleId.PURCHASING)
@@ -309,8 +318,8 @@ class PurchasingOperations(
             invoiceId, supplier.id, number, cmd.scope, cmd.locationId, cmd.date, cmd.dueDate, cmd.lines.map { it.copy(supplierItemName = it.supplierItemName.trim()) },
             total, InvoiceStatus.POSTED, cmd.accountLines.map { it.copy(memo = it.memo.trim()) },
             cmd.reviewLines.map { it.copy(supplierItemName = it.supplierItemName.trim(), quantityNote = it.quantityNote.trim()) },
-            cmd.note.trim(), order?.id, journals,
-        )
+            cmd.note.trim(), order?.id, journals, recordedBy = ctx.actor.userId,
+        ).let { inv -> inv.copy(requiredApprovals = approvalRules.all().filter { it.matches(inv.scope, inv.supplierId, inv.category, inv.total) }.maxOfOrNull { it.steps } ?: 0) }
         purchases.saveInvoice(invoice)
         cmd.lines.filter { it.supplierItemName.isNotBlank() }.forEach { suppliers.saveAlias(supplier.id, SupplierNames.normalize(it.supplierItemName), it.itemId) }
         order?.let {
@@ -320,7 +329,7 @@ class PurchasingOperations(
         Attachments.attach(ctx, attachments, INVOICE, invoice.id, cmd.attachments)
         ctx.audit(AuditDraft("PURCHASE_INVOICE_POST", "PURCHASE_INVOICE", invoice.id.value, "supplier=${supplier.id};no=$number;total=${total.rial};review=${reviewTotal.rial}"))
         ctx.emit("PurchaseInvoicePosted", mapOf("invoiceId" to invoice.id.value, "total" to total.rial.toString()))
-        cmd.payNow?.let { pay(ctx, invoice, it.treasuryAccountId, it.amount, cmd.date) }
+        cmd.payNow?.let { pay(ctx, invoice, it.treasuryAccountId, it.amount, cmd.date, paymentCheque(it.cheque, it.chequeId)) }
         invoice.id
     }
 
@@ -366,7 +375,7 @@ class PurchasingOperations(
 
     fun payInvoice(c: PaySupplierInvoice): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
         val invoice = requireInvoice(cmd.invoiceId, cmd.scope)
-        pay(ctx, invoice, cmd.treasuryAccountId, cmd.amount, cmd.date).id
+        pay(ctx, invoice, cmd.treasuryAccountId, cmd.amount, cmd.date, paymentCheque(cmd.cheque, cmd.chequeId)).id
     }
 
     fun reversePayment(c: ReverseSupplierPayment): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
@@ -464,7 +473,8 @@ class PurchasingOperations(
         allocation.id
     }
 
-    private fun pay(ctx: CommandContext, invoice: PurchaseInvoice, accountId: GlobalId, amount: Money, date: BusinessDate): SupplierPayment {
+    private fun pay(ctx: CommandContext, invoice: PurchaseInvoice, accountId: GlobalId, amount: Money, date: BusinessDate, cheque: ChequeInstruction?): SupplierPayment {
+        ensure(invoice.approved) { DomainError.InvalidState("PURCHASE_INVOICE", "NOT_APPROVED:${invoice.approvals.size}/${invoice.requiredApprovals}") }
         ensure(!amount.isZero) { DomainError.InvalidInput("amount", "مبلغ پرداخت باید بیشتر از صفر باشد.") }
         ensure(amount <= outstanding(invoice.id)) { DomainError.InvalidState("PURCHASE_INVOICE", "PAYMENT_EXCEEDS_OUTSTANDING") }
         ensure(date >= invoice.date) { DomainError.InvalidInput("date", "تاریخ پرداخت قبل از تاریخ فاکتور است.") }
@@ -474,12 +484,12 @@ class PurchasingOperations(
         var bridge: GlobalId? = null
         if (account.scope == invoice.scope) {
             treasury.settle(ctx, capability, account.id, Direction.PAYMENT, amount, date, PAYMENT, paymentId, "پرداخت به ${supplier.name}",
-                listOf(LineDraft(StandardAccounts.PAYABLE, debit = amount, memo = supplier.name, by = capability)))
+                listOf(LineDraft(StandardAccounts.PAYABLE, debit = amount, memo = supplier.name, by = capability)), cheque)
         } else {
             // Paying a branch's invoice from another scope's account (e.g. the organization bank):
             // each scope stays balanced through the inter-branch account.
             treasury.settle(ctx, capability, account.id, Direction.PAYMENT, amount, date, PAYMENT, paymentId, "پرداخت به ${supplier.name}",
-                listOf(LineDraft(StandardAccounts.INTER_BRANCH, debit = amount, memo = "بدهی شعبه", by = capability)))
+                listOf(LineDraft(StandardAccounts.INTER_BRANCH, debit = amount, memo = "بدهی شعبه", by = capability)), cheque)
             bridge = ledger.post(ctx, capability, JournalDraft(date, invoice.scope, PAYMENT, paymentId, "تسویه بدهی ${supplier.name} از حساب مرکزی", listOf(
                 LineDraft(StandardAccounts.PAYABLE, debit = amount, memo = supplier.name, by = capability),
                 LineDraft(StandardAccounts.INTER_BRANCH, credit = amount, memo = account.name, by = capability),

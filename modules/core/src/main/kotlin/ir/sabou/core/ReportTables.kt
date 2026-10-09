@@ -244,4 +244,49 @@ object ReportTables {
             "مقادیر به واحد هر کالا؛ ارزش‌ها به تومان.",
         ),
     )
+
+    fun chequeStatusName(s: ir.sabou.treasury.ChequeStatus) = when (s) {
+        ir.sabou.treasury.ChequeStatus.IN_HAND -> "در صندوق"
+        ir.sabou.treasury.ChequeStatus.DEPOSITED -> "واگذارشده به بانک"
+        ir.sabou.treasury.ChequeStatus.COLLECTED -> "وصول‌شده"
+        ir.sabou.treasury.ChequeStatus.ENDORSED -> "خرج‌شده"
+        ir.sabou.treasury.ChequeStatus.BOUNCED -> "برگشتی"
+        ir.sabou.treasury.ChequeStatus.SETTLED -> "برگشتی تسویه‌شده"
+        ir.sabou.treasury.ChequeStatus.ISSUED -> "صادرشده"
+        ir.sabou.treasury.ChequeStatus.CLEARED -> "پاس‌شده"
+        ir.sabou.treasury.ChequeStatus.VOID -> "باطل"
+    }
+
+    fun cheques(rows: List<ChequeRow>, title: String) = ReportTable(
+        title, "", listOf("سررسید", "نوع", "شماره", "بانک", "صیادی", "طرف حساب", "مبلغ", "وضعیت", "شعبه"),
+        rows.map {
+            val c = it.cheque
+            listOf(Cell.of(Fa.date(c.dueDate)), Cell.of(if (c.direction == ir.sabou.treasury.ChequeDirection.RECEIVED) "دریافتی" else "پرداختی"),
+                Cell.of(c.details.number), Cell.of(c.details.bank), Cell.of(c.details.sayadId), Cell.of(c.details.counterparty), Cell.Amount(c.amount.rial),
+                Cell.of(chequeStatusName(c.status)), Cell.of(it.branch))
+        },
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOf { it.cheque.amount.rial }), Cell.EMPTY, Cell.EMPTY),
+        notes = listOf(TOMAN),
+    )
+
+    fun budget(r: BudgetReport) = ReportTable(
+        "بودجه در برابر عملکرد", "${r.place} · ${period(r.from, r.to)}", listOf("کد", "حساب", "بودجه", "عملکرد", "اختلاف", "درصد مصرف"),
+        r.lines.map { listOf(Cell.of(it.account.code.value), Cell.of(it.account.name), Cell.Amount(it.budget), Cell.Amount(it.actual), Cell.Amount(it.variance), pct(it.usedBp)) },
+        notes = listOf(TOMAN, "بودجه‌ی دوره‌ای که بخشی از آن در این بازه است به نسبت روزها حساب شده است. اختلاف مثبت در هزینه یعنی بیش از بودجه."),
+    )
+
+    fun assets(rows: List<AssetRow>, asOf: BusinessDate) = ReportTable(
+        "دفتر دارایی‌های ثابت", Fa.date(asOf), listOf("دارایی", "گروه", "شعبه", "تاریخ خرید", "روش", "بها", "استهلاک انباشته", "ارزش دفتری", "وضعیت"),
+        rows.map {
+            val a = it.asset
+            listOf(Cell.of(a.name), Cell.of(a.category), Cell.of(it.branch), Cell.of(Fa.date(a.acquiredOn)),
+                Cell.of(if (a.method == ir.sabou.assets.DepreciationMethod.STRAIGHT_LINE) "خط مستقیم ${Fa.number(a.usefulLifeMonths?.toLong() ?: 0)} ماه" else "نزولی ${Fa.percent(a.rateBp ?: 0)}"),
+                Cell.Amount(a.cost.rial), Cell.Amount(a.accumulated.rial), Cell.Amount(a.bookValue.rial),
+                Cell.of(if (a.status == ir.sabou.assets.AssetStatus.ACTIVE) "فعال" else "واگذارشده"))
+        },
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.filter { it.asset.status == ir.sabou.assets.AssetStatus.ACTIVE }.sumOf { it.asset.cost.rial }),
+            Cell.Amount(rows.filter { it.asset.status == ir.sabou.assets.AssetStatus.ACTIVE }.sumOf { it.asset.accumulated.rial }),
+            Cell.Amount(rows.filter { it.asset.status == ir.sabou.assets.AssetStatus.ACTIVE }.sumOf { it.asset.bookValue.rial }), Cell.EMPTY),
+        notes = listOf(TOMAN, "روش و نرخ استهلاک هر گروه باید با جدول استهلاکات مالیاتی و مشاور مالیاتی تطبیق داده شود."),
+    )
 }

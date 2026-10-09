@@ -57,6 +57,17 @@ sealed interface Route : java.io.Serializable {
     data object ReviewQueue : Route
     data object PriceChanges : Route
     data object Suggestions : Route
+    data object PendingApprovals : Route
+    data object ApprovalRules : Route
+
+    // Cheques, budgets, fixed assets
+    data object Cheques : Route
+    data class ChequeDetail(val chequeId: GlobalId) : Route
+    data object Budget : Route
+    data object BudgetReport : Route
+    data object Assets : Route
+    data object NewAsset : Route
+    data class AssetDetail(val assetId: GlobalId) : Route
     data object Personnel : Route
     data object Attendance : Route
     data object Payroll : Route

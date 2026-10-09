@@ -76,6 +76,19 @@ class DeviceTest {
         assertTrue(photo.bytes.contentEquals(bytes))
     }
 
+    @Test fun ourChequePrintsOnALeafSizedPdf() {
+        val (_, core) = fresh()
+        val branch = ir.sabou.kernel.Scope.Branch(core.overview.branches().first().id)
+        val bank = core.treasury.openAccount(ir.sabou.treasury.OpenTreasuryAccount(GlobalId.new(), branch, "بانک", ir.sabou.treasury.TreasuryKind.BANK)).resultId
+        val book = core.treasury.openAccount(ir.sabou.treasury.OpenTreasuryAccount(GlobalId.new(), branch, "دسته‌چک", ir.sabou.treasury.TreasuryKind.ISSUED_CHEQUES)).resultId
+        core.treasury.payment(ir.sabou.treasury.RecordPayment(GlobalId.new(), branch, book, ir.sabou.treasury.PaymentPurpose.RENT, Money.of(125_000_000), BusinessDate(20_000), "اجاره",
+            cheque = ir.sabou.treasury.ChequeDetails("900001", "ملت", "", BusinessDate(20_030), "آقای موجر", bankAccountId = bank)))
+        val cheque = core.books.cheques().single().cheque
+        val pdf = java.io.ByteArrayOutputStream().also { ir.sabou.app.export.ChequePrint.write(context, cheque, it) }.toByteArray()
+        assertEquals("%PDF", String(pdf, 0, 4, Charsets.US_ASCII))
+        assertTrue(pdf.size > 1_000)
+    }
+
     @Test fun encryptedDatabaseAndKeystoreKeySurviveAReopen() {
         val (container, _) = fresh()
         container.open()                                   // close + open: the wrapped key is unwrapped again

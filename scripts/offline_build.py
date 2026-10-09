@@ -20,8 +20,9 @@ MODULES = {  # module -> direct dependencies (must mirror build.gradle.kts)
     'purchasing': ['inventory', 'treasury'],
     'sales': ['inventory', 'treasury'],
     'payroll': ['treasury'],
+    'assets': ['treasury'],
     'backup': ['kernel'],
-    'persistence': ['sales', 'purchasing', 'payroll'],
+    'persistence': ['sales', 'purchasing', 'payroll', 'assets'],
     'core': ['persistence'],
 }
 TEST_ONLY = ('sqlite-jdbc',)  # testImplementation jars: never visible to main code

@@ -117,3 +117,16 @@ class SqlPeriodStore(private val db: SqlDatabase) : PeriodStore {
         lock.id.value, lock.from.epochDay, lock.to.epochDay, if (lock.closed) 1L else 0L,
     )
 }
+
+class SqlBudgetStore(db: SqlDatabase) : SqlTable(db), ir.sabou.ledger.BudgetStore {
+    override fun entries() = docs("SELECT doc FROM budgets ORDER BY period_from, rowid").map { d ->
+        ir.sabou.ledger.BudgetEntry(Codec.id(d.str("id")), Codec.scopeOf(d.str("scope")), AccountCode.of(d.str("account")),
+            Codec.date(d.long("from")), Codec.date(d.long("to")), Codec.money(d.long("amount")))
+    }
+    override fun save(entry: ir.sabou.ledger.BudgetEntry) = upsert(
+        "budgets", "id",
+        mapOf("id" to entry.id.value, "scope" to Codec.scope(entry.scope), "account" to entry.account.value, "period_from" to entry.from.epochDay,
+            "doc" to Json.encode(mapOf("id" to entry.id.value, "scope" to Codec.scope(entry.scope), "account" to entry.account.value,
+                "from" to entry.from.epochDay, "to" to entry.to.epochDay, "amount" to entry.amount.rial))),
+    )
+}

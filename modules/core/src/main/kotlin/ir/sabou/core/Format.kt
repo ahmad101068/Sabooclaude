@@ -215,4 +215,38 @@ object Fa {
             return g2d(r.gy, 3, r.march) + (jm - 1) * 31 - jm / 7 * (jm - 7) + jd - 1
         }
     }
+
+    private val ones = listOf("", "یک", "دو", "سه", "چهار", "پنج", "شش", "هفت", "هشت", "نه", "ده", "یازده", "دوازده", "سیزده", "چهارده",
+        "پانزده", "شانزده", "هفده", "هجده", "نوزده")
+    private val tens = listOf("", "", "بیست", "سی", "چهل", "پنجاه", "شصت", "هفتاد", "هشتاد", "نود")
+    private val hundreds = listOf("", "صد", "دویست", "سیصد", "چهارصد", "پانصد", "ششصد", "هفتصد", "هشتصد", "نهصد")
+    private val scales = listOf("", "هزار", "میلیون", "میلیارد", "هزار میلیارد", "میلیون میلیارد")
+
+    private fun belowThousand(n: Int): String = listOfNotNull(
+        hundreds[n / 100].ifEmpty { null },
+        (n % 100).let { r -> if (r == 0) null else if (r < 20) ones[r] else listOfNotNull(tens[r / 10], ones[r % 10].ifEmpty { null }).joinToString(" و ") },
+    ).joinToString(" و ")
+
+    /** «یک میلیون و دویست هزار» — for cheques and printed amounts. */
+    fun inWords(value: Long): String {
+        if (value == 0L) return "صفر"
+        if (value < 0) return "منفی " + inWords(-value)
+        val groups = ArrayList<Int>()
+        var v = value
+        while (v > 0) { groups += (v % 1000).toInt(); v /= 1000 }
+        return groups.indices.reversed().filter { groups[it] != 0 }
+            .joinToString(" و ") { i -> listOf(belowThousand(groups[i]), scales[i]).filter { it.isNotEmpty() }.joinToString(" ") }
+    }
+
+    /** «پانزدهم مهر یک هزار و چهارصد و پنج» — the date line of a cheque. */
+    fun dateInWords(date: BusinessDate): String {
+        val j = jalali(date)
+        val w = inWords(j.day.toLong())
+        val ordinal = when {
+            w.endsWith("سه") -> w.dropLast(2) + "سوم"
+            w.endsWith("سی") -> w + "\u200cام"
+            else -> w + "م"
+        }
+        return "$ordinal ${monthNames[j.month - 1]} ${inWords(j.year.toLong())}"
+    }
 }

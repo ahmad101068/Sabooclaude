@@ -5,20 +5,26 @@ import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Scope
 
 /** Business modules. A module owns its documents; only the owner may post or reverse them (ADR-0002). */
-enum class ModuleId { PLATFORM, LEDGER_MANUAL, TREASURY, SALES, PURCHASING, INVENTORY, PAYROLL }
+enum class ModuleId { PLATFORM, LEDGER_MANUAL, TREASURY, SALES, PURCHASING, INVENTORY, PAYROLL, ASSETS }
 
 enum class Permission {
     // Platform
     USER_MANAGE, BACKUP_CREATE, BACKUP_RESTORE, FACTORY_RESET, AUDIT_VIEW,
     // Ledger
-    LEDGER_VIEW, JOURNAL_MANUAL_POST, JOURNAL_MANUAL_REVERSE, PERIOD_CLOSE, PERIOD_REOPEN,
+    LEDGER_VIEW, JOURNAL_MANUAL_POST, JOURNAL_MANUAL_REVERSE, PERIOD_CLOSE, PERIOD_REOPEN, BUDGET_MANAGE,
+    // Fixed assets
+    ASSET_VIEW, ASSET_MANAGE,
     // Treasury
     TREASURY_VIEW, TREASURY_ACCOUNT_MANAGE, TREASURY_RECEIPT, TREASURY_PAYMENT, TREASURY_TRANSFER, TREASURY_RECONCILE, TREASURY_REVERSE,
+    /** Deposit, collect, bounce and settle cheques. */
+    CHEQUE_MANAGE,
     // Sales
     SALES_VIEW, SALES_RECORD, SALES_POST, SALES_REVERSE, SALES_DAY_CLOSE, SALES_DAY_REOPEN, RECEIVABLE_COLLECT, RECEIVABLE_REVERSE,
     CUSTOMER_MANAGE, CREDIT_OVERRIDE,
     // Purchasing & inventory
     PURCHASE_VIEW, PURCHASE_RECORD, PURCHASE_PAY, PURCHASE_REVERSE, SUPPLIER_MANAGE, PURCHASE_ORDER,
+    /** Approve an invoice for payment; take approvals back; define the approval rules. */
+    PURCHASE_APPROVE, PURCHASE_UNAPPROVE, APPROVAL_RULES,
     INVENTORY_LOCATION_MANAGE, INVENTORY_WASTE, INVENTORY_COUNT, INVENTORY_OPENING,
     INVENTORY_VIEW, INVENTORY_ITEM_MANAGE, INVENTORY_ADJUST, INVENTORY_TRANSFER, RECIPE_MANAGE, INVENTORY_PRODUCE,
     // Payroll
@@ -34,6 +40,8 @@ enum class Role(val permissions: Set<Permission>) {
             Permission.USER_MANAGE, Permission.BACKUP_RESTORE, Permission.FACTORY_RESET,
             Permission.PERIOD_REOPEN, Permission.PAYROLL_APPROVE, Permission.ORGANIZATION_DATA,
             Permission.SALES_DAY_REOPEN, Permission.CREDIT_OVERRIDE,
+            // Approval controls stay with the owner: taking approvals back and changing the rules.
+            Permission.PURCHASE_UNAPPROVE, Permission.APPROVAL_RULES,
             // Organization-wide: closing the books and full-data backups stay with the owner/accountant.
             Permission.PERIOD_CLOSE, Permission.BACKUP_CREATE,
         ),
@@ -41,8 +49,9 @@ enum class Role(val permissions: Set<Permission>) {
     ACCOUNTANT(
         setOf(
             Permission.LEDGER_VIEW, Permission.JOURNAL_MANUAL_POST, Permission.JOURNAL_MANUAL_REVERSE, Permission.PERIOD_CLOSE,
+            Permission.BUDGET_MANAGE, Permission.ASSET_VIEW, Permission.ASSET_MANAGE,
             Permission.TREASURY_VIEW, Permission.TREASURY_RECEIPT, Permission.TREASURY_PAYMENT, Permission.TREASURY_TRANSFER,
-            Permission.TREASURY_RECONCILE, Permission.TREASURY_REVERSE, Permission.SALES_VIEW, Permission.RECEIVABLE_COLLECT,
+            Permission.TREASURY_RECONCILE, Permission.TREASURY_REVERSE, Permission.CHEQUE_MANAGE, Permission.SALES_VIEW, Permission.RECEIVABLE_COLLECT,
             Permission.PURCHASE_VIEW, Permission.PURCHASE_PAY, Permission.PERSONNEL_VIEW, Permission.PAYROLL_CALCULATE,
             Permission.PAYROLL_PAY, Permission.AUDIT_VIEW, Permission.ORGANIZATION_DATA,
         ),

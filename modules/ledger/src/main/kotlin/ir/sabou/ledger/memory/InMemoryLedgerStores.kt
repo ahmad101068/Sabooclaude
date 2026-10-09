@@ -57,3 +57,8 @@ class InMemoryPeriodStore : Table<GlobalId, PeriodLock>(), PeriodStore {
     override fun byId(id: GlobalId) = get(id)
     override fun save(lock: PeriodLock) = put(lock.id, lock)
 }
+
+class InMemoryBudgetStore : ir.sabou.platform.memory.Table<ir.sabou.kernel.GlobalId, ir.sabou.ledger.BudgetEntry>(), ir.sabou.ledger.BudgetStore {
+    override fun entries() = values()
+    override fun save(entry: ir.sabou.ledger.BudgetEntry) = put(entry.id, entry)
+}

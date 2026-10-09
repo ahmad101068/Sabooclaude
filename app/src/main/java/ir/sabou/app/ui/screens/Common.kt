@@ -120,24 +120,30 @@ fun kindName(k: TreasuryKind) = when (k) {
     TreasuryKind.BANK -> "حساب بانکی"
     TreasuryKind.CARD_TERMINAL -> "کارت‌خوان"
     TreasuryKind.PETTY_CASH -> "تنخواه"
+    TreasuryKind.RECEIVED_CHEQUES -> "صندوق چک‌های دریافتی"
+    TreasuryKind.ISSUED_CHEQUES -> "دسته‌چک (چک‌های صادره)"
 }
 
 fun kindIcon(k: TreasuryKind) = when (k) {
     TreasuryKind.CASH, TreasuryKind.PETTY_CASH -> R.drawable.ic_cash
     TreasuryKind.CARD_TERMINAL -> R.drawable.ic_card
     TreasuryKind.BANK -> R.drawable.ic_bank
+    TreasuryKind.RECEIVED_CHEQUES, TreasuryKind.ISSUED_CHEQUES -> R.drawable.ic_payment
 }
 
 @Composable
 fun kindColors(k: TreasuryKind) = when (k) {
     TreasuryKind.CASH, TreasuryKind.PETTY_CASH -> Sabou.colors.primary to Sabou.colors.primarySoft
     TreasuryKind.CARD_TERMINAL -> Sabou.colors.moneyIn to Sabou.colors.moneyInSoft
-    TreasuryKind.BANK -> Sabou.colors.bank to Sabou.colors.bankSoft
+    TreasuryKind.BANK, TreasuryKind.RECEIVED_CHEQUES, TreasuryKind.ISSUED_CHEQUES -> Sabou.colors.bank to Sabou.colors.bankSoft
 }
 
-/** Accounts the user can move money with in [scope] (same scope only, as the domain requires). */
-fun accountChoices(accounts: List<TreasuryAccount>, scope: Scope? = null) =
-    accounts.filter { it.isActive && (scope == null || it.scope == scope) }.map { Choice(it.id, it.name, kindName(it.kind)) }
+/**
+ * Accounts the user can move money with in [scope] (same scope only, as the domain requires). Cheque
+ * boxes and cheque books only where the form also takes the cheque ([cheques]).
+ */
+fun accountChoices(accounts: List<TreasuryAccount>, scope: Scope? = null, cheques: Boolean = false) =
+    accounts.filter { it.isActive && (scope == null || it.scope == scope) && (cheques || it.kind.isOrdinary) }.map { Choice(it.id, it.name, kindName(it.kind)) }
 
 @Composable
 fun <T> PickerOrHint(label: String, choices: List<Choice<T>>, selected: T?, onSelect: (T) -> Unit, emptyHint: String) {

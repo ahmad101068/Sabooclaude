@@ -28,6 +28,7 @@ class TreasuryGateway(
     private val capability: PostingCapability,
     private val accounts: TreasuryAccountStore,
     private val movements: MovementStore,
+    private val cheques: ChequeStore = ir.sabou.treasury.memory.InMemoryChequeStore(),
 ) {
     init {
         require(capability.module == ModuleId.TREASURY)
@@ -56,11 +57,13 @@ class TreasuryGateway(
         sourceId: GlobalId,
         description: String,
         counterLines: List<LineDraft>,
+        cheque: ChequeInstruction? = null,
     ): Settlement {
         ensure(owner.module == context.module) { DomainError.OwnedByAnotherModule(owner.module.name) }
         ensure(!amount.isZero) { DomainError.InvalidInput("amount", "مبلغ باید بیشتر از صفر باشد.") }
         val account = account(accountId)
         context.requireScope(account.scope)
+        val chequeStep = prepareCheque(account, direction, amount, cheque)
         if (direction == Direction.PAYMENT) requireFunds(account, amount)
         val counterDebit = Money.sum(counterLines.map { it.debit })
         val counterCredit = Money.sum(counterLines.map { it.credit })
@@ -78,10 +81,11 @@ class TreasuryGateway(
             context, owner,
             JournalDraft(date, account.scope, sourceType, sourceId, description, listOf(treasuryLine) + counterLines),
         )
+        val chequeId = chequeStep?.let { applyCheque(context, it, account, amount, date, sourceType, sourceId) }
         val movement = TreasuryMovement(
             id = GlobalId.new(), accountId = account.id, direction = direction, amount = amount, date = date,
             journalId = journal.id, source = SourceDocument(owner.module, sourceType, sourceId), reversalOf = null,
-            recordedAtEpochMillis = context.nowEpochMillis,
+            recordedAtEpochMillis = context.nowEpochMillis, chequeId = chequeId,
         )
         movements.insert(movement)
         context.audit(AuditDraft("TREASURY_${direction.name}", "TREASURY_MOVEMENT", movement.id.value, "account=${account.id};amount=${amount.rial};src=$sourceType:$sourceId"))
@@ -114,6 +118,17 @@ class TreasuryGateway(
             context.requireScope(account.scope)
             val outflow = rows.fold(0L) { acc, m -> if (m.direction == Direction.RECEIPT) acc + m.amount.rial else acc - m.amount.rial }
             if (outflow > 0) requireFunds(account, Money.of(outflow))
+        }
+        // Cheques touched by this document go back one step; refused if they have moved on since.
+        originals.mapNotNull { it.chequeId }.distinct().forEach { chequeId ->
+            val cheque = cheques.byId(chequeId) ?: ChequeRules.notFound()
+            val last = cheque.effective.lastOrNull()
+            ensure(last != null && last.sourceType == sourceType && last.sourceId == sourceId) { DomainError.InvalidState("CHEQUE", "MOVED_ON:${cheque.status}") }
+            val index = cheque.events.indexOfLast { !it.reversed }
+            val events = cheque.events.mapIndexed { i, e -> if (i == index) e.copy(reversed = true) else e }
+            val previous = events.lastOrNull { !it.reversed }?.status ?: ChequeStatus.VOID
+            cheques.save(cheque.copy(status = previous, events = events))
+            context.audit(AuditDraft("CHEQUE_STEP_REVERSE", "CHEQUE", cheque.id.value, "${cheque.status}->$previous;src=$sourceType:$sourceId"))
         }
         val reversedJournals = HashMap<GlobalId, JournalEntry>()
         return originals.map { original ->
@@ -161,6 +176,120 @@ class TreasuryGateway(
         }
         return journal
     }
+
+    fun cheque(id: GlobalId): Cheque = cheques.byId(id) ?: ChequeRules.notFound()
+
+    /**
+     * One cheque moving between two accounts of the same scope in one journal: a received cheque
+     * collected into the bank (box → bank) or our cheque cleared by the bank (bank → book).
+     */
+    fun moveCheque(
+        context: CommandContext,
+        owner: PostingCapability,
+        chequeId: GlobalId,
+        from: TreasuryAccount,
+        to: TreasuryAccount,
+        target: ChequeStatus,
+        date: BusinessDate,
+        sourceType: String,
+        sourceId: GlobalId,
+        description: String,
+    ): JournalEntry {
+        ensure(owner.module == context.module) { DomainError.OwnedByAnotherModule(owner.module.name) }
+        ensure(from.scope == to.scope) { DomainError.InvalidInput("scope", "حساب بانک باید در همان شعبه باشد.") }
+        context.requireScope(from.scope)
+        val cheque = cheque(chequeId)
+        val chequeSide = if (cheque.direction == ChequeDirection.RECEIVED) from else to
+        val step = prepareCheque(chequeSide, if (chequeSide == from) Direction.PAYMENT else Direction.RECEIPT, cheque.amount, ChequeInstruction.Move(chequeId, target))!!
+        requireFunds(from, cheque.amount)
+        val journal = ledger.post(
+            context, owner,
+            JournalDraft(date, from.scope, sourceType, sourceId, description, listOf(
+                LineDraft(to.glAccount, debit = cheque.amount, memo = to.name, by = capability),
+                LineDraft(from.glAccount, credit = cheque.amount, memo = from.name, by = capability),
+            )),
+        )
+        applyCheque(context, step, chequeSide, cheque.amount, date, sourceType, sourceId)
+        listOf(from to Direction.PAYMENT, to to Direction.RECEIPT).forEach { (account, direction) ->
+            movements.insert(TreasuryMovement(GlobalId.new(), account.id, direction, cheque.amount, date, journal.id,
+                SourceDocument(owner.module, sourceType, sourceId), null, context.nowEpochMillis, chequeId))
+        }
+        return journal
+    }
+
+    /** A step without money: a received cheque handed to the bank, or taken back. */
+    fun noteCheque(context: CommandContext, chequeId: GlobalId, to: ChequeStatus, bankAccountId: GlobalId?, date: BusinessDate, sourceType: String, sourceId: GlobalId, note: String) {
+        val cheque = cheque(chequeId)
+        context.requireScope(cheque.scope)
+        val ok = cheque.direction == ChequeDirection.RECEIVED && when (to) {
+            ChequeStatus.DEPOSITED -> cheque.status == ChequeStatus.IN_HAND
+            ChequeStatus.IN_HAND -> cheque.status == ChequeStatus.DEPOSITED
+            else -> false
+        }
+        ensure(ok) { DomainError.InvalidState("CHEQUE", cheque.status.name) }
+        val updated = if (to == ChequeStatus.DEPOSITED) {
+            cheque.copy(status = to, bankAccountId = bankAccountId, events = cheque.events + ChequeEvent(to, date, sourceType, sourceId, bankAccountId, note.trim()))
+        } else {
+            // Taking it back from the bank undoes the deposit, so the cheque is exactly as before.
+            val index = cheque.events.indexOfLast { !it.reversed }
+            cheque.copy(status = to, bankAccountId = null, events = cheque.events.mapIndexed { i, e -> if (i == index) e.copy(reversed = true, note = note.trim()) else e })
+        }
+        cheques.save(updated)
+        context.audit(AuditDraft("CHEQUE_$to", "CHEQUE", cheque.id.value, "bank=$bankAccountId;note=${note.trim()}"))
+    }
+
+    private class ChequeStep(val instruction: ChequeInstruction, val existing: Cheque?)
+
+    /** Validates what the movement does to a cheque before anything is written. */
+    private fun prepareCheque(account: TreasuryAccount, direction: Direction, amount: Money, instruction: ChequeInstruction?): ChequeStep? {
+        val register = !account.kind.isOrdinary
+        val createsHere = (account.kind == TreasuryKind.RECEIVED_CHEQUES && direction == Direction.RECEIPT) ||
+            (account.kind == TreasuryKind.ISSUED_CHEQUES && direction == Direction.PAYMENT)
+        return when (instruction) {
+            null -> {
+                ensure(!register) { DomainError.InvalidInput("cheque", if (createsHere) "مشخصات چک لازم است." else "چک را انتخاب کنید.") }
+                null
+            }
+            is ChequeInstruction.New -> {
+                ensure(createsHere) { DomainError.InvalidInput("cheque", "چک جدید فقط به صندوق چک‌های دریافتی وارد یا از دسته‌چک صادر می‌شود.") }
+                instruction.details.validate()
+                if (account.kind == TreasuryKind.ISSUED_CHEQUES) {
+                    val bankId = instruction.details.bankAccountId ?: throw DomainException(DomainError.InvalidInput("bankAccount", "حساب بانکی چک را انتخاب کنید."))
+                    val bank = account(bankId)
+                    ensure(bank.kind == TreasuryKind.BANK && bank.scope == account.scope) { DomainError.InvalidInput("bankAccount", "چک باید از حساب بانکی همین شعبه باشد.") }
+                }
+                ChequeStep(instruction, null)
+            }
+            is ChequeInstruction.Move -> {
+                ensure(!createsHere) { DomainError.InvalidInput("cheque", "مشخصات چک جدید لازم است.") }
+                val cheque = cheque(instruction.chequeId)
+                ChequeRules.requireMove(cheque, account, direction, amount, instruction.to)
+                ChequeStep(instruction, cheque)
+            }
+        }
+    }
+
+    private fun applyCheque(context: CommandContext, step: ChequeStep, account: TreasuryAccount, amount: Money, date: BusinessDate, sourceType: String, sourceId: GlobalId): GlobalId =
+        when (val i = step.instruction) {
+            is ChequeInstruction.New -> {
+                val received = account.kind == TreasuryKind.RECEIVED_CHEQUES
+                val status = if (received) ChequeStatus.IN_HAND else ChequeStatus.ISSUED
+                val details = i.details.copy(number = i.details.number.trim(), bank = i.details.bank.trim(), counterparty = i.details.counterparty.trim(), note = i.details.note.trim())
+                val cheque = Cheque(
+                    GlobalId.new(), if (received) ChequeDirection.RECEIVED else ChequeDirection.ISSUED, account.id, account.scope, amount, details, status,
+                    listOf(ChequeEvent(status, date, sourceType, sourceId, account.id)), if (received) null else details.bankAccountId,
+                )
+                cheques.save(cheque)
+                context.audit(AuditDraft("CHEQUE_${cheque.direction}", "CHEQUE", cheque.id.value, "no=${details.number};amount=${amount.rial};due=${details.dueDate.epochDay}"))
+                cheque.id
+            }
+            is ChequeInstruction.Move -> {
+                val cheque = step.existing!!
+                cheques.save(cheque.copy(status = i.to, events = cheque.events + ChequeEvent(i.to, date, sourceType, sourceId, account.id)))
+                context.audit(AuditDraft("CHEQUE_${i.to}", "CHEQUE", cheque.id.value, "src=$sourceType:$sourceId"))
+                cheque.id
+            }
+        }
 
     private fun requireFunds(account: TreasuryAccount, amount: Money) {
         if (account.allowOverdraft) return

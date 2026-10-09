@@ -19,6 +19,12 @@ import ir.sabou.inventory.StockMovement
 import ir.sabou.inventory.StockStore
 import ir.sabou.inventory.StockUnit
 import ir.sabou.ledger.AccountCode
+import ir.sabou.treasury.Cheque
+import ir.sabou.treasury.ChequeDetails
+import ir.sabou.treasury.ChequeDirection
+import ir.sabou.treasury.ChequeEvent
+import ir.sabou.treasury.ChequeStatus
+import ir.sabou.treasury.ChequeStore
 import ir.sabou.treasury.Direction
 import ir.sabou.treasury.MovementStore
 import ir.sabou.treasury.TreasuryAccount
@@ -53,7 +59,7 @@ class SqlMovementStore(db: SqlDatabase) : SqlTable(db), MovementStore {
     private fun read(d: Doc) = TreasuryMovement(
         Codec.id(d.str("id")), Codec.id(d.str("account")), Direction.valueOf(d.str("direction")), Codec.money(d.long("amount")),
         Codec.date(d.long("date")), Codec.id(d.str("journal")), Codec.sourceOf(d.doc("source")), Codec.idOrNull(d.strOrNull("reversalOf")),
-        d.long("recordedAt"),
+        d.long("recordedAt"), Codec.idOrNull(d.strOrNull("cheque")),
     )
 
     override fun insert(movement: TreasuryMovement) = db.execute(
@@ -65,6 +71,7 @@ class SqlMovementStore(db: SqlDatabase) : SqlTable(db), MovementStore {
                 "id" to movement.id.value, "account" to movement.accountId.value, "direction" to movement.direction.name,
                 "amount" to movement.amount.rial, "date" to movement.date.epochDay, "journal" to movement.journalId.value,
                 "source" to Codec.source(movement.source), "reversalOf" to movement.reversalOf?.value, "recordedAt" to movement.recordedAtEpochMillis,
+                "cheque" to movement.chequeId?.value,
             ),
         ),
     )
@@ -81,6 +88,45 @@ class SqlMovementStore(db: SqlDatabase) : SqlTable(db), MovementStore {
         "SELECT COALESCE(SUM(CASE direction WHEN 'RECEIPT' THEN amount ELSE -amount END), 0) AS n FROM treasury_movements WHERE account_id = ?",
         accountId.value,
     ).single().long("n")
+}
+
+class SqlChequeStore(db: SqlDatabase) : SqlTable(db), ChequeStore {
+    private fun read(d: Doc): Cheque {
+        val det = d.doc("details")
+        return Cheque(
+            Codec.id(d.str("id")), ChequeDirection.valueOf(d.str("direction")), Codec.id(d.str("account")), Codec.scopeOf(d.str("scope")),
+            Codec.money(d.long("amount")),
+            ChequeDetails(det.str("number"), det.str("bank"), det.strOr("sayad", ""), Codec.date(det.long("due")), det.str("counterparty"),
+                det.strOr("note", ""), Codec.idOrNull(det.strOrNull("bankAccount"))),
+            ChequeStatus.valueOf(d.str("status")),
+            d.docs("events").map {
+                ChequeEvent(ChequeStatus.valueOf(it.str("status")), Codec.date(it.long("date")), it.str("sourceType"), Codec.id(it.str("sourceId")),
+                    Codec.idOrNull(it.strOrNull("account")), it.strOr("note", ""), it.boolOr("reversed", false))
+            },
+            Codec.idOrNull(d.strOrNull("bankAccount")),
+        )
+    }
+    override fun byId(id: GlobalId) = doc("SELECT doc FROM cheques WHERE id = ?", id.value)?.let(::read)
+    override fun all() = docs("SELECT doc FROM cheques ORDER BY due, rowid").map(::read)
+    override fun save(cheque: Cheque) = upsert(
+        "cheques", "id",
+        mapOf(
+            "id" to cheque.id.value, "scope" to Codec.scope(cheque.scope), "direction" to cheque.direction.name, "status" to cheque.status.name,
+            "due" to cheque.dueDate.epochDay,
+            "doc" to Json.encode(mapOf(
+                "id" to cheque.id.value, "direction" to cheque.direction.name, "account" to cheque.accountId.value, "scope" to Codec.scope(cheque.scope),
+                "amount" to cheque.amount.rial, "status" to cheque.status.name, "bankAccount" to cheque.bankAccountId?.value,
+                "details" to cheque.details.let {
+                    mapOf("number" to it.number, "bank" to it.bank, "sayad" to it.sayadId, "due" to it.dueDate.epochDay, "counterparty" to it.counterparty,
+                        "note" to it.note, "bankAccount" to it.bankAccountId?.value)
+                },
+                "events" to cheque.events.map {
+                    mapOf("status" to it.status.name, "date" to it.date.epochDay, "sourceType" to it.sourceType, "sourceId" to it.sourceId.value,
+                        "account" to it.accountId?.value, "note" to it.note, "reversed" to it.reversed)
+                },
+            )),
+        ),
+    )
 }
 
 // ---------------------------------------------------------------- Inventory

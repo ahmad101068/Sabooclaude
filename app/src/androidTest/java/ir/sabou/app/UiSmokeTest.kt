@@ -33,6 +33,7 @@ class UiSmokeTest {
         Route.Reports, Route.ProfitLoss, Route.DayFlash, Route.ProductMix, Route.Usage, Route.AttendanceReport,
         Route.PrepRecipes, Route.Production,
         Route.Orders, Route.NewOrder(), Route.ReviewQueue, Route.PriceChanges, Route.Suggestions,
+        Route.PendingApprovals, Route.ApprovalRules, Route.Cheques, Route.Budget, Route.BudgetReport, Route.Assets, Route.NewAsset,
     )
 
     @Test fun everyPageOpensAndItsDraftCanBeSaved() {
@@ -56,7 +57,19 @@ class UiSmokeTest {
             ir.sabou.kernel.BusinessDate(today), listOf(ir.sabou.purchasing.InvoiceLine(itemId, Quantity.units(1), ir.sabou.kernel.Money.of(50_000))),
             reviewLines = listOf(ir.sabou.purchasing.ReviewLine("دستکش", "۲ بسته", ir.sabou.kernel.Money.of(20_000))),
             attachments = listOf(ir.sabou.platform.AttachmentInput("f.jpg", "image/jpeg", ByteArray(500) { 1 })))).resultId
+        // Cheques, an approval rule and a fixed asset for the detail pages.
+        val box = core.treasury.openAccount(ir.sabou.treasury.OpenTreasuryAccount(GlobalId.new(), scope, "صندوق چک", ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES)).resultId
+        val bank = core.treasury.openAccount(ir.sabou.treasury.OpenTreasuryAccount(GlobalId.new(), scope, "بانک", ir.sabou.treasury.TreasuryKind.BANK)).resultId
+        core.treasury.receipt(ir.sabou.treasury.RecordReceipt(GlobalId.new(), scope, box, ir.sabou.treasury.ReceiptPurpose.OTHER_INCOME, ir.sabou.kernel.Money.of(1_000_000),
+            ir.sabou.kernel.BusinessDate(today), "چک", ir.sabou.treasury.ChequeDetails("12", "ملت", "", ir.sabou.kernel.BusinessDate(today + 3), "مشتری")))
+        val cheque = core.books.cheques().first().cheque.id
+        core.approvals.saveRule(ir.sabou.purchasing.SaveApprovalRule(GlobalId.new(), null, "همه", null, null, null, ir.sabou.kernel.Money.ZERO, 1))
+        core.treasury.receipt(ir.sabou.treasury.RecordReceipt(GlobalId.new(), scope, bank, ir.sabou.treasury.ReceiptPurpose.OWNER_CAPITAL, ir.sabou.kernel.Money.of(100_000_000),
+            ir.sabou.kernel.BusinessDate(today), "آورده"))
+        val asset = core.fixedAssets.acquire(ir.sabou.assets.AcquireAsset(GlobalId.new(), scope, "فر", "تجهیزات", ir.sabou.kernel.Money.of(50_000_000), ir.sabou.kernel.Money.ZERO,
+            ir.sabou.kernel.BusinessDate(today), ir.sabou.assets.DepreciationMethod.STRAIGHT_LINE, 120, null, ir.sabou.assets.Funding.Paid(bank))).resultId
         val allPages = pages + listOf(
+            Route.ChequeDetail(cheque), Route.AssetDetail(asset),
             Route.ItemEdit(itemId), Route.LedgerDetail("4101", today - 30, today, null),
             Route.PurchaseDetail(invoice), Route.OrderDetail(order), Route.PurchaseFromOrder(order), Route.SupplierEdit(supplier),
             Route.NewOrder(supplier, location, listOf(ir.sabou.app.ui.OrderDraftLine(itemId, 2_000_000, 100_000))),

@@ -64,6 +64,7 @@ object ReportsScreens {
                     SectionTitle("مالی")
                     NavRow(R.drawable.ic_finance, "سود و زیان", "روزانه، به تفکیک شعبه، درصد بهای غذا و نیروی کار", onClick = { nav.go(Route.ProfitLoss) })
                     NavRow(R.drawable.ic_finance, "تراز آزمایشی", "مانده‌ی همه‌ی حساب‌ها", onClick = { nav.go(Route.TrialBalance) })
+                    NavRow(R.drawable.ic_finance, "بودجه در برابر عملکرد", "ماهانه یا سالانه، به تفکیک حساب", onClick = { nav.go(Route.BudgetReport) })
                 }
                 if (session.can(Permission.SALES_VIEW)) {
                     SectionTitle("فروش")
