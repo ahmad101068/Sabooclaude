@@ -13,7 +13,8 @@ android {
         // 26: PBKDF2WithHmacSHA256, java.util.Base64 and ThreadLocal.withInitial used by the core exist natively.
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
+        // Every CI build gets a higher versionCode, so a newer APK installs over the previous one.
+        versionCode = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -26,6 +27,14 @@ android {
         throw GradleException("Release signing is partially configured: set all SABOU_* signing variables or none.")
     }
     signingConfigs {
+        // A fixed, public debug key (committed on purpose, debug builds only): without it every CI runner
+        // signs with a fresh random key and Android refuses to update the installed app.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (signingComplete) {
             create("release") {
                 storeFile = file(signing.getValue("SABOU_KEYSTORE_PATH")!!)
