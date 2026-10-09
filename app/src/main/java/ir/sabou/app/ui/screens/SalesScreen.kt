@@ -150,6 +150,9 @@ private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
     var discount by mutableStateOf(sale?.discount)
     var service by mutableStateOf(sale?.serviceCharge)
     var tax by mutableStateOf(sale?.tax)
+    /** Covers and bills of the day (optional, 0 = not recorded): average spend per guest and per bill. */
+    var guests by mutableStateOf(sale?.guests?.takeIf { it > 0 }?.let { Fa.number(it.toLong()) } ?: "")
+    var transactions by mutableStateOf(sale?.transactions?.takeIf { it > 0 }?.let { Fa.number(it.toLong()) } ?: "")
     val liquid = mutableStateMapOf<GlobalId, Money?>().apply {
         sale?.settlements?.filterIsInstance<Settlement.Liquid>()?.forEach { put(it.treasuryAccountId, it.amount) }
     }
@@ -173,6 +176,9 @@ private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
     fun grossTotal() = lines().sumOf { it.gross.rial }
     fun payable() = grossTotal() - (discount?.rial ?: 0) + (service?.rial ?: 0) + (tax?.rial ?: 0)
     fun settled() = settlements().sumOf { it.amount.rial }
+
+    fun count(text: String): Int? = if (text.isBlank()) 0 else Fa.parseLong(text)?.takeIf { it in 0..1_000_000 }?.toInt()
+    fun countsValid() = count(guests) != null && count(transactions) != null
 }
 
 /** The day's sale form, kept across process death (ADR-0010). */
@@ -181,7 +187,7 @@ private fun saleFormSaver(data: SalesData, today: BusinessDate) = androidx.compo
     save = { f ->
         listOf(
             HashMap(f.portions), HashMap(f.gross), f.kitchen, f.discount, f.service, f.tax, HashMap(f.liquid),
-            ArrayList(f.credits.map { arrayListOf(it.customer, it.amount, it.due) }), f.step,
+            ArrayList(f.credits.map { arrayListOf(it.customer, it.amount, it.due) }), f.step, f.guests, f.transactions,
         )
     },
     restore = { l ->
@@ -193,6 +199,7 @@ private fun saleFormSaver(data: SalesData, today: BusinessDate) = androidx.compo
             liquid.putAll(l[6] as Map<GlobalId, Money?>)
             (l[7] as List<List<Any?>>).forEach { c -> credits.add(CreditRow(c[0] as GlobalId?, c[1] as Money?, c[2] as BusinessDate)) }
             step = l[8] as Int
+            if (l.size > 10) { guests = l[9] as String; transactions = l[10] as String }
         } }.getOrNull()   // a draft that does not fit the form starts it fresh
     },
 )
@@ -228,7 +235,14 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                 MoneyInput("تخفیف", form.discount, { form.discount = it })
                 MoneyInput("حق سرویس", form.service, { form.service = it })
                 MoneyInput("مالیات و عوارض", form.tax, { form.tax = it })
-                PrimaryButton("ادامه: تسویه", { form.step = 1 }, enabled = form.lines().isNotEmpty())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextInput("تعداد مهمان", form.guests, { form.guests = it }, Modifier.weight(1f), keyboard = androidx.compose.ui.text.input.KeyboardType.Number,
+                        error = if (form.count(form.guests) == null) "عدد معتبر نیست" else null)
+                    TextInput("تعداد فاکتور", form.transactions, { form.transactions = it }, Modifier.weight(1f), keyboard = androidx.compose.ui.text.input.KeyboardType.Number,
+                        error = if (form.count(form.transactions) == null) "عدد معتبر نیست" else null)
+                }
+                Text("اختیاری؛ برای میانگین خرید هر مهمان و هر فاکتور در گزارش پایان روز.", style = SabouType.caption, color = Sabou.colors.muted)
+                PrimaryButton("ادامه: تسویه", { form.step = 1 }, enabled = form.lines().isNotEmpty() && form.countsValid())
             }
             1 -> FormCard("روش‌های تسویه") {
                 if (data.accounts.isEmpty()) Banner("برای این شعبه صندوق یا کارت‌خوانی تعریف نشده است.", ChipKind.ACCENT)
@@ -287,7 +301,7 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                 action.error?.let { Banner(it) }
                 val kitchen = form.kitchen
                 fun draft() = SaveSaleDraft(draftId.value, branch, date, kitchen!!, form.lines(), form.discount ?: Money.ZERO,
-                    form.service ?: Money.ZERO, form.tax ?: Money.ZERO, form.settlements())
+                    form.service ?: Money.ZERO, form.tax ?: Money.ZERO, form.settlements(), form.count(form.guests) ?: 0, form.count(form.transactions) ?: 0)
                 SecondaryButton("ذخیره پیش‌نویس", {
                     action.run({ salesOps.saveDraft(draft()) }) { draftId.value = GlobalId.new() }
                 }, enabled = kitchen != null && !action.busy)
@@ -357,6 +371,8 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
             KeyValue("مالیات و عوارض", Fa.toman(sale.tax))
             Divider()
             KeyValue("جمع تسویه‌شده (تومان)", Fa.toman(sale.payable), strong = true)
+            if (sale.guests > 0) KeyValue("مهمان · میانگین هر نفر", "${Fa.number(sale.guests.toLong())} · ${Fa.toman(sale.netFood.rial / sale.guests)}")
+            if (sale.transactions > 0) KeyValue("فاکتور · میانگین هر فاکتور", "${Fa.number(sale.transactions.toLong())} · ${Fa.toman(sale.payable.rial / sale.transactions)}")
             KeyValue("بهای تمام‌شده مواد", Fa.toman(sale.cost))
             if (!sale.netFood.isZero) {
                 val pct = sale.cost.rial * 1000 / sale.netFood.rial

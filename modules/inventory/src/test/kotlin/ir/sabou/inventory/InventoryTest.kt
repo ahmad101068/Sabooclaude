@@ -194,4 +194,62 @@ class InventoryTest {
         override val commandId: GlobalId = GlobalId.new()
         override fun fingerprint() = "simple"
     }
+
+    // ---------------------------------------------------------------- yield, prepared items, period queries
+
+    @Test fun recipeYieldTakesMoreFromStockThanEndsUpInTheDish() {
+        val onion = item("پیاز")
+        val line = RecipeLine(onion, Quantity.of(80_000), yieldPercent = 80)          // 80 g in the dish, 20 % peeled away
+        assertEquals(Quantity.of(100_000), line.grossFor(Quantity.units(1)))
+        assertEquals(Quantity.of(1_000_000), line.grossFor(Quantity.units(10)))
+        assertEquals(Quantity.of(80_000), RecipeLine(onion, Quantity.of(80_000)).grossFor(Quantity.units(1)))   // default 100 %
+        val menu = ops.defineMenuItem(DefineMenuItem(GlobalId.new(), "سوپ")).resultId
+        assertEquals("INVALID_INPUT:yield", code { ops.publishRecipe(PublishRecipe(GlobalId.new(), menu, day, listOf(line.copy(yieldPercent = 0)))) })
+        ops.publishRecipe(PublishRecipe(GlobalId.new(), menu, day, listOf(line)))
+        assertEquals(listOf(IssueLine(onion, Quantity.units(1))), RecipeBook(recipes).requirements(menu, day, Quantity.units(10)))
+    }
+
+    @Test fun productionConservesValueAndNeedsAPreparedItem() {
+        val kitchen = location(branchA, "آشپزخانه مرکزی")
+        val tomato = item("گوجه"); val oil = item("روغن")
+        val sauce = ops.createItem(CreateItem(GlobalId.new(), "سس پاستا", StockUnit.KILOGRAM, kg(0), prepared = true)).resultId
+        buy(kitchen, branchA, tomato, kg(10), 1_000_000)
+        buy(kitchen, branchA, oil, kg(2), 300_000)
+        // 4 kg of sauce from 5 kg tomato (90 % usable) and 1 kg oil.
+        ops.publishPrepRecipe(PublishPrepRecipe(GlobalId.new(), sauce, day, kg(4),
+            listOf(RecipeLine(tomato, Quantity.of(4_500_000), 90), RecipeLine(oil, kg(1)))))
+        assertEquals("INVALID_STATE:ITEM:NOT_PREPARED", code {
+            ops.publishPrepRecipe(PublishPrepRecipe(GlobalId.new(), tomato, day, kg(1), listOf(RecipeLine(oil, kg(1)))))
+        })
+        ops.produce(RecordProduction(GlobalId.new(), branchA, kitchen, sauce, kg(8), day))     // two batches
+        assertEquals(Quantity.ZERO, gateway.balance(tomato, kitchen).quantity)
+        assertEquals(Quantity.ZERO, gateway.balance(oil, kitchen).quantity)
+        val made = gateway.balance(sauce, kitchen)
+        assertEquals(kg(8), made.quantity)
+        assertEquals(1_300_000, made.value.rial)                                              // all ingredient value, nothing lost
+        assertEquals(1_300_000, ledger.balance(StandardAccounts.INVENTORY, branchA).rial)     // no journal needed, still equal
+        assertTrue(code { ops.produce(RecordProduction(GlobalId.new(), branchA, kitchen, sauce, kg(1), day)) }.startsWith("INSUFFICIENT_STOCK"))
+        // Movements by period: the opening of the next day is today's closing.
+        val totals = stock.totalsBefore(kitchen, day.plusDays(1)).associateBy { it.itemId }
+        assertEquals(8_000_000, totals.getValue(sauce).quantity)
+        assertEquals(0, totals.getValue(tomato).quantity)
+        assertEquals(5, stock.movementsAt(kitchen, day, day).size)   // 2 purchases, 2 ingredients out, 1 sauce in
+        assertTrue(stock.movementsAt(kitchen, day.plusDays(1), day.plusDays(2)).isEmpty())
+    }
+
+    @Test fun itemDetailsAreEditableButStayConsistent() {
+        val rice = item("برنج")
+        val supplierA = GlobalId.new(); val supplierB = GlobalId.new()
+        assertEquals("INVALID_INPUT:parLevel", code {
+            ops.updateItem(UpdateItem(GlobalId.new(), rice, "برنج", kg(10), kg(5), "", "", null, emptySet(), true))
+        })
+        assertEquals("INVALID_INPUT:supplier", code {
+            ops.updateItem(UpdateItem(GlobalId.new(), rice, "برنج", kg(10), kg(30), "", "", supplierB, setOf(supplierA), true))
+        })
+        ops.updateItem(UpdateItem(GlobalId.new(), rice, "برنج هاشمی", kg(10), kg(30), "انبار خشک · قفسه ۲", "", supplierA, setOf(supplierA, supplierB), true))
+        val stored = items.byId(rice)!!
+        assertEquals("برنج هاشمی", stored.name); assertEquals(kg(30), stored.parLevel); assertEquals("انبار خشک · قفسه ۲", stored.shelf)
+        assertEquals(setOf(supplierA, supplierB), stored.approvedSupplierIds)
+        assertEquals(StockUnit.KILOGRAM, stored.unit)
+    }
 }

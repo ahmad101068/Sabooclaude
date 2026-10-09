@@ -52,8 +52,10 @@ import ir.sabou.app.ui.components.SecondaryButton
 import ir.sabou.app.ui.components.TextInput
 import ir.sabou.app.ui.screens.FinanceScreens
 import ir.sabou.app.ui.screens.HomeScreen
+import ir.sabou.app.ui.screens.KitchenScreens
 import ir.sabou.app.ui.screens.MeScreens
 import ir.sabou.app.ui.screens.OperationsScreens
+import ir.sabou.app.ui.screens.ReportsScreens
 import ir.sabou.app.ui.screens.SalesScreen
 import ir.sabou.app.ui.theme.Sabou
 import ir.sabou.app.ui.theme.SabouType
@@ -409,11 +411,20 @@ private fun Pages(route: Route, nav: Nav) {
         is Route.Collect -> FinanceScreens.CollectForm(nav, route.receivableId)
         Route.TrialBalance -> FinanceScreens.TrialBalance(nav)
         is Route.AccountHistory -> FinanceScreens.AccountHistory(nav, route.accountId)
+        Route.Reports -> ReportsScreens.Hub(nav)
+        Route.ProfitLoss -> ReportsScreens.ProfitLoss(nav)
+        is Route.LedgerDetail -> ReportsScreens.LedgerDetail(nav, route)
+        Route.DayFlash -> ReportsScreens.DayFlash(nav)
+        Route.ProductMix -> ReportsScreens.ProductMix(nav)
+        Route.Usage -> ReportsScreens.Usage(nav)
+        Route.AttendanceReport -> ReportsScreens.AttendanceReport(nav)
         Route.Stock -> OperationsScreens.Stock(nav)
         Route.Waste -> OperationsScreens.Waste(nav)
         Route.Count -> OperationsScreens.Count(nav)
         Route.StockTransfer -> OperationsScreens.StockTransfer(nav)
         Route.Recipes -> OperationsScreens.Recipes(nav)
+        Route.PrepRecipes -> KitchenScreens.PrepRecipes(nav)
+        Route.Production -> KitchenScreens.Production(nav)
         Route.Purchases -> OperationsScreens.Purchases(nav)
         Route.NewPurchase -> OperationsScreens.NewPurchase(nav)
         is Route.PurchaseDetail -> OperationsScreens.PurchaseDetail(nav, route.invoiceId)
@@ -424,6 +435,7 @@ private fun Pages(route: Route, nav: Nav) {
         Route.Branches -> MeScreens.Branches(nav)
         Route.Users -> MeScreens.Users(nav)
         Route.Items -> MeScreens.Items(nav)
+        is Route.ItemEdit -> KitchenScreens.ItemEdit(nav, route.itemId)
         Route.Locations -> MeScreens.Locations(nav)
         Route.Menu -> MeScreens.Menu(nav)
         Route.Accounts -> MeScreens.Accounts(nav)

@@ -25,12 +25,24 @@ sealed interface Route : java.io.Serializable {
     data object TrialBalance : Route
     data class AccountHistory(val accountId: GlobalId) : Route
 
+    // Reports
+    data object Reports : Route
+    data object ProfitLoss : Route
+    /** Journal lines behind one P&L figure; dates as epoch days, branch as id text (null = all). */
+    data class LedgerDetail(val account: String, val from: Long, val to: Long, val branch: String?) : Route
+    data object DayFlash : Route
+    data object ProductMix : Route
+    data object Usage : Route
+    data object AttendanceReport : Route
+
     // Operations
     data object Stock : Route
     data object Waste : Route
     data object Count : Route
     data object StockTransfer : Route
     data object Recipes : Route
+    data object PrepRecipes : Route
+    data object Production : Route
     data object Purchases : Route
     data object NewPurchase : Route
     data class PurchaseDetail(val invoiceId: GlobalId) : Route
@@ -43,6 +55,7 @@ sealed interface Route : java.io.Serializable {
     data object Branches : Route
     data object Users : Route
     data object Items : Route
+    data class ItemEdit(val itemId: GlobalId) : Route
     data object Locations : Route
     data object Menu : Route
     data object Accounts : Route

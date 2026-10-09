@@ -38,6 +38,14 @@ class InMemoryJournalStore : JournalStore, Transactional {
             .filter { it.account == account }
             .fold(0L) { acc, l -> Math.addExact(acc, l.debit.rial - l.credit.rial) }
     override fun all() = entries.toList()
+    override fun dailyTotals(from: BusinessDate, to: BusinessDate) =
+        entries.filter { it.date >= from && it.date <= to }
+            .flatMap { e -> e.lines.map { Triple(Triple(it.account, e.scope, e.date), it.debit.rial, it.credit.rial) } }
+            .groupBy { it.first }
+            .map { (k, v) -> ir.sabou.ledger.DailyAccountTotal(k.first, k.second, k.third, v.sumOf { it.second }, v.sumOf { it.third }) }
+    override fun entriesTouching(account: AccountCode, scope: Scope?, from: BusinessDate, to: BusinessDate) =
+        entries.filter { e -> e.date >= from && e.date <= to && (scope == null || e.scope == scope) && e.lines.any { it.account == account } }
+            .sortedWith(compareBy({ it.date }, { it.number }))
     override fun snapshot(): Any = entries.toList()
     @Suppress("UNCHECKED_CAST")
     override fun restore(snapshot: Any) { entries.clear(); entries.addAll(snapshot as List<JournalEntry>) }

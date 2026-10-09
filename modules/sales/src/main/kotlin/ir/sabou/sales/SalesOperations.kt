@@ -46,9 +46,11 @@ data class SaveSaleDraft(
     val serviceCharge: Money,
     val tax: Money,
     val settlements: List<Settlement>,
+    val guests: Int = 0,
+    val transactions: Int = 0,
 ) : Command {
     override val requiredPermission = Permission.SALES_RECORD
-    override fun fingerprint() = "$scope|${date.epochDay}|$kitchenLocationId|${discount.rial}|${serviceCharge.rial}|${tax.rial}|" +
+    override fun fingerprint() = "$scope|${date.epochDay}|$kitchenLocationId|${discount.rial}|${serviceCharge.rial}|${tax.rial}|$guests|$transactions|" +
         lines.joinToString(";") { "${it.menuItemId}:${it.portions.micros}:${it.gross.rial}" } + "|" +
         settlements.joinToString(";") { s -> when (s) {
             is Settlement.Liquid -> "L:${s.treasuryAccountId}:${s.amount.rial}"
@@ -154,7 +156,9 @@ class SalesOperations(
             id = existing?.id ?: GlobalId.new(), scope = cmd.scope, date = cmd.date, kitchenLocationId = cmd.kitchenLocationId,
             lines = cmd.lines, discount = cmd.discount, serviceCharge = cmd.serviceCharge, tax = cmd.tax,
             settlements = cmd.settlements, status = SaleStatus.DRAFT, revenueJournalId = null, cost = Money.ZERO,
+            guests = cmd.guests, transactions = cmd.transactions,
         )
+        ensure(cmd.guests in 0..100_000 && cmd.transactions in 0..100_000) { DomainError.InvalidInput("guests", "تعداد مهمان یا تراکنش معتبر نیست.") }
         ensure(sale.discount <= sale.gross) { DomainError.InvalidInput("discount", "تخفیف از فروش بیشتر است.") }
         sales.saveSale(sale)
         ctx.audit(AuditDraft("SALE_DRAFT_SAVE", "DAILY_SALE", sale.id.value, "payable=${sale.payable.rial};settled=${sale.settled.rial}"))

@@ -86,12 +86,26 @@ class SqlMovementStore(db: SqlDatabase) : SqlTable(db), MovementStore {
 // ---------------------------------------------------------------- Inventory
 
 class SqlItemStore(db: SqlDatabase) : SqlTable(db), ItemStore {
-    private fun read(d: Doc) = Item(Codec.id(d.str("id")), d.str("name"), StockUnit.valueOf(d.str("unit")), Codec.qty(d.long("minimum")), d.bool("active"))
+    private fun read(d: Doc) = Item(
+        Codec.id(d.str("id")), d.str("name"), StockUnit.valueOf(d.str("unit")), Codec.qty(d.long("minimum")), d.bool("active"),
+        parLevel = Codec.qty(d.longOr("par", 0)), shelf = d.strOr("shelf", ""), allergens = d.strOr("allergens", ""),
+        prepared = d.boolOr("prepared", false), preferredSupplierId = Codec.idOrNull(d.strOrNull("preferredSupplier")),
+        approvedSupplierIds = d.strsOr("approvedSuppliers").map(Codec::id).toSet(),
+    )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM items WHERE id = ?", id.value)?.let(::read)
     override fun all() = docs("SELECT doc FROM items ORDER BY rowid").map(::read)
     override fun save(item: Item) = upsert(
         "items", "id",
-        mapOf("id" to item.id.value, "doc" to Json.encode(mapOf("id" to item.id.value, "name" to item.name, "unit" to item.unit.name, "minimum" to item.minimumStock.micros, "active" to item.isActive))),
+        mapOf(
+            "id" to item.id.value,
+            "doc" to Json.encode(
+                mapOf(
+                    "id" to item.id.value, "name" to item.name, "unit" to item.unit.name, "minimum" to item.minimumStock.micros, "active" to item.isActive,
+                    "par" to item.parLevel.micros, "shelf" to item.shelf, "allergens" to item.allergens, "prepared" to item.prepared,
+                    "preferredSupplier" to item.preferredSupplierId?.value, "approvedSuppliers" to item.approvedSupplierIds.map { it.value }.sorted(),
+                ),
+            ),
+        ),
     )
 }
 
@@ -135,7 +149,27 @@ class SqlStockStore(db: SqlDatabase) : SqlTable(db), StockStore {
         Codec.sourceOf(d.doc("source")), Codec.idOrNull(d.strOrNull("reversalOf")), d.long("recordedAt"),
     )
 
-    override fun insertMovement(movement: StockMovement) = db.execute(
+    override fun insertMovement(movement: StockMovement) {
+        insertDoc(movement)
+        db.execute(
+            "INSERT INTO stock_movement_index (movement_id, item_id, location_id, date, kind, qty, value) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            movement.id.value, movement.itemId.value, movement.locationId.value, movement.date.epochDay, movement.kind.name,
+            movement.quantityDelta, movement.valueDelta,
+        )
+    }
+
+    override fun movementsAt(locationId: GlobalId, from: ir.sabou.kernel.BusinessDate, to: ir.sabou.kernel.BusinessDate) = docs(
+        "SELECT m.doc AS doc FROM stock_movement_index i JOIN stock_movements m ON m.id = i.movement_id " +
+            "WHERE i.location_id = ? AND i.date BETWEEN ? AND ? ORDER BY m.rowid",
+        locationId.value, from.epochDay, to.epochDay,
+    ).map(::read)
+
+    override fun totalsBefore(locationId: GlobalId, date: ir.sabou.kernel.BusinessDate) = db.query(
+        "SELECT item_id, SUM(qty) AS q, SUM(value) AS v FROM stock_movement_index WHERE location_id = ? AND date < ? GROUP BY item_id",
+        locationId.value, date.epochDay,
+    ).map { ir.sabou.inventory.MovementTotal(Codec.id(it.str("item_id")), it.long("q"), it.long("v")) }
+
+    private fun insertDoc(movement: StockMovement) = db.execute(
         "INSERT INTO stock_movements (id, source_type, source_id, reversal_of, doc) VALUES (?, ?, ?, ?, ?)",
         movement.id.value, movement.source.type, movement.source.id.value, movement.reversalOf?.value,
         Json.encode(
@@ -167,9 +201,29 @@ class SqlRecipeStore(db: SqlDatabase) : SqlTable(db), RecipeStore {
     override fun versions(menuItemId: GlobalId) = docs("SELECT doc FROM recipe_versions WHERE menu_item_id = ? ORDER BY rowid", menuItemId.value).map { d ->
         RecipeVersion(
             Codec.id(d.str("id")), Codec.id(d.str("menuItem")), d.int("version"), Codec.date(d.long("from")),
-            d.docs("lines").map { RecipeLine(Codec.id(it.str("item")), Codec.qty(it.long("qty"))) },
+            d.docs("lines").map(::line),
         )
     }
+
+    private fun line(d: Doc) = RecipeLine(Codec.id(d.str("item")), Codec.qty(d.long("qty")), d.intOr("yield", 100))
+    private fun lineDoc(l: RecipeLine) = mapOf("item" to l.itemId.value, "qty" to l.quantityPerPortion.micros, "yield" to l.yieldPercent)
+
+    override fun prepVersions(itemId: GlobalId) = docs("SELECT doc FROM prep_recipes WHERE item_id = ? ORDER BY rowid", itemId.value).map { d ->
+        ir.sabou.inventory.PrepRecipe(
+            Codec.id(d.str("id")), Codec.id(d.str("item")), d.int("version"), Codec.date(d.long("from")), Codec.qty(d.long("output")), d.docs("lines").map(::line),
+        )
+    }
+
+    override fun savePrepVersion(version: ir.sabou.inventory.PrepRecipe) = db.execute(
+        "INSERT INTO prep_recipes (id, item_id, doc) VALUES (?, ?, ?)",
+        version.id.value, version.itemId.value,
+        Json.encode(
+            mapOf(
+                "id" to version.id.value, "item" to version.itemId.value, "version" to version.version, "from" to version.effectiveFrom.epochDay,
+                "output" to version.outputQuantity.micros, "lines" to version.lines.map(::lineDoc),
+            ),
+        ),
+    )
 
     /** Versions are immutable: a plain INSERT, so re-saving an id fails loudly. */
     override fun saveVersion(version: RecipeVersion) = db.execute(
@@ -178,7 +232,7 @@ class SqlRecipeStore(db: SqlDatabase) : SqlTable(db), RecipeStore {
         Json.encode(
             mapOf(
                 "id" to version.id.value, "menuItem" to version.menuItemId.value, "version" to version.version, "from" to version.effectiveFrom.epochDay,
-                "lines" to version.lines.map { mapOf("item" to it.itemId.value, "qty" to it.quantityPerPortion.micros) },
+                "lines" to version.lines.map(::lineDoc),
             ),
         ),
     )

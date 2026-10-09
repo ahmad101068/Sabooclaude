@@ -32,6 +32,13 @@ object Fa {
 
     fun toman(money: Money): String = toman(money.rial)
 
+    /** Basis points as a percentage with one decimal: 1234 → «۱۲٫۳٪». */
+    fun percent(bp: Long): String {
+        val tenths = (kotlin.math.abs(bp) + 5) / 10
+        val text = if (tenths % 10 == 0L) number(tenths / 10) else number(tenths / 10) + "٫" + digits((tenths % 10).toString())
+        return (if (bp < 0) "−" else "") + text + "٪"
+    }
+
     /** Compact form for cards: ۱۴٫۸ م (million Toman) / ۲٫۱ ب (billion Toman). */
     fun tomanShort(rial: Long): String {
         val toman = rial / 10

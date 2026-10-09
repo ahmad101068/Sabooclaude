@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ir.sabou.app.R
 import ir.sabou.app.ui.Load
+import ir.sabou.app.ui.ExportButtons
 import ir.sabou.app.ui.LocalSession
 import ir.sabou.app.ui.Nav
 import ir.sabou.app.ui.Route
@@ -50,6 +51,7 @@ import ir.sabou.app.ui.rememberAction
 import ir.sabou.app.ui.theme.Sabou
 import ir.sabou.app.ui.theme.SabouType
 import ir.sabou.core.Fa
+import ir.sabou.core.ReportTables
 import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Scope
@@ -111,6 +113,9 @@ object FinanceScreens {
 
     // ------------------------------------------------------------ Hub (design: Treasury)
 
+    /** Anyone who may open at least one report. */
+    val reportPerms = listOf(Permission.LEDGER_VIEW, Permission.SALES_VIEW, Permission.INVENTORY_VIEW, Permission.PERSONNEL_VIEW, Permission.ATTENDANCE_RECORD, Permission.PAYROLL_CALCULATE)
+
     @Composable
     fun Hub(nav: Nav) {
         val session = LocalSession.current
@@ -165,6 +170,9 @@ object FinanceScreens {
                     }
                 }
                 item { SectionTitle("گزارش‌ها") }
+                if (reportPerms.any { session.can(it) }) item {
+                    NavRow(R.drawable.ic_finance, "گزارش‌های مدیریتی", "سود و زیان، پایان روز، پرفروش‌ها، مصرف مواد، کارکرد — با خروجی اکسل و PDF", onClick = { nav.go(Route.Reports) })
+                }
                 if (session.can(Permission.SALES_VIEW)) item { NavRow(R.drawable.ic_person, "طلب از مشتریان", "دریافت نسیه‌ها", onClick = { nav.go(Route.Receivables) }) }
                 if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "بدهی به تأمین‌کنندگان", "فاکتورهای پرداخت‌نشده", onClick = { nav.go(Route.Purchases) }) }
                 if (session.can(Permission.LEDGER_VIEW)) item { NavRow(R.drawable.ic_finance, "تراز آزمایشی", "مانده همه حساب‌های دفتر کل", onClick = { nav.go(Route.TrialBalance) }) }
@@ -323,6 +331,7 @@ object FinanceScreens {
                     }
                 }
                 item { action.error?.let { Banner(it) } }
+                item { ExportButtons("گردش-حساب") { overview.accountHistory(accountId).let { (b, list) -> listOf(ReportTables.accountHistory(b, list)) } } }
                 val rows = data.orNull()?.second.orEmpty()
                 items(rows) { m ->
                     val own = m.source.module == ModuleId.TREASURY && m.reversalOf == null && m.source.type != "TREASURY_RECONCILIATION"
@@ -367,6 +376,7 @@ object FinanceScreens {
                             Fa.tomanShort(r.outstanding.rial), onClick = { nav.go(Route.Collect(r.receivable.id)) })
                     }
                 }
+                ExportButtons("طلب-از-مشتریان") { listOf(ReportTables.receivables(overview.openReceivables())) }
             }
         }
     }
@@ -421,6 +431,8 @@ object FinanceScreens {
                         KeyValue("جمع (باید صفر باشد)", Fa.toman(rows.sumOf { it.second }), strong = true)
                     }
                 }
+                if (session.can(Permission.LEDGER_VIEW)) SecondaryButton("سود و زیان و گزارش‌های دیگر", { nav.go(Route.Reports) })
+                ExportButtons("تراز-آزمایشی") { listOf(ReportTables.trialBalance(overview.trialBalance(), session.today)) }
             }
         }
     }

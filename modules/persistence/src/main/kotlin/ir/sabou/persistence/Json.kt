@@ -116,6 +116,15 @@ class Doc(private val m: Map<String, Any?>) {
     fun strs(k: String): List<String> = m[k] as List<String>
     fun strMap(k: String): Map<String, String> = m[k] as Map<String, String>
 
+    // Fields added after a document type first shipped: absent in older rows → the default.
+    fun has(k: String): Boolean = m[k] != null
+    fun strOr(k: String, default: String): String = (m[k] as String?) ?: default
+    fun boolOr(k: String, default: Boolean): Boolean = (m[k] as Boolean?) ?: default
+    fun longOr(k: String, default: Long): Long = (m[k] as Long?) ?: default
+    fun intOr(k: String, default: Int): Int = (m[k] as Long?)?.toInt() ?: default
+    fun strsOr(k: String): List<String> = (m[k] as List<String>?) ?: emptyList()
+    fun docsOr(k: String): List<Doc> = (m[k] as List<Map<String, Any?>>?)?.map(::Doc) ?: emptyList()
+
     companion object {
         fun parse(json: String): Doc = Doc(Json.decode(json) as Map<String, Any?>)
     }

@@ -52,6 +52,9 @@ data class PayrollView(
     val insurance: Money,
     val tax: Money,
 )
+data class ProductionNeed(val item: Item, val needed: Quantity, val available: Quantity) {
+    val short: Boolean get() = available < needed
+}
 data class SetupStatus(val hasAccounts: Boolean, val hasItems: Boolean, val hasMenu: Boolean)
 
 /**
@@ -150,6 +153,22 @@ class Overview internal constructor(private val core: SabouCore) {
     }
 
     // ------------------------------------------------------------ Inventory
+
+    /** Prepared items with their current prep recipe (null: none yet). */
+    fun prepRecipes(): List<Pair<Item, ir.sabou.inventory.PrepRecipe?>> {
+        actor(Permission.RECIPE_MANAGE, Permission.INVENTORY_PRODUCE, Permission.INVENTORY_VIEW)
+        return core.items.all().filter { it.prepared }.map { item -> item to core.recipes.prepVersions(item.id).maxByOrNull { it.version } }
+    }
+
+    /** What producing [quantity] of a prepared item needs, against what the location holds. */
+    fun productionPreview(locationId: GlobalId, itemId: GlobalId, quantity: Quantity, date: BusinessDate): List<ProductionNeed> {
+        val a = actor(Permission.INVENTORY_PRODUCE)
+        a.require(location(locationId).scope)
+        val items = core.items.all().associateBy { it.id }
+        return core.recipeBook.prepRequirements(itemId, date, quantity).map {
+            ProductionNeed(items.getValue(it.itemId), it.quantity, core.stock.balance(it.itemId, locationId).quantity)
+        }
+    }
 
     fun stock(locationId: GlobalId): List<StockBalance> {
         val a = actor(Permission.INVENTORY_VIEW, Permission.INVENTORY_COUNT, Permission.INVENTORY_OPENING)

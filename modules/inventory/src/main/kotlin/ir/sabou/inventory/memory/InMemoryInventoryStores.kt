@@ -51,6 +51,11 @@ class InMemoryStockStore : StockStore, Transactional {
     override fun reversalOf(id: GlobalId) = movements.firstOrNull { it.reversalOf == id }
     override fun balances(locationId: GlobalId) = balances.values.filter { it.locationId == locationId }
     fun movements(): List<StockMovement> = movements.toList()
+    override fun movementsAt(locationId: GlobalId, from: ir.sabou.kernel.BusinessDate, to: ir.sabou.kernel.BusinessDate) =
+        movements.filter { it.locationId == locationId && it.date >= from && it.date <= to }
+    override fun totalsBefore(locationId: GlobalId, date: ir.sabou.kernel.BusinessDate) =
+        movements.filter { it.locationId == locationId && it.date < date }.groupBy { it.itemId }
+            .map { (item, l) -> ir.sabou.inventory.MovementTotal(item, l.sumOf { it.quantityDelta }, l.sumOf { it.valueDelta }) }
 
     override fun snapshot(): Any = LinkedHashMap(balances) to movements.toList()
     @Suppress("UNCHECKED_CAST")
@@ -63,14 +68,17 @@ class InMemoryStockStore : StockStore, Transactional {
 class InMemoryRecipeStore : RecipeStore, Transactional {
     private val menu = LinkedHashMap<GlobalId, MenuItem>()
     private val versions = mutableListOf<RecipeVersion>()
+    private val preps = mutableListOf<ir.sabou.inventory.PrepRecipe>()
+    override fun prepVersions(itemId: GlobalId) = preps.filter { it.itemId == itemId }
+    override fun savePrepVersion(version: ir.sabou.inventory.PrepRecipe) { preps += version }
     override fun menuItem(id: GlobalId) = menu[id]
     override fun saveMenuItem(item: MenuItem) { menu[item.id] = item }
     override fun versions(menuItemId: GlobalId) = versions.filter { it.menuItemId == menuItemId }
     override fun saveVersion(version: RecipeVersion) { versions += version }
-    override fun snapshot(): Any = LinkedHashMap(menu) to versions.toList()
+    override fun snapshot(): Any = Triple(LinkedHashMap(menu), versions.toList(), preps.toList())
     @Suppress("UNCHECKED_CAST")
     override fun restore(snapshot: Any) {
-        val (m, v) = snapshot as Pair<Map<GlobalId, MenuItem>, List<RecipeVersion>>
-        menu.clear(); menu.putAll(m); versions.clear(); versions.addAll(v)
+        val (m, v, p) = snapshot as Triple<Map<GlobalId, MenuItem>, List<RecipeVersion>, List<ir.sabou.inventory.PrepRecipe>>
+        menu.clear(); menu.putAll(m); versions.clear(); versions.addAll(v); preps.clear(); preps.addAll(p)
     }
 }

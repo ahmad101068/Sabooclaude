@@ -5,7 +5,8 @@ package ir.sabou.persistence
  * plus a test; the app refuses to open a database newer than it knows (AUD-014).
  */
 object Schema {
-    data class Migration(val version: Int, val statements: List<String>)
+    /** [backfill] runs after [statements] in the same transaction, for data that SQL alone cannot derive. */
+    data class Migration(val version: Int, val statements: List<String>, val backfill: ((SqlDatabase) -> Unit)? = null)
 
     private fun immutable(table: String) = listOf(
         "CREATE TRIGGER ${table}_no_update BEFORE UPDATE ON $table BEGIN SELECT RAISE(ABORT, 'IMMUTABLE:$table'); END",
@@ -65,6 +66,25 @@ object Schema {
             ) + immutable("audit_events") + immutable("journal_entries") + immutable("journal_lines") +
                 immutable("treasury_movements") + immutable("stock_movements") + immutable("payroll_policies"),
         ),
+        Migration(
+            2,
+            listOf(
+                // Stock movements by location and date (period reports: actual vs theoretical, day flash).
+                "CREATE TABLE stock_movement_index (movement_id TEXT PRIMARY KEY REFERENCES stock_movements(id), item_id TEXT NOT NULL, location_id TEXT NOT NULL, date INTEGER NOT NULL, kind TEXT NOT NULL, qty INTEGER NOT NULL, value INTEGER NOT NULL)",
+                "CREATE INDEX stock_movement_index_location ON stock_movement_index(location_id, date)",
+                // How prepared items (sauces, dough) are made; versioned like menu recipes.
+                "CREATE TABLE prep_recipes (id TEXT PRIMARY KEY, item_id TEXT NOT NULL REFERENCES items(id), doc TEXT NOT NULL)",
+            ) + immutable("stock_movement_index"),
+            backfill = { db ->
+                db.query("SELECT id, doc FROM stock_movements ORDER BY rowid").forEach { row ->
+                    val d = Doc.parse(row.str("doc"))
+                    db.execute(
+                        "INSERT INTO stock_movement_index (movement_id, item_id, location_id, date, kind, qty, value) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        row.str("id"), d.str("item"), d.str("location"), d.long("date"), d.str("kind"), d.long("qty"), d.long("value"),
+                    )
+                }
+            },
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }
@@ -80,6 +100,7 @@ object Schema {
         try {
             pending.forEach { m ->
                 m.statements.forEach { db.execute(it) }
+                m.backfill?.invoke(db)
                 db.execute("INSERT INTO schema_version(version) VALUES (?)", m.version)
             }
             db.commit()

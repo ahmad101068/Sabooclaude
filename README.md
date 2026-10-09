@@ -34,8 +34,9 @@ Gradle checks the SHA-256 of every downloaded artifact against `gradle/verificat
 
 ## Status (2026-10-09)
 
-- JVM modules: **107 tests passing** offline (unit, end-to-end on a real SQLite file, restart, rollback, replay, tamper and rollback detection, factory reset, 80-year Jalali round trip). Spot mutation checks confirm key rules are guarded.
+- JVM modules: **118 tests passing** offline (unit, end-to-end on a real SQLite file, restart, rollback, replay, tamper and rollback detection, factory reset, 80-year Jalali round trip). Spot mutation checks confirm key rules are guarded.
 - CI (`.github/workflows/ci.yml`): Gradle `domainBuild` with all tests; the Android app compiles, passes lint and produces a debug APK (artifact `sabou-debug-apk`, signed with the committed debug key so updates install over each other); instrumented tests run on an Android emulator (SQLCipher, Keystore, backup/restore, rollback detection, encrypted drafts, every page).
 - Payroll legal values are not shipped: the owner enters each year's parameters (after professional review); payroll fails closed until then.
 - Unfinished forms survive the system closing the app (ADR-0010). Partial-month payroll is prorated (default ÷30).
+- Management reports (ADR-0011): profit and loss by day and branch with drill-down, food and labour cost %, end of day, item mix and margins, actual vs theoretical usage, attendance; every report and payroll (with one payslip per page) exports to Excel and PDF. Prep items with production and recipe yields.
 - Before production: a round of hands-on testing on the restaurant's own devices, the yearly payroll values reviewed by a tax/insurance advisor, and a release signing key.

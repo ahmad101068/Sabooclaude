@@ -75,6 +75,9 @@ interface AccountStore {
     fun upsert(account: Account)
 }
 
+/** Debit and credit of one account in one scope on one day (period reports). */
+data class DailyAccountTotal(val account: AccountCode, val scope: Scope, val date: BusinessDate, val debit: Long, val credit: Long)
+
 interface JournalStore {
     fun nextNumber(): Long
     fun insert(entry: JournalEntry)
@@ -84,6 +87,10 @@ interface JournalStore {
     /** Signed debit-minus-credit total for an account, optionally limited to one scope and date. */
     fun netDebit(account: AccountCode, scope: Scope?, upTo: BusinessDate?): Long
     fun all(): List<JournalEntry>
+    /** Totals per account, scope and day for [from]..[to]; computed in the store, not by loading entries. */
+    fun dailyTotals(from: BusinessDate, to: BusinessDate): List<DailyAccountTotal>
+    /** Entries with at least one line on [account] in [from]..[to] (and [scope], when given), oldest first. */
+    fun entriesTouching(account: AccountCode, scope: Scope?, from: BusinessDate, to: BusinessDate): List<JournalEntry>
 }
 
 interface PeriodStore {

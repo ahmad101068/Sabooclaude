@@ -149,6 +149,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
         },
         status = SaleStatus.valueOf(d.str("status")), revenueJournalId = Codec.idOrNull(d.strOrNull("revenueJournal")),
         cost = Codec.money(d.long("cost")), consumed = d.bool("consumed"),
+        guests = d.intOr("guests", 0), transactions = d.intOr("transactions", 0),
     )
 
     override fun sale(id: GlobalId) = doc("SELECT doc FROM daily_sales WHERE id = ?", id.value)?.let(::saleOf)
@@ -173,6 +174,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
                         }
                     },
                     "status" to sale.status.name, "revenueJournal" to sale.revenueJournalId?.value, "cost" to sale.cost.rial, "consumed" to sale.consumed,
+                    "guests" to sale.guests, "transactions" to sale.transactions,
                 ),
             ),
         ),
