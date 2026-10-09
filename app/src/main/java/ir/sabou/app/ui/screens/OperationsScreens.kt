@@ -53,10 +53,8 @@ import ir.sabou.app.ui.theme.Sabou
 import ir.sabou.app.ui.theme.SabouType
 import ir.sabou.core.Fa
 import ir.sabou.core.ReportTables
-import ir.sabou.inventory.CountLine
 import ir.sabou.inventory.IssueLine
 import ir.sabou.inventory.Item
-import ir.sabou.inventory.PostStockCount
 import ir.sabou.inventory.ReceiptLine
 import ir.sabou.inventory.RecordOpeningStock
 import ir.sabou.inventory.RecordWaste
@@ -104,7 +102,7 @@ object OperationsScreens {
             LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (any(inventoryPerms)) item { SectionTitle("انبار") }
                 if (session.can(Permission.INVENTORY_VIEW)) item { NavRow(R.drawable.ic_operations, "موجودی", low?.let { if (it > 0) "${Fa.number(it.toLong())} کالا زیر حداقل" else "همه کالاها بالای حداقل" }, onClick = { nav.go(Route.Stock) }) }
-                if (session.can(Permission.INVENTORY_COUNT)) item { NavRow(R.drawable.ic_count, "انبارگردانی", "شمارش و ثبت اختلاف", onClick = { nav.go(Route.Count) }) }
+                if (session.can(Permission.INVENTORY_COUNT) || session.can(Permission.INVENTORY_ADJUST)) item { NavRow(R.drawable.ic_count, "انبارگردانی", "شمارش، بررسی و تأیید اختلاف با دلیل", onClick = { nav.go(Route.Count) }) }
                 if (session.can(Permission.INVENTORY_TRANSFER)) item { NavRow(R.drawable.ic_transfer, "انتقال", "بین انبارها و شعب", onClick = { nav.go(Route.StockTransfer) }) }
                 if (session.can(Permission.INVENTORY_WASTE)) item { NavRow(R.drawable.ic_waste, "ضایعات", "ثبت با دلیل", onClick = { nav.go(Route.Waste) }) }
                 if (session.can(Permission.RECIPE_MANAGE)) item { NavRow(R.drawable.ic_recipe, "رسپی و بهای تمام‌شده", "نسخه‌های رسپی آیتم‌های منو", onClick = { nav.go(Route.Recipes) }) }
@@ -253,15 +251,18 @@ object OperationsScreens {
     fun Count(nav: Nav) {
         val session = LocalSession.current
         Column(Modifier.fillMaxSize()) {
-            Header("انبارگردانی", onBack = nav.back)
+            Header("انبارگردانی", onBack = nav.back) { BranchSwitcher() }
             WithBranch { branch ->
                 val inv by invData(branch)
+                val pending by load(session, branch) { overview.stockCounts(branch).count { it.count.status == ir.sabou.inventory.CountStatus.PENDING } }
                 var locationId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
                 Page {
+                    NavRow(R.drawable.ic_count, "سابقه و تأیید انبارگردانی‌ها", pending.orNull()?.takeIf { it > 0 }?.let { "${Fa.number(it.toLong())} شمارش در انتظار تأیید" }
+                        ?: "همه‌ی شمارش‌ها با اختلاف و دلیل", onClick = { nav.go(Route.CountHistory) })
                     Loaded(inv) { d ->
                         val loc = locationId ?: d.locations.firstOrNull()?.id
                         if (d.locations.size > 1) Picker("انبار", d.locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
-                        if (loc != null) key(loc) { CountSheet(nav, branch, loc, d.items) }
+                        if (loc != null && session.can(Permission.INVENTORY_COUNT)) key(loc) { CountSheet(nav, branch, loc) }
                     }
                 }
             }
@@ -269,36 +270,157 @@ object OperationsScreens {
     }
 
     @Composable
-    private fun CountSheet(nav: Nav, branch: Scope.Branch, locationId: GlobalId, items: List<Item>) {
+    private fun CountSheet(nav: Nav, branch: Scope.Branch, locationId: GlobalId) {
         val session = LocalSession.current
-        val balances by load(session, locationId) { overview.stock(locationId) }
+        val sheet by load(session, locationId) { overview.countSheet(locationId) }
         val counted = ir.sabou.app.ui.rememberValueMap<GlobalId, Quantity?>()
-        val id = rememberSaveable { GlobalId.new() }
-        var confirm by remember { mutableStateOf(false) }
+        var note by rememberSaveable { mutableStateOf("") }
+        val id = ir.sabou.app.ui.rememberCommandId(locationId)
+        var confirm by rememberSaveable { mutableStateOf(false) }
         val action = rememberAction()
-        Loaded(balances) { list ->
-            val book = list.associateBy({ it.itemId }, { it.quantity })
+        Loaded(sheet) { list ->
+            val blind = list.all { it.book == null }
             FormCard("مقدار شمارش‌شده") {
-                Text("فقط کالاهایی را که شمردید وارد کنید؛ اختلاف به حساب مغایرت انبار ثبت می‌شود. ترتیب فهرست به محل نگهداری است.", style = SabouType.caption, color = Sabou.colors.muted)
+                Text(
+                    "فقط کالاهایی را که شمردید وارد کنید. ترتیب فهرست به محل نگهداری است. " +
+                        if (blind) "موجودی دفتری نمایش داده نمی‌شود؛ آنچه را می‌بینید بشمارید." else "",
+                    style = SabouType.caption, color = Sabou.colors.muted,
+                )
+                Text("ثبت شمارش موجودی را عوض نمی‌کند؛ اختلاف‌ها پس از بررسی و تأیید مدیر (با دلیل) ثبت می‌شود.", style = SabouType.caption, color = Sabou.colors.primary)
                 var lastShelf: String? = null
-                items.sortedWith(compareBy({ it.shelf.isBlank() }, { it.shelf }, { it.name })).forEach { item ->
+                list.forEach { line ->
+                    val item = line.item
                     if (item.shelf != lastShelf) {
                         lastShelf = item.shelf
                         Text(item.shelf.ifBlank { "بدون محل" }, style = SabouType.bodyStrong, color = Sabou.colors.primary)
                     }
                     key(item.id) {
-                        QuantityInput("${item.name} — دفتری ${Fa.quantity(book[item.id] ?: Quantity.ZERO)}", unitName(item.unit), { counted[item.id] = it })
+                        QuantityInput(item.name + (line.book?.let { " — دفتری ${Fa.quantity(it)}" } ?: ""), unitName(item.unit), { counted[item.id] = it }, value = counted[item.id])
                     }
                 }
+                TextInput("توضیح (اختیاری)", note, { note = it }, singleLine = false)
                 action.error?.let { Banner(it) }
-                PrimaryButton("ثبت انبارگردانی", { confirm = true }, enabled = counted.values.any { it != null }, busy = action.busy)
+                PrimaryButton("ثبت شمارش برای تأیید", { confirm = true }, enabled = counted.values.any { it != null }, busy = action.busy)
             }
         }
         if (confirm) {
-            Confirm("ثبت انبارگردانی؟", "موجودی دفتری کالاهای شمارش‌شده با مقدار شمارش جایگزین می‌شود.", "ثبت", onConfirm = {
-                val lines = counted.entries.mapNotNull { (k, v) -> v?.let { CountLine(k, it) } }
-                action.run({ inventory.count(PostStockCount(id, branch, locationId, lines, session.today)) }) { nav.back() }
+            Confirm("ثبت شمارش؟", "شمارش برای بررسی مدیر ثبت می‌شود و تا تأیید، موجودی تغییر نمی‌کند.", "ثبت", onConfirm = {
+                confirm = false
+                val lines = counted.entries.mapNotNull { (k, v) -> v?.let { ir.sabou.inventory.CountEntry(k, it) } }
+                action.run({ counts.submit(ir.sabou.inventory.SubmitStockCount(id.value, branch, locationId, session.today, lines, note)) }) { r ->
+                    nav.back(); nav.go(Route.CountDetail(r.resultId))
+                }
             }, onDismiss = { confirm = false })
+        }
+    }
+
+    @Composable
+    fun CountHistory(nav: Nav) {
+        val session = LocalSession.current
+        Column(Modifier.fillMaxSize()) {
+            Header("سابقه انبارگردانی", onBack = nav.back) { BranchSwitcher() }
+            WithBranch { branch ->
+                val data by load(session, branch) { overview.stockCounts(branch) }
+                Page {
+                    Loaded(data) { list ->
+                        if (list.isEmpty()) EmptyState("هنوز انبارگردانی‌ای ثبت نشده است.")
+                        list.forEach { v ->
+                            val c = v.count
+                            val value = c.lines.sumOf { it.postedValue ?: 0 }
+                            val sub = "${Fa.date(c.date)} · ${c.countedByName} · ${ReportTables.countStatusName(c.status)}" +
+                                (if (v.showsBook) " · ${Fa.number(c.differences.size.toLong())} اختلاف" else "")
+                            NavRow(R.drawable.ic_count, v.location, sub, if (c.status == ir.sabou.inventory.CountStatus.POSTED) Fa.tomanShort(value) else null,
+                                tint = if (c.status == ir.sabou.inventory.CountStatus.PENDING) Sabou.colors.onAccentSoft else Sabou.colors.primary,
+                                tile = if (c.status == ir.sabou.inventory.CountStatus.PENDING) Sabou.colors.accentSoft else Sabou.colors.primarySoft,
+                                onClick = { nav.go(Route.CountDetail(c.id)) })
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private val varianceReasons = ir.sabou.inventory.VarianceReason.entries.map { Choice(it, ir.sabou.inventory.StockCountOperations.reasonName(it)) }
+
+    @Composable
+    fun CountDetail(nav: Nav, countId: GlobalId) {
+        val session = LocalSession.current
+        val data by load(session, countId) { overview.stockCount(countId) to overview.items().associateBy { it.id } }
+        val reasons = ir.sabou.app.ui.rememberValueMap<GlobalId, ir.sabou.inventory.VarianceReason?>()
+        val notes = ir.sabou.app.ui.rememberValueMap<GlobalId, String>()
+        var rejectReason by rememberSaveable { mutableStateOf("") }
+        var confirm by rememberSaveable { mutableStateOf(0) }   // 1 approve, 2 reject
+        val id = ir.sabou.app.ui.rememberCommandId(countId)
+        val action = rememberAction()
+        Column(Modifier.fillMaxSize()) {
+            Header("انبارگردانی", onBack = nav.back)
+            Page {
+                Loaded(data) { (v, items) ->
+                    val c = v.count
+                    val pending = c.status == ir.sabou.inventory.CountStatus.PENDING
+                    val reviewer = pending && session.can(Permission.INVENTORY_ADJUST)
+                    SCard {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(v.location, style = SabouType.section, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                            Chip(ReportTables.countStatusName(c.status), when (c.status) {
+                                ir.sabou.inventory.CountStatus.PENDING -> ChipKind.ACCENT
+                                ir.sabou.inventory.CountStatus.POSTED -> ChipKind.PRIMARY
+                                ir.sabou.inventory.CountStatus.REJECTED -> ChipKind.DANGER
+                            })
+                        }
+                        KeyValue("تاریخ شمارش", Fa.date(c.date))
+                        KeyValue("شمارش", c.countedByName)
+                        c.reviewedByName?.let { KeyValue(if (c.status == ir.sabou.inventory.CountStatus.REJECTED) "رد" else "تأیید", it) }
+                        c.rejectReason?.let { Text("دلیل رد: $it", style = SabouType.caption, color = Sabou.colors.danger) }
+                        if (c.note.isNotBlank()) Text(c.note, style = SabouType.caption, color = Sabou.colors.muted)
+                        if (c.status == ir.sabou.inventory.CountStatus.POSTED) KeyValue("ارزش کل اختلاف (تومان)", Fa.toman(c.lines.sumOf { it.postedValue ?: 0 }), strong = true)
+                        if (!v.showsBook) Text("تا تأیید، اختلاف‌ها فقط به بررسی‌کننده نشان داده می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
+                    }
+                    val shown = if (v.showsBook) c.lines.sortedBy { it.difference == 0L } else c.lines
+                    shown.forEach { l ->
+                        val item = items[l.itemId]
+                        val unit = item?.let { unitName(it.unit) } ?: ""
+                        SCard {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(item?.name ?: "", style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                                if (v.showsBook && l.difference != 0L) Chip((if (l.difference > 0) "+" else "−") + Fa.quantity(Quantity.of(kotlin.math.abs(l.difference))) + " $unit",
+                                    if (l.difference < 0) ChipKind.DANGER else ChipKind.ACCENT)
+                            }
+                            Text((if (v.showsBook) "دفتری ${Fa.quantity(l.bookAtCount)} · " else "") + "شمارش‌شده ${Fa.quantity(l.counted)} $unit" +
+                                (l.postedValue?.let { " · ارزش ${Fa.toman(it)}" } ?: ""), style = SabouType.caption, color = Sabou.colors.muted)
+                            if (l.note.isNotBlank()) Text("یادداشت شمارنده: ${l.note}", style = SabouType.caption, color = Sabou.colors.muted)
+                            l.reason?.let { Text("دلیل: ${ir.sabou.inventory.StockCountOperations.reasonName(it)}" + if (l.reasonNote.isNotBlank()) " · ${l.reasonNote}" else "",
+                                style = SabouType.caption, color = Sabou.colors.ink) }
+                            if (reviewer && l.difference != 0L) {
+                                Picker("دلیل اختلاف", varianceReasons, reasons[l.itemId], { reasons[l.itemId] = it })
+                                TextInput("توضیح" + if (reasons[l.itemId] == ir.sabou.inventory.VarianceReason.OTHER) " (لازم)" else " (اختیاری)",
+                                    notes[l.itemId] ?: "", { notes[l.itemId] = it })
+                            }
+                        }
+                    }
+                    action.error?.let { Banner(it) }
+                    if (reviewer) {
+                        val missing = c.differences.any { reasons[it.itemId] == null ||
+                            (reasons[it.itemId] == ir.sabou.inventory.VarianceReason.OTHER && (notes[it.itemId] ?: "").trim().length < 3) }
+                        PrimaryButton(if (c.differences.isEmpty()) "تأیید (بدون اختلاف)" else "تأیید و ثبت اختلاف‌ها", { confirm = 1 }, enabled = !missing, busy = action.busy)
+                        if (missing) Text("برای هر اختلاف دلیل را انتخاب کنید.", style = SabouType.caption, color = Sabou.colors.muted)
+                        FormCard("رد شمارش") {
+                            TextInput("دلیل رد", rejectReason, { rejectReason = it }, placeholder = "مثلاً دوباره شمرده شود")
+                            SecondaryButton("رد کن", { confirm = 2 }, enabled = rejectReason.trim().length >= 3, danger = true)
+                        }
+                    }
+                    if (confirm == 1) Confirm("تأیید انبارگردانی؟", "موجودی و حساب مغایرت انبار با این اختلاف‌ها اصلاح می‌شود.", "تأیید", onConfirm = {
+                        confirm = 0
+                        val map = c.differences.associate { it.itemId to ir.sabou.inventory.LineReason(reasons[it.itemId]!!, notes[it.itemId] ?: "") }
+                        action.run({ counts.approve(ir.sabou.inventory.ApproveStockCount(id.value, c.scope, c.id, map)) })
+                    }, onDismiss = { confirm = 0 })
+                    if (confirm == 2) Confirm("رد شمارش؟", "موجودی تغییر نمی‌کند و دلیل رد ثبت می‌شود.", "رد کن", onConfirm = {
+                        confirm = 0
+                        action.run({ counts.reject(ir.sabou.inventory.RejectStockCount(id.value, c.scope, c.id, rejectReason)) })
+                    }, onDismiss = { confirm = 0 }, danger = true)
+                    ExportButtons("انبارگردانی") { listOf(ReportTables.stockCount(overview.stockCount(countId), overview.items().associateBy { it.id })) }
+                }
+            }
         }
     }
 

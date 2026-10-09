@@ -68,6 +68,12 @@ data class PayrollView(
 data class ProductionNeed(val item: Item, val needed: Quantity, val available: Quantity) {
     val short: Boolean get() = available < needed
 }
+/** One row of a count sheet; [book] only for people who review counts (the counter counts blind). */
+data class CountSheetLine(val item: Item, val book: Quantity?)
+
+/** A stock count with its location; [showsBook] false = book quantities hidden from this reader while it is pending. */
+data class CountView(val count: ir.sabou.inventory.StockCount, val location: String, val showsBook: Boolean)
+
 data class SetupStatus(val hasAccounts: Boolean, val hasItems: Boolean, val hasMenu: Boolean)
 
 /**
@@ -187,6 +193,33 @@ class Overview internal constructor(private val core: SabouCore) {
         val a = actor(Permission.INVENTORY_VIEW, Permission.INVENTORY_COUNT, Permission.INVENTORY_OPENING)
         a.require(location(locationId).scope)
         return core.stock.balances(locationId)
+    }
+
+    /** Items to count at a location, in shelf order. The book quantity is shown only to reviewers. */
+    fun countSheet(locationId: GlobalId): List<CountSheetLine> {
+        val a = actor(Permission.INVENTORY_COUNT, Permission.INVENTORY_ADJUST)
+        a.require(location(locationId).scope)
+        val reviewer = a.role.allows(Permission.INVENTORY_ADJUST)
+        val stocked = core.stock.balances(locationId).associateBy { it.itemId }
+        return core.items.all().filter { it.isActive }.sortedWith(compareBy({ it.shelf.ifBlank { "\uFFFF" } }, { it.name }))
+            .map { CountSheetLine(it, if (reviewer) stocked[it.id]?.quantity ?: Quantity.ZERO else null) }
+    }
+
+    /** Counts of a branch, newest first: pending, approved and rejected. */
+    fun stockCounts(branch: Scope.Branch): List<CountView> {
+        val a = actor(Permission.INVENTORY_COUNT, Permission.INVENTORY_ADJUST, Permission.INVENTORY_VIEW)
+        a.require(branch)
+        val names = core.locations.all().associate { it.id to it.name }
+        val reviewer = a.role.allows(Permission.INVENTORY_ADJUST)
+        return core.stockCounts.all().filter { it.scope == branch }.map { c ->
+            val hide = !reviewer && c.status == ir.sabou.inventory.CountStatus.PENDING
+            CountView(if (hide) c.copy(lines = c.lines.map { it.copy(bookAtCount = it.counted) }) else c, names[c.locationId].orEmpty(), !hide)
+        }
+    }
+
+    fun stockCount(id: GlobalId): CountView {
+        val c = core.stockCounts.byId(id) ?: throw DomainException(DomainError.NotFound("STOCK_COUNT"))
+        return stockCounts(c.scope).first { it.count.id == id }
     }
 
     fun lowStock(): List<LowStock> {

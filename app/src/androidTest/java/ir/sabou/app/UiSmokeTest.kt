@@ -33,7 +33,7 @@ class UiSmokeTest {
         Route.Reports, Route.ProfitLoss, Route.DayFlash, Route.ProductMix, Route.Usage, Route.AttendanceReport,
         Route.PrepRecipes, Route.Production,
         Route.Orders, Route.NewOrder(), Route.ReviewQueue, Route.PriceChanges, Route.Suggestions,
-        Route.PendingApprovals, Route.ApprovalRules, Route.Cheques, Route.Budget, Route.BudgetReport, Route.Assets, Route.NewAsset,
+        Route.PendingApprovals, Route.ApprovalRules, Route.CountHistory, Route.Cheques, Route.Budget, Route.BudgetReport, Route.Assets, Route.NewAsset,
     )
 
     @Test fun everyPageOpensAndItsDraftCanBeSaved() {
@@ -45,7 +45,7 @@ class UiSmokeTest {
         val branch = core.identity.accessibleBranches(actor).first().id
         instrumentation.runOnMainSync { app.ui.session = AppSession(core, actor, branch) {} }
         val itemId = core.inventory.createItem(CreateItem(GlobalId.new(), "پیاز", StockUnit.KILOGRAM, Quantity.ZERO)).resultId
-        core.inventory.createItem(CreateItem(GlobalId.new(), "سس مخصوص", StockUnit.KILOGRAM, Quantity.ZERO, prepared = true))
+        val itemId2 = core.inventory.createItem(CreateItem(GlobalId.new(), "سس مخصوص", StockUnit.KILOGRAM, Quantity.ZERO, prepared = true)).resultId
         val today = java.time.LocalDate.now().toEpochDay()
         // Purchasing documents so the detail pages have something to show.
         val scope = ir.sabou.kernel.Scope.Branch(branch)
@@ -70,6 +70,8 @@ class UiSmokeTest {
             ir.sabou.kernel.BusinessDate(today), ir.sabou.assets.DepreciationMethod.STRAIGHT_LINE, 120, null, ir.sabou.assets.Funding.Paid(bank))).resultId
         val allPages = pages + listOf(
             Route.ChequeDetail(cheque), Route.AssetDetail(asset), Route.SupplierAccount(supplier),
+            Route.CountDetail(core.counts.submit(ir.sabou.inventory.SubmitStockCount(GlobalId.new(), scope, location, ir.sabou.kernel.BusinessDate(today),
+                listOf(ir.sabou.inventory.CountEntry(itemId, Quantity.units(2)), ir.sabou.inventory.CountEntry(itemId2, Quantity.ZERO)))).resultId),
             Route.ItemEdit(itemId), Route.LedgerDetail("4101", today - 30, today, null),
             Route.PurchaseDetail(invoice), Route.OrderDetail(order), Route.PurchaseFromOrder(order), Route.SupplierEdit(supplier),
             Route.NewOrder(supplier, location, listOf(ir.sabou.app.ui.OrderDraftLine(itemId, 2_000_000, 100_000))),

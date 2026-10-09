@@ -83,3 +83,9 @@ class InMemoryRecipeStore : RecipeStore, Transactional {
         menu.clear(); menu.putAll(m); versions.clear(); versions.addAll(v); preps.clear(); preps.addAll(p)
     }
 }
+
+class InMemoryStockCountStore : ir.sabou.platform.memory.Table<ir.sabou.kernel.GlobalId, ir.sabou.inventory.StockCount>(), ir.sabou.inventory.StockCountStore {
+    override fun byId(id: ir.sabou.kernel.GlobalId) = get(id)
+    override fun all() = values()
+    override fun save(count: ir.sabou.inventory.StockCount) = put(count.id, count)
+}

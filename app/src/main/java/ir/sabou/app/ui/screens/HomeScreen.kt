@@ -118,6 +118,11 @@ fun HomeScreen(nav: Nav) {
             if (session.actor.role.allows(Permission.PURCHASE_APPROVE)) safe { books.pendingApprovals() }?.takeIf { it.isNotEmpty() }?.let { list ->
                 add(Todo(R.drawable.ic_check, "${Fa.number(list.size.toLong())} فاکتور در انتظار تأیید شما", "پیش از پرداخت تأیید لازم است", Route.PendingApprovals, false))
             }
+            if (branch != null && session.actor.role.allows(Permission.INVENTORY_ADJUST)) safe {
+                overview.stockCounts(branch).filter { it.count.status == ir.sabou.inventory.CountStatus.PENDING }
+            }?.takeIf { it.isNotEmpty() }?.let { list ->
+                add(Todo(R.drawable.ic_count, "${Fa.number(list.size.toLong())} انبارگردانی در انتظار تأیید", "اختلاف‌ها را با دلیل تأیید یا رد کنید", Route.CountHistory, true))
+            }
             safe { buying.reviewQueue() }?.takeIf { it.isNotEmpty() }?.let { list ->
                 add(Todo(R.drawable.ic_alert, "${Fa.number(list.size.toLong())} ردیف فاکتور در انتظار بررسی", "کالای ناشناخته را به کالا یا هزینه وصل کنید", Route.ReviewQueue, false))
             }

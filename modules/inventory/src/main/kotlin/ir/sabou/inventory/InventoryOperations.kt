@@ -118,20 +118,6 @@ data class RecordWaste(
     override fun fingerprint() = "$scope|$locationId|$itemId|${quantity.micros}|$reason|$note|${date.epochDay}"
 }
 
-data class CountLine(val itemId: GlobalId, val counted: Quantity)
-
-/** Physical count: each counted quantity replaces the book quantity; the difference goes to 6106. */
-data class PostStockCount(
-    override val commandId: GlobalId,
-    override val scope: Scope.Branch,
-    val locationId: GlobalId,
-    val lines: List<CountLine>,
-    val date: BusinessDate,
-) : Command {
-    override val requiredPermission = Permission.INVENTORY_COUNT
-    override fun fingerprint() = "$scope|$locationId|${date.epochDay}|" + lines.joinToString(";") { "${it.itemId}:${it.counted.micros}" }
-}
-
 data class TransferStock(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -285,42 +271,6 @@ class InventoryOperations(
             LineDraft(StandardAccounts.INVENTORY, credit = value, memo = location.name, by = cap),
         )))
         gateway.stockOut(ctx, cmd.itemId, location, cmd.quantity, value, MovementKind.WASTE, cmd.date, journal?.id, SourceDocument(ModuleId.INVENTORY, type, docId), null)
-        docId
-    }
-
-    fun count(c: PostStockCount): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
-        val location = requireLocationScope(cmd.locationId, cmd.scope)
-        ensure(cmd.lines.isNotEmpty() && cmd.lines.map { it.itemId }.distinct().size == cmd.lines.size) {
-            DomainError.InvalidInput("lines", "هر کالا فقط یک‌بار شمارش شود.")
-        }
-        val docId = GlobalId.new()
-        cmd.lines.forEach { line ->
-            gateway.item(line.itemId)
-            val book = gateway.balance(line.itemId, location.id)
-            if (line.counted == book.quantity) return@forEach
-            val source = SourceDocument(ModuleId.INVENTORY, COUNT, docId)
-            if (line.counted < book.quantity) {
-                val loss = book.quantity - line.counted
-                val value = gateway.valueOf(book, loss)
-                val journal = if (value.isZero) null else gateway.postOwn(ctx, JournalDraft(cmd.date, location.scope, COUNT, docId, "کسری انبارگردانی", listOf(
-                    LineDraft(StandardAccounts.INVENTORY_VARIANCE, debit = value, by = cap),
-                    LineDraft(StandardAccounts.INVENTORY, credit = value, memo = location.name, by = cap),
-                )))
-                gateway.stockOut(ctx, line.itemId, location, loss, value, MovementKind.COUNT_LOSS, cmd.date, journal?.id, source, null)
-            } else {
-                // A gain is valued at the current average cost; with no stock left there is no
-                // reliable cost, so the gain is recorded at zero value and flagged for review.
-                val gain = line.counted - book.quantity
-                val value = if (book.quantity.isZero) Money.ZERO
-                else Money.of(ir.sabou.kernel.Ratio.mulDiv(book.value.rial, gain.micros, book.quantity.micros))
-                val journal = if (value.isZero) null else gateway.postOwn(ctx, JournalDraft(cmd.date, location.scope, COUNT, docId, "اضافه انبارگردانی", listOf(
-                    LineDraft(StandardAccounts.INVENTORY, debit = value, memo = location.name, by = cap),
-                    LineDraft(StandardAccounts.INVENTORY_VARIANCE, credit = value, by = cap),
-                )))
-                gateway.stockIn(ctx, line.itemId, location, gain, value, MovementKind.COUNT_GAIN, cmd.date, journal?.id, source, null)
-            }
-        }
-        ctx.audit(AuditDraft("STOCK_COUNT", "LOCATION", location.id.value, "lines=${cmd.lines.size}"))
         docId
     }
 

@@ -193,4 +193,35 @@ class BooksTest {
         assertTrue(core.books.cheques(ChequeDirection.RECEIVED).all { it.cheque.status == ChequeStatus.VOID })
         assertEquals(0, core.overview.treasury().single { it.account.id == box }.balance)
     }
+
+    @Test fun theCounterCountsBlindAndTheReviewSurvivesARestart() {
+        val core = boot()
+        core.bootstrap("شعبه ونک", "مالک", "owner", "123456".toCharArray())
+        val branch = Scope.Branch(core.overview.branches().single().id)
+        val kitchen = core.overview.locations(branch).single().id
+        val cheese = core.inventory.createItem(CreateItem(id(), "پنیر", StockUnit.KILOGRAM, Quantity.ZERO)).resultId
+        val supplier = core.purchasing.registerSupplier(RegisterSupplier(id(), "لبنیات", "")).resultId
+        core.purchasing.postInvoice(PostPurchaseInvoice(id(), branch, supplier, "1", kitchen, day, day, listOf(InvoiceLine(cheese, Quantity.units(10), rial(3_000_000)))))
+        core.identity.createUser("store", "انباردار", Role.STOREKEEPER, setOf(branch.branchId), "222222".toCharArray())
+        core.identity.logout(); core.identity.login("store", "222222".toCharArray())
+        assertEquals(null, core.overview.countSheet(kitchen).single { it.item.id == cheese }.book)       // blind
+        val count = core.counts.submit(ir.sabou.inventory.SubmitStockCount(id(), branch, kitchen, day, listOf(ir.sabou.inventory.CountEntry(cheese, Quantity.units(9))))).resultId
+        val seenByCounter = core.overview.stockCount(count)
+        assertEquals(false, seenByCounter.showsBook)
+        assertEquals(0, seenByCounter.count.lines.single().difference)
+        core.identity.logout()
+
+        val again = boot()
+        again.identity.login("owner", "123456".toCharArray())
+        assertEquals(Quantity.units(10), again.overview.countSheet(kitchen).single { it.item.id == cheese }.book)
+        val pending = again.overview.stockCount(count)
+        assertEquals(-1_000_000, pending.count.lines.single().difference)
+        assertEquals("انباردار", pending.count.countedByName)
+        again.counts.approve(ir.sabou.inventory.ApproveStockCount(id(), branch, count, mapOf(cheese to ir.sabou.inventory.LineReason(ir.sabou.inventory.VarianceReason.UNRECORDED_USE, "تست پیتزای جدید"))))
+        val done = again.overview.stockCounts(branch).single().count
+        assertEquals(ir.sabou.inventory.CountStatus.POSTED, done.status)
+        assertEquals(-300_000L, done.lines.single().postedValue)
+        assertEquals("تست پیتزای جدید", done.lines.single().reasonNote)
+        assertEquals(300_000, again.ledger.balance(StandardAccounts.INVENTORY_VARIANCE, branch).rial)
+    }
 }

@@ -278,3 +278,35 @@ class SqlRecipeStore(db: SqlDatabase) : SqlTable(db), RecipeStore {
         ),
     )
 }
+
+class SqlStockCountStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.StockCountStore {
+    private fun read(d: Doc) = ir.sabou.inventory.StockCount(
+        Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.id(d.str("location")), Codec.date(d.long("date")),
+        d.docs("lines").map {
+            ir.sabou.inventory.CountedLine(
+                Codec.id(it.str("item")), Codec.qty(it.long("counted")), Codec.qty(it.long("book")), it.strOr("note", ""),
+                it.strOrNull("reason")?.let(ir.sabou.inventory.VarianceReason::valueOf), it.strOr("reasonNote", ""), it.longOrNull("posted"),
+            )
+        },
+        d.strOr("note", ""), ir.sabou.inventory.CountStatus.valueOf(d.str("status")), Codec.id(d.str("countedBy")), d.str("countedByName"), d.long("countedAt"),
+        Codec.idOrNull(d.strOrNull("reviewedBy")), d.strOrNull("reviewedByName"), d.longOrNull("reviewedAt"), d.strOrNull("rejectReason"),
+    )
+    override fun byId(id: GlobalId) = doc("SELECT doc FROM stock_counts WHERE id = ?", id.value)?.let(::read)
+    override fun all() = docs("SELECT doc FROM stock_counts ORDER BY rowid DESC").map(::read)
+    override fun save(count: ir.sabou.inventory.StockCount) = upsert(
+        "stock_counts", "id",
+        mapOf(
+            "id" to count.id.value, "scope" to Codec.scope(count.scope), "location_id" to count.locationId.value, "status" to count.status.name,
+            "doc" to Json.encode(mapOf(
+                "id" to count.id.value, "scope" to Codec.scope(count.scope), "location" to count.locationId.value, "date" to count.date.epochDay,
+                "lines" to count.lines.map {
+                    mapOf("item" to it.itemId.value, "counted" to it.counted.micros, "book" to it.bookAtCount.micros, "note" to it.note,
+                        "reason" to it.reason?.name, "reasonNote" to it.reasonNote, "posted" to it.postedValue)
+                },
+                "note" to count.note, "status" to count.status.name, "countedBy" to count.countedBy.value, "countedByName" to count.countedByName,
+                "countedAt" to count.countedAt, "reviewedBy" to count.reviewedBy?.value, "reviewedByName" to count.reviewedByName,
+                "reviewedAt" to count.reviewedAt, "rejectReason" to count.rejectReason,
+            )),
+        ),
+    )
+}
