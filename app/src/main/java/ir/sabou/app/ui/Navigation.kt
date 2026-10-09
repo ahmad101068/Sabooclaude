@@ -50,6 +50,7 @@ sealed interface Route : java.io.Serializable {
     data class PurchaseFromOrder(val orderId: GlobalId) : Route
     data object Suppliers : Route
     data class SupplierEdit(val supplierId: GlobalId) : Route
+    data class SupplierAccount(val supplierId: GlobalId) : Route
     data object Orders : Route
     /** A new order, optionally filled from the suggested-purchase list. */
     data class NewOrder(val supplierId: GlobalId? = null, val locationId: GlobalId? = null, val lines: List<OrderDraftLine> = emptyList()) : Route

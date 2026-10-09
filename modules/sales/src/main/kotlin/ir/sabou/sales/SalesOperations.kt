@@ -53,7 +53,7 @@ data class SaveSaleDraft(
     override fun fingerprint() = "$scope|${date.epochDay}|$kitchenLocationId|${discount.rial}|${serviceCharge.rial}|${tax.rial}|$guests|$transactions|" +
         lines.joinToString(";") { "${it.menuItemId}:${it.portions.micros}:${it.gross.rial}" } + "|" +
         settlements.joinToString(";") { s -> when (s) {
-            is Settlement.Liquid -> "L:${s.treasuryAccountId}:${s.amount.rial}"
+            is Settlement.Liquid -> "L:${s.treasuryAccountId}:${s.amount.rial}:${s.cheque?.fingerprint()}"
             is Settlement.Credit -> "C:${s.customerId}:${s.amount.rial}:${s.dueDate.epochDay}"
         } }
 }
@@ -162,6 +162,14 @@ class SalesOperations(
         )
         ensure(cmd.guests in 0..100_000 && cmd.transactions in 0..100_000) { DomainError.InvalidInput("guests", "تعداد مهمان یا تراکنش معتبر نیست.") }
         ensure(sale.discount <= sale.gross) { DomainError.InvalidInput("discount", "تخفیف از فروش بیشتر است.") }
+        cmd.settlements.filterIsInstance<Settlement.Liquid>().forEach { s ->
+            val account = treasury.account(s.treasuryAccountId)
+            ensure(account.scope == cmd.scope) { DomainError.InvalidInput("account", "حساب تسویه متعلق به این شعبه نیست.") }
+            ensure(account.kind != ir.sabou.treasury.TreasuryKind.ISSUED_CHEQUES) { DomainError.InvalidInput("account", "دسته‌چک برای دریافت نیست.") }
+            // A cheque box takes one cheque per settlement, with its details; other accounts take none.
+            ensure((account.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES) == (s.cheque != null)) { DomainError.InvalidInput("cheque", "مشخصات چک فقط و حتماً برای صندوق چک لازم است.") }
+            s.cheque?.validate()
+        }
         sales.saveSale(sale)
         ctx.audit(AuditDraft("SALE_DRAFT_SAVE", "DAILY_SALE", sale.id.value, "payable=${sale.payable.rial};settled=${sale.settled.rial}"))
         sale.id
@@ -209,7 +217,7 @@ class SalesOperations(
                 is Settlement.Liquid -> {
                     ensure(treasury.account(s.treasuryAccountId).scope == sale.scope) { DomainError.InvalidInput("account", "حساب تسویه متعلق به این شعبه نیست.") }
                     treasury.settle(ctx, capability, s.treasuryAccountId, Direction.RECEIPT, s.amount, sale.date, SETTLEMENT, sale.id, "تسویه فروش روز",
-                        listOf(LineDraft(StandardAccounts.SALES_CLEARING, credit = s.amount, by = capability)))
+                        listOf(LineDraft(StandardAccounts.SALES_CLEARING, credit = s.amount, by = capability)), s.cheque?.let { ir.sabou.treasury.ChequeInstruction.New(it) })
                 }
                 is Settlement.Credit -> sales.saveReceivable(Receivable(GlobalId.new(), s.customerId, sale.scope, sale.id, s.amount, s.dueDate, voided = false))
             }

@@ -143,6 +143,27 @@ private class CreditRow(customer: GlobalId?, amount: Money?, due: BusinessDate) 
     var due by mutableStateOf(due)
 }
 
+/** A customer's cheque taken for the day's sale, into a cheque box. */
+private class ChequeRow(account: GlobalId, amount: Money?, number: String, bank: String, sayad: String, due: BusinessDate, party: String) {
+    var account by mutableStateOf(account)
+    var amount by mutableStateOf(amount)
+    var number by mutableStateOf(number)
+    var bank by mutableStateOf(bank)
+    var sayad by mutableStateOf(sayad)
+    var due by mutableStateOf(due)
+    var party by mutableStateOf(party)
+    fun fields(): ArrayList<Any?> = arrayListOf(account, amount, number, bank, sayad, due, party)
+    fun settlement(): Settlement.Liquid? {
+        val a = amount ?: return null
+        val no = Fa.latinDigits(number).trim(); val b = bank.trim(); val p = party.trim()
+        if (a.isZero || no.isEmpty() || b.isEmpty() || p.isEmpty()) return null
+        return Settlement.Liquid(account, a, ir.sabou.treasury.ChequeDetails(no, b, Fa.latinDigits(sayad).trim(), due, p))
+    }
+    companion object {
+        fun of(f: List<Any?>) = ChequeRow(f[0] as GlobalId, f[1] as Money?, f[2] as String, f[3] as String, f[4] as String, f[5] as BusinessDate, f[6] as String)
+    }
+}
+
 private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
     val portions = mutableStateMapOf<GlobalId, Quantity?>().apply { sale?.lines?.forEach { put(it.menuItemId, it.portions) } }
     val gross = mutableStateMapOf<GlobalId, Money?>().apply { sale?.lines?.forEach { put(it.menuItemId, it.gross) } }
@@ -154,7 +175,12 @@ private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
     var guests by mutableStateOf(sale?.guests?.takeIf { it > 0 }?.let { Fa.number(it.toLong()) } ?: "")
     var transactions by mutableStateOf(sale?.transactions?.takeIf { it > 0 }?.let { Fa.number(it.toLong()) } ?: "")
     val liquid = mutableStateMapOf<GlobalId, Money?>().apply {
-        sale?.settlements?.filterIsInstance<Settlement.Liquid>()?.forEach { put(it.treasuryAccountId, it.amount) }
+        sale?.settlements?.filterIsInstance<Settlement.Liquid>()?.filter { it.cheque == null }?.forEach { put(it.treasuryAccountId, it.amount) }
+    }
+    val cheques = mutableStateListOf<ChequeRow>().apply {
+        sale?.settlements?.filterIsInstance<Settlement.Liquid>()?.forEach { s ->
+            s.cheque?.let { c -> add(ChequeRow(s.treasuryAccountId, s.amount, c.number, c.bank, c.sayadId, c.dueDate, c.counterparty)) }
+        }
     }
     val credits = mutableStateListOf<CreditRow>().apply {
         sale?.settlements?.filterIsInstance<Settlement.Credit>()?.forEach { add(CreditRow(it.customerId, it.amount, it.dueDate)) }
@@ -163,6 +189,8 @@ private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
     private val defaultDue = today.plusDays(30)
 
     fun addCredit() { credits.add(CreditRow(null, null, defaultDue)) }
+    fun addCheque(box: GlobalId, today: BusinessDate) { cheques.add(ChequeRow(box, null, "", "", "", today, "")) }
+    fun chequesComplete() = cheques.all { it.settlement() != null }
 
     fun lines(): List<SaleLine> = portions.entries.mapNotNull { (id, q) ->
         val g = gross[id]
@@ -171,6 +199,7 @@ private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
 
     fun settlements(): List<Settlement> =
         liquid.entries.mapNotNull { (id, m) -> m?.takeIf { !it.isZero }?.let { Settlement.Liquid(id, it) } } +
+            cheques.mapNotNull { it.settlement() } +
             credits.mapNotNull { r -> val c = r.customer; val a = r.amount; if (c != null && a != null && !a.isZero) Settlement.Credit(c, a, r.due) else null }
 
     fun grossTotal() = lines().sumOf { it.gross.rial }
@@ -188,6 +217,7 @@ private fun saleFormSaver(data: SalesData, today: BusinessDate) = androidx.compo
         listOf(
             HashMap(f.portions), HashMap(f.gross), f.kitchen, f.discount, f.service, f.tax, HashMap(f.liquid),
             ArrayList(f.credits.map { arrayListOf(it.customer, it.amount, it.due) }), f.step, f.guests, f.transactions,
+            ArrayList(f.cheques.map { it.fields() }),
         )
     },
     restore = { l ->
@@ -200,6 +230,7 @@ private fun saleFormSaver(data: SalesData, today: BusinessDate) = androidx.compo
             (l[7] as List<List<Any?>>).forEach { c -> credits.add(CreditRow(c[0] as GlobalId?, c[1] as Money?, c[2] as BusinessDate)) }
             step = l[8] as Int
             if (l.size > 10) { guests = l[9] as String; transactions = l[10] as String }
+            if (l.size > 11) (l[11] as List<List<Any?>>).forEach { cheques.add(ChequeRow.of(it)) }
         } }.getOrNull()   // a draft that does not fit the form starts it fresh
     },
 )
@@ -246,7 +277,7 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
             }
             1 -> FormCard("روش‌های تسویه") {
                 if (data.accounts.isEmpty()) Banner("برای این شعبه صندوق یا کارت‌خوانی تعریف نشده است.", ChipKind.ACCENT)
-                data.accounts.forEach { a ->
+                data.accounts.filter { it.kind.isOrdinary }.forEach { a ->
                     key(a.id) {
                         val (tint, tile) = kindColors(a.kind)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -254,6 +285,37 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                             MoneyInput("${kindName(a.kind)} · ${a.name}", form.liquid[a.id], { form.liquid[a.id] = it }, Modifier.weight(1f))
                         }
                     }
+                }
+                val boxes = data.accounts.filter { it.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES }
+                form.cheques.forEachIndexed { i, row ->
+                    key(row) {
+                        Column(
+                            Modifier.fillMaxWidth().clip(SabouShapes.field).background(Sabou.colors.bankSoft).padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("چک ${Fa.number(i + 1L)}", style = SabouType.bodyStrong, color = Sabou.colors.bank, modifier = Modifier.weight(1f))
+                                Text("حذف", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable { form.cheques.remove(row) }.padding(6.dp))
+                            }
+                            if (boxes.size > 1) Picker("صندوق چک", boxes.map { Choice(it.id, it.name) }, row.account, { row.account = it })
+                            MoneyInput("مبلغ چک", row.amount, { row.amount = it })
+                            TextInput("شماره چک", row.number, { row.number = it }, keyboard = androidx.compose.ui.text.input.KeyboardType.Number)
+                            TextInput("بانک", row.bank, { row.bank = it })
+                            TextInput("شناسه صیادی (اختیاری)", row.sayad, { row.sayad = it }, keyboard = androidx.compose.ui.text.input.KeyboardType.Number)
+                            DateInput("سررسید", row.due, { row.due = it }, session.today)
+                            TextInput("صاحب حساب", row.party, { row.party = it })
+                            if (row.settlement() == null) Text("مبلغ، شماره، بانک و صاحب حساب لازم است.", style = SabouType.caption, color = Sabou.colors.danger)
+                        }
+                    }
+                }
+                if (boxes.isNotEmpty()) Row(
+                    Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(SabouShapes.field).border(1.dp, Sabou.colors.bankSoft, SabouShapes.field)
+                        .clickable { form.addCheque(boxes.first().id, session.today) },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Icon(painterResource(R.drawable.ic_plus), contentDescription = null, tint = Sabou.colors.bank, modifier = Modifier.size(18.dp))
+                    Text(" افزودن چک", style = SabouType.bodyStrong, color = Sabou.colors.bank)
                 }
                 form.credits.forEachIndexed { i, row ->
                     key(row) {
@@ -282,7 +344,7 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                     Text(" افزودن نسیه", style = SabouType.bodyStrong, color = Sabou.colors.primary)
                 }
                 SecondaryButton("بازگشت به اقلام", { form.step = 0 })
-                PrimaryButton("ادامه: تأیید", { form.step = 2 }, enabled = form.settlements().isNotEmpty())
+                PrimaryButton("ادامه: تأیید", { form.step = 2 }, enabled = form.settlements().isNotEmpty() && form.chequesComplete())
             }
             else -> FormCard("تأیید و ثبت") {
                 KeyValue("فروش ناخالص", Fa.toman(form.grossTotal()))
@@ -293,7 +355,8 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                 KeyValue("قابل تسویه (تومان)", Fa.toman(form.payable()), strong = true)
                 form.settlements().forEach { s ->
                     val label = when (s) {
-                        is Settlement.Liquid -> data.accounts.firstOrNull { it.id == s.treasuryAccountId }?.name ?: "حساب"
+                        is Settlement.Liquid -> s.cheque?.let { "چک ${Fa.digits(it.number)} · ${it.bank} · سررسید ${Fa.date(it.dueDate)}" }
+                            ?: data.accounts.firstOrNull { it.id == s.treasuryAccountId }?.name ?: "حساب"
                         is Settlement.Credit -> "نسیه · " + (data.customers.firstOrNull { it.id == s.customerId }?.name ?: "مشتری")
                     }
                     KeyValue(label, Fa.toman(s.amount))
@@ -383,7 +446,8 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
             Text("تسویه", style = SabouType.section, color = Sabou.colors.ink)
             sale.settlements.forEach { s ->
                 when (s) {
-                    is Settlement.Liquid -> KeyValue(data.accounts.firstOrNull { it.id == s.treasuryAccountId }?.name ?: "حساب", "+ " + Fa.toman(s.amount), Sabou.colors.moneyIn)
+                    is Settlement.Liquid -> KeyValue(s.cheque?.let { "چک ${Fa.digits(it.number)} · ${it.bank}" } ?: data.accounts.firstOrNull { it.id == s.treasuryAccountId }?.name ?: "حساب",
+                        "+ " + Fa.toman(s.amount), Sabou.colors.moneyIn)
                     is Settlement.Credit -> KeyValue("نسیه · " + (data.customers.firstOrNull { it.id == s.customerId }?.name ?: "مشتری"), Fa.toman(s.amount), Sabou.colors.onAccentSoft)
                 }
             }

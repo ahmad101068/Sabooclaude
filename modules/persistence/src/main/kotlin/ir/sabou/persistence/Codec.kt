@@ -32,6 +32,13 @@ internal object Codec {
     fun date(v: Long): BusinessDate = BusinessDate(v)
 
     fun source(d: SourceDocument): Map<String, Any?> = mapOf("module" to d.module.name, "type" to d.type, "id" to d.id.value)
+    fun cheque(c: ir.sabou.treasury.ChequeDetails): Map<String, Any?> = mapOf(
+        "number" to c.number, "bank" to c.bank, "sayad" to c.sayadId, "due" to c.dueDate.epochDay, "counterparty" to c.counterparty,
+        "note" to c.note, "bankAccount" to c.bankAccountId?.value,
+    )
+    fun chequeOf(d: Doc) = ir.sabou.treasury.ChequeDetails(
+        d.str("number"), d.str("bank"), d.strOr("sayad", ""), date(d.long("due")), d.str("counterparty"), d.strOr("note", ""), idOrNull(d.strOrNull("bankAccount")),
+    )
     fun sourceOf(d: Doc): SourceDocument = SourceDocument(ModuleId.valueOf(d.str("module")), d.str("type"), id(d.str("id")))
 }
 

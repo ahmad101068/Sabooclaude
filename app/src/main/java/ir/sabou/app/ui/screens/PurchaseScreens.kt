@@ -810,7 +810,7 @@ object PurchaseScreens {
                             if (!s.isActive) "غیرفعال" else delivery,
                         ).joinToString(" · ")
                         NavRow(R.drawable.ic_supplier, s.name, sub, tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft,
-                            onClick = { if (session.can(Permission.SUPPLIER_MANAGE)) nav.go(Route.SupplierEdit(s.id)) })
+                            onClick = { nav.go(Route.SupplierAccount(s.id)) })
                     }
                     if (list.isNotEmpty() && session.can(Permission.PURCHASE_VIEW)) ExportButtons("تامین-کنندگان") { listOf(ReportTables.suppliers(overview.suppliers())) }
                 }
@@ -822,6 +822,80 @@ object PurchaseScreens {
                         PrimaryButton("ثبت", {
                             action.run({ purchasing.registerSupplier(RegisterSupplier(id.value, name, phone)) }) { name = ""; phone = ""; id.value = GlobalId.new() }
                         }, enabled = name.trim().length >= 2, busy = action.busy)
+                    }
+                }
+            }
+        }
+    }
+
+    /** What we owe a supplier, its unapplied return credit per branch, and money it paid back. */
+    @Composable
+    fun SupplierAccount(nav: Nav, supplierId: GlobalId) {
+        val session = LocalSession.current
+        val data by load(session, supplierId) {
+            val account = buying.supplierAccount(supplierId)
+            Triple(account, overview.branches().associate { it.id to it.name },
+                if (session.can(Permission.PURCHASE_PAY) && session.can(Permission.TREASURY_RECEIPT)) overview.paymentAccounts() else emptyList())
+        }
+        var scopeId by rememberSaveable { mutableStateOf<BranchId?>(null) }
+        var accountId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var amount by rememberSaveable { mutableStateOf<Money?>(null) }
+        var date by rememberSaveable { mutableStateOf(session.today) }
+        var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+        val chequeFields = ir.sabou.app.ui.rememberChequeFields()
+        val id = rememberCommandId(supplierId)
+        val action = rememberAction()
+        pending?.let { (title, act) -> Confirm(title, "سند برگشتی ثبت می‌شود و سابقه حذف نمی‌شود.", "برگشت بزن", { pending = null; act() }, { pending = null }, danger = true) }
+        Column(Modifier.fillMaxSize()) {
+            Header("حساب تأمین‌کننده", onBack = nav.back)
+            Page {
+                Loaded(data) { (acc, branches, accounts) ->
+                    val s = acc.supplier
+                    SCard {
+                        Text(s.name, style = SabouType.section, color = Sabou.colors.ink)
+                        if (s.phone.isNotBlank()) KeyValue("تلفن", Fa.digits(s.phone))
+                        KeyValue("بدهی ما (تومان)", Fa.toman(acc.owed), strong = true)
+                        acc.credits.forEach { (b, credit) -> KeyValue("اعتبار مرجوعی · ${branches[b.branchId] ?: "شعبه"}", Fa.toman(credit), Sabou.colors.moneyIn) }
+                        s.nextDelivery(session.today, minutesNow())?.let { Text(deliveryText(it, session.today), style = SabouType.caption, color = Sabou.colors.muted) }
+                    }
+                    if (session.can(Permission.SUPPLIER_MANAGE)) NavRow(R.drawable.ic_settings, "ویرایش مشخصات", "تلفن، روزهای تحویل و مهلت سفارش", onClick = { nav.go(Route.SupplierEdit(s.id)) })
+                    if (acc.refunds.isNotEmpty()) SCard {
+                        Text("استرداد اعتبار", style = SabouType.section, color = Sabou.colors.ink)
+                        acc.refunds.forEach { r ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("${Fa.date(r.date)} · ${accounts.firstOrNull { it.id == r.treasuryAccountId }?.name ?: ""}" + if (r.reversed) " · برگشت‌خورده" else "",
+                                    style = SabouType.body, color = Sabou.colors.muted, modifier = Modifier.weight(1f))
+                                Text(Fa.toman(r.amount), style = SabouType.bodyStrong, color = Sabou.colors.moneyIn)
+                                if (!r.reversed && session.can(Permission.PURCHASE_REVERSE)) {
+                                    Text("برگشت", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable {
+                                        pending = "برگشت این استرداد؟" to {
+                                            action.run({ purchasing.reverseRefund(ir.sabou.purchasing.ReverseSupplierRefund(GlobalId.new(), r.scope, r.id, session.today, "اصلاح استرداد")) })
+                                        }
+                                    }.padding(start = 10.dp))
+                                }
+                            }
+                        }
+                    }
+                    if (acc.credits.isNotEmpty() && accounts.isNotEmpty()) FormCard("دریافت وجه اعتبار از تأمین‌کننده") {
+                        Text("وقتی تأمین‌کننده مبلغ کالای مرجوعی را پس می‌دهد (به‌جای کم کردن از فاکتور بعدی).", style = SabouType.caption, color = Sabou.colors.muted)
+                        val branch = scopeId ?: acc.credits.first().first.branchId
+                        val available = acc.credits.firstOrNull { it.first.branchId == branch }?.second ?: Money.ZERO
+                        if (acc.credits.size > 1) Picker("اعتبار شعبه", acc.credits.map { Choice(it.first.branchId, branches[it.first.branchId] ?: "شعبه", "${Fa.toman(it.second)} تومان") },
+                            branch, { scopeId = it })
+                        val usable = accounts.filter { it.kind != ir.sabou.treasury.TreasuryKind.ISSUED_CHEQUES }
+                        val account = usable.firstOrNull { it.id == accountId }
+                        val byCheque = account?.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES
+                        Picker("واریز به", accountChoices(usable, cheques = true), accountId, { accountId = it })
+                        MoneyInput(if (byCheque) "مبلغ چک" else "مبلغ", amount, { amount = it }, hint = "حداکثر ${Fa.toman(available)} تومان")
+                        DateInput("تاریخ", date, { date = it }, session.today)
+                        if (byCheque) ir.sabou.app.ui.ChequeInputs(chequeFields, session.today, s.name, issued = false, banks = emptyList())
+                        val cheque = if (byCheque) ir.sabou.app.ui.chequeDetails(chequeFields, session.today, s.name, issued = false) else null
+                        action.error?.let { Banner(it) }
+                        PrimaryButton("ثبت دریافت", {
+                            action.run({
+                                purchasing.receiveRefund(ir.sabou.purchasing.ReceiveSupplierRefund(id.value, Scope.Branch(branch), s.id, accountId!!, amount!!, date, cheque))
+                            }) { id.value = GlobalId.new(); amount = null; chequeFields.clear() }
+                        }, enabled = accountId != null && amount != null && (!byCheque || cheque != null), busy = action.busy)
                     }
                 }
             }

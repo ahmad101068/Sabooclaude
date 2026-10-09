@@ -126,6 +126,13 @@ object Schema {
                 "CREATE TABLE depreciation_runs (id TEXT PRIMARY KEY, doc TEXT NOT NULL)",
             ),
         ),
+        Migration(
+            5,
+            listOf(
+                "CREATE TABLE supplier_refunds (id TEXT PRIMARY KEY, supplier_id TEXT NOT NULL REFERENCES suppliers(id), scope TEXT NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX supplier_refunds_supplier ON supplier_refunds(supplier_id, scope)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

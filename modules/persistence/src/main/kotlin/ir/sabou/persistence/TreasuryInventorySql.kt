@@ -20,7 +20,6 @@ import ir.sabou.inventory.StockStore
 import ir.sabou.inventory.StockUnit
 import ir.sabou.ledger.AccountCode
 import ir.sabou.treasury.Cheque
-import ir.sabou.treasury.ChequeDetails
 import ir.sabou.treasury.ChequeDirection
 import ir.sabou.treasury.ChequeEvent
 import ir.sabou.treasury.ChequeStatus
@@ -96,8 +95,7 @@ class SqlChequeStore(db: SqlDatabase) : SqlTable(db), ChequeStore {
         return Cheque(
             Codec.id(d.str("id")), ChequeDirection.valueOf(d.str("direction")), Codec.id(d.str("account")), Codec.scopeOf(d.str("scope")),
             Codec.money(d.long("amount")),
-            ChequeDetails(det.str("number"), det.str("bank"), det.strOr("sayad", ""), Codec.date(det.long("due")), det.str("counterparty"),
-                det.strOr("note", ""), Codec.idOrNull(det.strOrNull("bankAccount"))),
+            Codec.chequeOf(det),
             ChequeStatus.valueOf(d.str("status")),
             d.docs("events").map {
                 ChequeEvent(ChequeStatus.valueOf(it.str("status")), Codec.date(it.long("date")), it.str("sourceType"), Codec.id(it.str("sourceId")),
@@ -116,10 +114,7 @@ class SqlChequeStore(db: SqlDatabase) : SqlTable(db), ChequeStore {
             "doc" to Json.encode(mapOf(
                 "id" to cheque.id.value, "direction" to cheque.direction.name, "account" to cheque.accountId.value, "scope" to Codec.scope(cheque.scope),
                 "amount" to cheque.amount.rial, "status" to cheque.status.name, "bankAccount" to cheque.bankAccountId?.value,
-                "details" to cheque.details.let {
-                    mapOf("number" to it.number, "bank" to it.bank, "sayad" to it.sayadId, "due" to it.dueDate.epochDay, "counterparty" to it.counterparty,
-                        "note" to it.note, "bankAccount" to it.bankAccountId?.value)
-                },
+                "details" to Codec.cheque(cheque.details),
                 "events" to cheque.events.map {
                     mapOf("status" to it.status.name, "date" to it.date.epochDay, "sourceType" to it.sourceType, "sourceId" to it.sourceId.value,
                         "account" to it.accountId?.value, "note" to it.note, "reversed" to it.reversed)

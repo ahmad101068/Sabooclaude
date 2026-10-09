@@ -184,6 +184,24 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
         ),
     )
 
+    private fun refundOf(d: Doc) = ir.sabou.purchasing.SupplierRefund(
+        Codec.id(d.str("id")), Codec.id(d.str("supplier")), Codec.branchOf(d.str("scope")), Codec.id(d.str("treasury")), Codec.money(d.long("amount")),
+        Codec.date(d.long("date")), Codec.idOrNull(d.strOrNull("bridge")), d.bool("reversed"),
+    )
+    override fun refund(id: GlobalId) = doc("SELECT doc FROM supplier_refunds WHERE id = ?", id.value)?.let(::refundOf)
+    override fun refundsOf(supplierId: GlobalId, scope: Scope.Branch) =
+        docs("SELECT doc FROM supplier_refunds WHERE supplier_id = ? AND scope = ? ORDER BY rowid", supplierId.value, Codec.scope(scope)).map(::refundOf)
+    override fun saveRefund(refund: ir.sabou.purchasing.SupplierRefund) = upsert(
+        "supplier_refunds", "id",
+        mapOf(
+            "id" to refund.id.value, "supplier_id" to refund.supplierId.value, "scope" to Codec.scope(refund.scope),
+            "doc" to Json.encode(mapOf(
+                "id" to refund.id.value, "supplier" to refund.supplierId.value, "scope" to Codec.scope(refund.scope), "treasury" to refund.treasuryAccountId.value,
+                "amount" to refund.amount.rial, "date" to refund.date.epochDay, "bridge" to refund.bridgeJournalId?.value, "reversed" to refund.reversed,
+            )),
+        ),
+    )
+
     private fun orderOf(d: Doc) = PurchaseOrder(
         Codec.id(d.str("id")), d.long("number"), Codec.id(d.str("supplier")), Codec.branchOf(d.str("scope")), Codec.id(d.str("location")),
         Codec.date(d.long("date")), Codec.date(d.long("expected")),
@@ -272,7 +290,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
         discount = Codec.money(d.long("discount")), serviceCharge = Codec.money(d.long("service")), tax = Codec.money(d.long("tax")),
         settlements = d.docs("settlements").map {
             when (it.str("kind")) {
-                "LIQUID" -> Settlement.Liquid(Codec.id(it.str("treasury")), Codec.money(it.long("amount")))
+                "LIQUID" -> Settlement.Liquid(Codec.id(it.str("treasury")), Codec.money(it.long("amount")), it.docOrNull("cheque")?.let(Codec::chequeOf))
                 "CREDIT" -> Settlement.Credit(Codec.id(it.str("customer")), Codec.money(it.long("amount")), Codec.date(it.long("due")))
                 else -> error("unknown_settlement")
             }
@@ -299,7 +317,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
                     "discount" to sale.discount.rial, "service" to sale.serviceCharge.rial, "tax" to sale.tax.rial,
                     "settlements" to sale.settlements.map {
                         when (it) {
-                            is Settlement.Liquid -> mapOf("kind" to "LIQUID", "treasury" to it.treasuryAccountId.value, "amount" to it.amount.rial)
+                            is Settlement.Liquid -> mapOf("kind" to "LIQUID", "treasury" to it.treasuryAccountId.value, "amount" to it.amount.rial, "cheque" to it.cheque?.let(Codec::cheque))
                             is Settlement.Credit -> mapOf("kind" to "CREDIT", "customer" to it.customerId.value, "amount" to it.amount.rial, "due" to it.dueDate.epochDay)
                         }
                     },

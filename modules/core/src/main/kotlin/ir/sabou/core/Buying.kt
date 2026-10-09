@@ -26,6 +26,14 @@ import ir.sabou.purchasing.ReviewLine
 import ir.sabou.purchasing.Supplier
 import ir.sabou.purchasing.SupplierNames
 
+/** One supplier: what the visible branches owe, return credit per branch, and refunds received. */
+data class SupplierAccount(
+    val supplier: Supplier,
+    val owed: Money,
+    val credits: List<Pair<Scope.Branch, Money>>,
+    val refunds: List<ir.sabou.purchasing.SupplierRefund>,
+)
+
 data class OrderRow(val order: PurchaseOrder, val supplier: String, val location: String)
 
 /** A held invoice line waiting for someone to say what it is. */
@@ -99,6 +107,21 @@ class Buying internal constructor(private val core: SabouCore) {
         val order = core.purchases.order(id) ?: throw DomainException(DomainError.NotFound("PURCHASE_ORDER"))
         a.require(order.scope)
         return OrderRow(order, core.suppliers.byId(order.supplierId)?.name.orEmpty(), core.locations.byId(order.locationId)?.name.orEmpty())
+    }
+
+    // ------------------------------------------------------------ Supplier account
+
+    fun supplierAccount(supplierId: GlobalId): SupplierAccount {
+        val a = actor(Permission.PURCHASE_VIEW, Permission.SUPPLIER_MANAGE)
+        val supplier = core.suppliers.byId(supplierId) ?: throw DomainException(DomainError.NotFound("SUPPLIER"))
+        val invoices = core.purchases.invoices().filter { it.supplierId == supplierId && a.canAccess(it.scope) }
+        val scopes = invoices.map { it.scope }.distinct()
+        return SupplierAccount(
+            supplier,
+            Money.sum(invoices.filter { it.status == InvoiceStatus.POSTED }.map { core.purchasing.outstanding(it.id) }),
+            scopes.map { it to core.purchasing.unappliedCredit(supplierId, it) }.filter { !it.second.isZero },
+            scopes.flatMap { core.purchases.refundsOf(supplierId, it) }.sortedByDescending { it.date },
+        )
     }
 
     // ------------------------------------------------------------ Review queue

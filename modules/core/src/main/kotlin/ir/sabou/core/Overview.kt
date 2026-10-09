@@ -218,8 +218,8 @@ class Overview internal constructor(private val core: SabouCore) {
             sale = core.sales.activeSale(branch, date),
             day = core.sales.day(branch, date),
             customers = core.customers.all().filter { it.isActive && it.registeredIn == branch },
-            // Cheque boxes and books need the cheque's details: not offered for the day's settlement.
-            accounts = core.treasuryAccounts.all().filter { it.isActive && it.scope == branch && it.kind.isOrdinary },
+            // A cheque box takes customers' cheques (with their details); a cheque book never receives.
+            accounts = core.treasuryAccounts.all().filter { it.isActive && it.scope == branch && it.kind != ir.sabou.treasury.TreasuryKind.ISSUED_CHEQUES },
         )
     }
 

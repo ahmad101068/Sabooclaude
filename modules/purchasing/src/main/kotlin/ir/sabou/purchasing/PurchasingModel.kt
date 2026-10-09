@@ -164,6 +164,21 @@ data class CreditAllocation(
     val released: Boolean = false,
 )
 
+/**
+ * The supplier paying back unapplied return credit (cash, transfer or a cheque into a cheque box).
+ * [bridgeJournalId]: the branch side when the money arrives in another scope's account.
+ */
+data class SupplierRefund(
+    val id: GlobalId,
+    val supplierId: GlobalId,
+    val scope: Scope.Branch,
+    val treasuryAccountId: GlobalId,
+    val amount: Money,
+    val date: BusinessDate,
+    val bridgeJournalId: GlobalId?,
+    val reversed: Boolean = false,
+)
+
 enum class OrderStatus { OPEN, RECEIVED, CANCELLED }
 
 /** Expected quantity and price per whole unit. */
@@ -212,6 +227,9 @@ interface PurchaseStore {
     fun allocationsTo(invoiceId: GlobalId): List<CreditAllocation>
     fun allocationsOf(supplierId: GlobalId, scope: Scope.Branch): List<CreditAllocation>
     fun saveAllocation(allocation: CreditAllocation)
+    fun refund(id: GlobalId): SupplierRefund?
+    fun refundsOf(supplierId: GlobalId, scope: Scope.Branch): List<SupplierRefund>
+    fun saveRefund(refund: SupplierRefund)
     fun order(id: GlobalId): PurchaseOrder?
     fun orders(): List<PurchaseOrder>
     fun saveOrder(order: PurchaseOrder)

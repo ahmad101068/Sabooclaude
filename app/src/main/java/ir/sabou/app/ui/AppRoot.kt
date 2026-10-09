@@ -433,6 +433,7 @@ private fun Pages(route: Route, nav: Nav) {
         is Route.PurchaseDetail -> PurchaseScreens.PurchaseDetail(nav, route.invoiceId)
         Route.Suppliers -> PurchaseScreens.Suppliers(nav)
         is Route.SupplierEdit -> PurchaseScreens.SupplierEdit(nav, route.supplierId)
+        is Route.SupplierAccount -> PurchaseScreens.SupplierAccount(nav, route.supplierId)
         Route.Orders -> PurchaseScreens.Orders(nav)
         is Route.NewOrder -> PurchaseScreens.NewOrder(nav, route)
         is Route.OrderDetail -> PurchaseScreens.OrderDetail(nav, route.orderId)

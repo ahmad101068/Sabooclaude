@@ -163,4 +163,34 @@ class BooksTest {
         assertEquals("سی‌ام مهر یک هزار و چهارصد و پنج", Fa.dateInWords(Fa.fromJalali(1405, 7, 30)!!))
         assertEquals("یکم مهر یک هزار و چهارصد و پنج", Fa.dateInWords(Fa.fromJalali(1405, 7, 1)!!))
     }
+
+    @Test fun customersChequesSettleTheDaysSaleAndReversingTheSaleVoidsThem() {
+        val core = boot()
+        core.bootstrap("شعبه ونک", "مالک", "owner", "123456".toCharArray())
+        val branch = Scope.Branch(core.overview.branches().single().id)
+        val kitchen = core.overview.locations(branch).single().id
+        val cash = core.overview.treasury().single().account.id
+        val box = core.account(branch, "صندوق چک", TreasuryKind.RECEIVED_CHEQUES)
+        val cheese = core.inventory.createItem(CreateItem(id(), "پنیر", StockUnit.KILOGRAM, Quantity.ZERO)).resultId
+        val pizza = core.inventory.defineMenuItem(DefineMenuItem(id(), "پیتزا")).resultId
+        core.inventory.publishRecipe(PublishRecipe(id(), pizza, BusinessDate(19_000), listOf(RecipeLine(cheese, Quantity.of(200_000)))))
+        val supplier = core.purchasing.registerSupplier(RegisterSupplier(id(), "لبنیات", "")).resultId
+        core.purchasing.postInvoice(PostPurchaseInvoice(id(), branch, supplier, "1", kitchen, day, day, listOf(InvoiceLine(cheese, Quantity.units(1), rial(1_000_000)))))
+        assertTrue(core.overview.salesDay(branch, day).accounts.any { it.id == box })
+        fun cheque(no: String) = ChequeDetails(no, "ملت", "", day.plusDays(7), "مهمان")
+        val settlements = listOf(Settlement.Liquid(cash, rial(1_000_000)), Settlement.Liquid(box, rial(3_000_000), cheque("1")), Settlement.Liquid(box, rial(4_000_000), cheque("2")))
+        assertEquals("INVALID_INPUT:cheque", runCatching {
+            core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLine(pizza, Quantity.units(1), rial(8_000_000))),
+                rial(0), rial(0), rial(0), listOf(Settlement.Liquid(box, rial(8_000_000)))))
+        }.exceptionOrNull()!!.let { (it as ir.sabou.kernel.DomainException).error.code })
+        val sale = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLine(pizza, Quantity.units(1), rial(8_000_000))),
+            rial(0), rial(0), rial(0), settlements)).resultId
+        assertEquals(settlements, core.overview.salesDay(branch, day).sale!!.settlements)     // read back with the cheques
+        core.salesOps.post(PostDailySale(id(), branch, sale))
+        assertEquals(listOf(3_000_000L, 4_000_000L), core.books.cheques(ChequeDirection.RECEIVED).map { it.cheque.amount.rial }.sorted())
+        assertEquals(7_000_000, core.overview.treasury().single { it.account.id == box }.balance)
+        core.salesOps.reverse(ir.sabou.sales.ReverseDailySale(id(), branch, sale, day, "ثبت اشتباه"))
+        assertTrue(core.books.cheques(ChequeDirection.RECEIVED).all { it.cheque.status == ChequeStatus.VOID })
+        assertEquals(0, core.overview.treasury().single { it.account.id == box }.balance)
+    }
 }
