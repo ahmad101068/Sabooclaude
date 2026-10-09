@@ -90,13 +90,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           validate-wrappers: true
-      - name: Resolve everything and record SHA-256 of every artifact
-        if: hashFiles('gradle/verification-metadata.xml') == ''
-        run: ./gradlew --no-daemon --write-verification-metadata sha256 domainBuild :app:assembleDebug :app:assembleRelease :app:lintDebug
-      - name: Publish metadata to the ci-logs branch
-        if: hashFiles('gradle/verification-metadata.xml') == ''
+      - name: Generate and publish (skipped once the file is committed)
         shell: bash
         run: |
+          if [ -f gradle/verification-metadata.xml ]; then echo "metadata present; Gradle verifies every artifact"; exit 0; fi
+          ./gradlew --no-daemon --write-verification-metadata sha256 domainBuild :app:assembleDebug :app:assembleRelease :app:lintDebug
           mkdir -p /tmp/meta && cp gradle/verification-metadata.xml /tmp/meta/ && cd /tmp/meta
           git init -q && git checkout -q -b ci-logs
           git config user.name ci && git config user.email ci@users.noreply.github.com
