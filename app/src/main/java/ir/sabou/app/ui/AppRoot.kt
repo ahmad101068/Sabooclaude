@@ -131,12 +131,7 @@ private fun Splash() {
 @Composable
 private fun RecoveryScreen(container: AppContainer, detail: String, title: String, explanation: String, retry: (() -> Unit)? = null) {
     val scope = rememberCoroutineScope()
-    var password by remember { mutableStateOf("") }
-    var uri by remember { mutableStateOf<Uri?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri = it }
 
     Page {
         Spacer(Modifier.height(24.dp))
@@ -144,21 +139,7 @@ private fun RecoveryScreen(container: AppContainer, detail: String, title: Strin
         Banner(explanation)
         Text("کد: $detail", style = SabouType.caption, color = Sabou.colors.muted)
         if (retry != null) PrimaryButton("تلاش دوباره", { scope.launch(Dispatchers.IO) { retry() } })
-        FormCard("بازیابی از فایل پشتیبان") {
-            SecondaryButton(if (uri == null) "انتخاب فایل پشتیبان" else "فایل انتخاب شد ✓", { picker.launch(arrayOf("*/*")) })
-            TextInput("رمز فایل پشتیبان", password, { password = it }, secret = true)
-            error?.let { Banner(it) }
-            PrimaryButton("بازیابی", {
-                val source = uri ?: return@PrimaryButton
-                busy = true; error = null
-                scope.launch {
-                    error = withContext(Dispatchers.IO) {
-                        runCatching { container.restore(null, password.toCharArray(), source) }.exceptionOrNull()?.let(::restoreMessage)
-                    }
-                    busy = false
-                }
-            }, enabled = uri != null && password.length >= 10, busy = busy)
-        }
+        RestoreCard(container)
         FormCard("شروع از نو") {
             Text("همه داده‌های این دستگاه پاک می‌شود و برنامه مثل نصب اول باز می‌شود.", style = SabouType.body, color = Sabou.colors.muted)
             SecondaryButton("پاک کردن همه داده‌ها", { confirmReset = true }, danger = true)
@@ -167,6 +148,32 @@ private fun RecoveryScreen(container: AppContainer, detail: String, title: Strin
     if (confirmReset) {
         Confirm("پاک کردن همه داده‌ها؟", "این کار برگشت‌پذیر نیست. فقط وقتی انجام دهید که فایل پشتیبان ندارید یا نمی‌خواهید.", "پاک کن",
             onConfirm = { scope.launch(Dispatchers.IO) { container.factoryReset(null) } }, onDismiss = { confirmReset = false }, danger = true)
+    }
+}
+
+/** Restore from a backup file (recovery screen, and first run on a new or reinstalled device). */
+@Composable
+private fun RestoreCard(container: AppContainer, title: String = "بازیابی از فایل پشتیبان") {
+    val scope = rememberCoroutineScope()
+    var password by remember { mutableStateOf("") }
+    var uri by remember { mutableStateOf<Uri?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri = it }
+    FormCard(title) {
+        SecondaryButton(if (uri == null) "انتخاب فایل پشتیبان" else "فایل انتخاب شد ✓", { picker.launch(arrayOf("*/*")) })
+        TextInput("رمز فایل پشتیبان", password, { password = it }, secret = true)
+        error?.let { Banner(it) }
+        PrimaryButton("بازیابی", {
+            val source = uri ?: return@PrimaryButton
+            busy = true; error = null
+            scope.launch {
+                error = withContext(Dispatchers.IO) {
+                    runCatching { container.restore(null, password.toCharArray(), source) }.exceptionOrNull()?.let(::restoreMessage)
+                }
+                busy = false
+            }
+        }, enabled = uri != null && password.length >= 10, busy = busy)
     }
 }
 
@@ -185,13 +192,13 @@ private fun Gate(core: SabouCore, container: AppContainer, onSignedIn: (ir.sabou
     LaunchedEffect(core) { needsBootstrap = withContext(Dispatchers.IO) { core.identity.needsBootstrap() } }
     when (needsBootstrap) {
         null -> Splash()
-        true -> Bootstrap(core, onSignedIn)
+        true -> Bootstrap(core, container, onSignedIn)
         false -> Login(core, onSignedIn)
     }
 }
 
 @Composable
-private fun Bootstrap(core: SabouCore, onSignedIn: (ir.sabou.platform.Actor) -> Unit) {
+private fun Bootstrap(core: SabouCore, container: AppContainer, onSignedIn: (ir.sabou.platform.Actor) -> Unit) {
     val scope = rememberCoroutineScope()
     var branch by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
@@ -229,6 +236,9 @@ private fun Bootstrap(core: SabouCore, onSignedIn: (ir.sabou.platform.Actor) -> 
                 result.onSuccess(onSignedIn).onFailure { error = Messages.of(it) }
             }
         }, enabled = branch.isNotBlank() && name.isNotBlank() && username.isNotBlank() && pin.length >= 6 && Fa.latinDigits(pin) == Fa.latinDigits(pin2), busy = busy)
+        Spacer(Modifier.height(8.dp))
+        Text("از قبل فایل پشتیبان سابو دارید؟ (گوشی جدید یا نصب دوباره)", style = SabouType.body, color = Sabou.colors.muted)
+        RestoreCard(container, title = "بازیابی اطلاعات قبلی")
     }
 }
 
