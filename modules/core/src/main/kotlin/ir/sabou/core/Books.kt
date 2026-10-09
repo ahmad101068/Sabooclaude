@@ -58,8 +58,9 @@ class Books internal constructor(private val core: SabouCore) {
 
     // ------------------------------------------------------------ Cheques
 
-    private fun rows(filter: (Cheque) -> Boolean): List<ChequeRow> {
-        val a = actor(Permission.TREASURY_VIEW, Permission.CHEQUE_MANAGE)
+    private fun rows(filter: (Cheque) -> Boolean): List<ChequeRow> = rows(actor(Permission.TREASURY_VIEW, Permission.CHEQUE_MANAGE), filter)
+
+    private fun rows(a: Actor, filter: (Cheque) -> Boolean): List<ChequeRow> {
         val accounts = core.treasuryAccounts.all().associateBy { it.id }
         return core.cheques.all().filter { a.canAccess(it.scope) && filter(it) }
             .map { ChequeRow(it, accounts[it.accountId]?.name.orEmpty(), it.bankAccountId?.let { b -> accounts[b]?.name }, scopeName(it.scope)) }
@@ -78,7 +79,7 @@ class Books internal constructor(private val core: SabouCore) {
     fun heldCheques(scope: Scope): List<ChequeRow> {
         val a = actor(Permission.PURCHASE_PAY, Permission.TREASURY_PAYMENT, Permission.CHEQUE_MANAGE)
         a.require(scope)
-        return rows { it.direction == ChequeDirection.RECEIVED && it.status == ChequeStatus.IN_HAND && it.scope == scope }
+        return rows(a) { it.direction == ChequeDirection.RECEIVED && it.status == ChequeStatus.IN_HAND && it.scope == scope }
     }
 
     // ------------------------------------------------------------ Approvals
