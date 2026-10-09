@@ -175,4 +175,85 @@ class PayrollTest {
         session.actor = accountant
         assertTrue(code { ops.calculate(CalculatePayroll(GlobalId.new(), other, from, to)) }.startsWith("SCOPE_DENIED"))
     }
+
+    // ---------------------------------------------------------------- partial months
+
+    @Test fun someoneHiredDuringTheMonthIsPaidForTheDaysEmployed() {
+        val waiter = ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "گارسون", "0499370899", rial(30_000_000), startDate = from.plusDays(10))).resultId
+        val slip = payrollStore.run(calculate())!!.payslips.single { it.employeeId == waiter }
+        assertEquals(20, slip.payableDays)                       // days 11..30 of a 30-day month
+        assertEquals(20_000_000, slip.baseSalary.rial)           // the base shown on the payslip is the prorated one
+        assertEquals(20_000_000, slip.gross.rial)                // 30,000,000 × 20 ÷ 30
+        val chefSlip = payrollStore.run(payrollStore.runs(branch).single().id)!!.payslips.single { it.employeeId == chef }
+        assertEquals(null, chefSlip.payableDays)                 // whole month: unchanged
+        assertEquals(31_700_000, chefSlip.gross.rial)
+    }
+
+    @Test fun someoneWhoLeavesIsPaidUpToTheLastDayAndNotAfter() {
+        ops.endEmployment(EndEmployment(GlobalId.new(), branch, chef, from.plusDays(14)))
+        val slip = payrollStore.run(calculate())!!.payslips.single()
+        assertEquals(15, slip.payableDays)
+        // 15,000,000 prorated − absence 2,500,000 (minute rate of the monthly salary) + overtime 4,200,000
+        assertEquals(16_700_000, slip.gross.rial)
+        session.actor = accountant
+        assertEquals("INVALID_STATE:PAYROLL_RUN:NO_EMPLOYEES", code { ops.calculate(CalculatePayroll(GlobalId.new(), branch, to.plusDays(1), to.plusDays(30))) })
+        session.actor = owner
+        assertEquals("INVALID_STATE:EMPLOYEE:ALREADY_ENDED", code { ops.endEmployment(EndEmployment(GlobalId.new(), branch, chef, to)) })
+    }
+
+    @Test fun absenceNeverExceedsAProratedBase() {
+        val late = ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "کمک‌آشپز", "0499370899", rial(30_000_000), startDate = to)).resultId
+        repeat(1) { ops.recordAttendance(RecordAttendance(GlobalId.new(), branch, late, to, 0, 0, 1_440)) }
+        val slip = payrollStore.run(calculate())!!.payslips.single { it.employeeId == late }
+        assertEquals(1, slip.payableDays)
+        assertEquals(1_000_000, slip.absenceDeduction.rial)      // capped at the 1-day base, not 3,750,000
+        assertEquals(0, slip.gross.rial)
+    }
+
+    @Test fun anEndDateCannotUndoAnApprovedMonthOrPrecedeTheStart() {
+        val run = calculate(); ops.approve(ApprovePayroll(GlobalId.new(), branch, run))
+        assertEquals("INVALID_STATE:EMPLOYEE:PERIOD_APPROVED", code { ops.endEmployment(EndEmployment(GlobalId.new(), branch, chef, from.plusDays(5))) })
+        ops.endEmployment(EndEmployment(GlobalId.new(), branch, chef, to))   // the approved month's last day is fine
+        val newcomer = ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "صندوقدار", "0499370899", rial(1_000), startDate = to.plusDays(1))).resultId
+        assertEquals("INVALID_INPUT:lastDay", code { ops.endEmployment(EndEmployment(GlobalId.new(), branch, newcomer, to)) })
+    }
+
+    @Test fun attendanceOnlyOnEmployedDays() {
+        val waiter = ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "گارسون", "0499370899", rial(1_000), startDate = from.plusDays(10))).resultId
+        assertEquals("INVALID_STATE:EMPLOYEE:NOT_EMPLOYED_ON_DATE", code { ops.recordAttendance(RecordAttendance(GlobalId.new(), branch, waiter, from.plusDays(9), 480, 0, 0)) })
+        ops.recordAttendance(RecordAttendance(GlobalId.new(), branch, waiter, from.plusDays(10), 480, 0, 0))
+        ops.endEmployment(EndEmployment(GlobalId.new(), branch, waiter, from.plusDays(12)))   // entered ahead of time
+        ops.recordAttendance(RecordAttendance(GlobalId.new(), branch, waiter, from.plusDays(12), 480, 0, 0))
+        assertEquals("INVALID_STATE:EMPLOYEE:NOT_EMPLOYED_ON_DATE", code { ops.recordAttendance(RecordAttendance(GlobalId.new(), branch, waiter, from.plusDays(13), 480, 0, 0)) })
+    }
+
+    @Test fun aDraftThatNoLongerMatchesTheDataCannotBeApproved() {
+        val run = calculate()
+        ops.endEmployment(EndEmployment(GlobalId.new(), branch, chef, from.plusDays(14)))   // leaves after the calculation
+        assertEquals("INVALID_STATE:PAYROLL_RUN:STALE", code { ops.approve(ApprovePayroll(GlobalId.new(), branch, run)) })
+        val again = calculate()                                                         // recalculating updates the same draft
+        assertEquals(run, again)
+        ops.approve(ApprovePayroll(GlobalId.new(), branch, again))
+        assertEquals(16_700_000, ledger.balance(StandardAccounts.SALARIES, branch).rial)
+    }
+
+    @Test fun attendanceChangedAfterTheCalculationAlsoMakesItStale() {
+        val run = calculate()
+        ops.recordAttendance(RecordAttendance(GlobalId.new(), branch, chef, from.plusDays(5), 0, 0, 480))
+        assertEquals("INVALID_STATE:PAYROLL_RUN:STALE", code { ops.approve(ApprovePayroll(GlobalId.new(), branch, run)) })
+    }
+
+    @Test fun aStartDateCannotFallInAnApprovedMonth() {
+        ops.approve(ApprovePayroll(GlobalId.new(), branch, calculate()))
+        assertEquals("INVALID_STATE:EMPLOYEE:START_IN_APPROVED_PERIOD", code {
+            ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "گارسون", "0499370899", rial(1_000), startDate = from.plusDays(3)))
+        })
+        ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "گارسون", "0499370899", rial(1_000), startDate = to.plusDays(1)))
+    }
+
+    @Test fun prorationDaysAreBounded() {
+        assertFailsWith<IllegalArgumentException> { policy.copy(prorationDays = 27) }
+        val slip = policy.copy(prorationDays = 31).calculate(chef, rial(31_000_000), 0, 0, payableDays = 10)
+        assertEquals(10_000_000, slip.gross.rial)
+    }
 }

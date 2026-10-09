@@ -42,8 +42,9 @@ class AppContainer(private val context: Context) {
     fun ensureOpen() {
         if (helper == null && state.value is AppState.Opening) {
             // A crash in the middle of a backup or restore must not leave a plaintext copy behind.
-            File(context.cacheDir, BACKUP_PLAIN).delete()
-            context.deleteDatabase(RESTORE_PLAIN)
+            File(context.cacheDir, BACKUP_PLAIN).delete()   // left by versions before payload v2
+            File(context.cacheDir, BACKUP_SEALED).delete()
+            context.deleteDatabase(RESTORE_CANDIDATE)
             context.deleteDatabase(RESTORE_STAGED)
             open()
         }
@@ -57,7 +58,7 @@ class AppContainer(private val context: Context) {
             val db = openHelper(DB_NAME, keys.databasePassphrase()).also { helper = it }.writableDatabase
             val core = SabouCore.open(AndroidSqlDatabase(db), anchors, Clock.SYSTEM, newDatabaseEpoch = newEpoch)
             when (val verdict = runCatching { core.verifyStartup() }.getOrElse { StartupVerdict.RollbackDetected(it.message ?: "ANCHOR") }) {
-                StartupVerdict.Healthy -> AppState.Ready(core)
+                StartupVerdict.Healthy -> AppState.Ready(core).also { verifyInBackgroundIfDue(core) }
                 is StartupVerdict.RollbackDetected -> AppState.Recovery(verdict.detail)
             }
         } catch (e: Throwable) {
@@ -65,8 +66,97 @@ class AppContainer(private val context: Context) {
         }
     }
 
+    /**
+     * The daily full audit check (ADR-0004), off the startup path. Called after opening and whenever the
+     * app comes to the foreground; a failure moves the app to the recovery screen.
+     */
+    fun verifyInBackgroundIfDue() {
+        (state.value as? AppState.Ready)?.core?.let(::verifyInBackgroundIfDue)
+    }
+
+    private fun verifyInBackgroundIfDue(core: SabouCore) {
+        if (verifying) return
+        verifying = true
+        kotlin.concurrent.thread(name = "sabou-audit-verify", isDaemon = true) {
+            try {
+                // Even "is it due" reads the database: never on the main thread (a backup may hold it).
+                if (!runCatching { core.backgroundVerificationDue() }.getOrDefault(false)) return@thread
+                // A transient error (e.g. the database being replaced meanwhile) just means: try next time.
+                val verdict = runCatching { core.verifyAuditInBackground() }.getOrNull()
+                if (verdict is StartupVerdict.RollbackDetected) synchronized(this) {
+                    if ((state.value as? AppState.Ready)?.core === core) mutableState.value = AppState.Recovery(verdict.detail)
+                }
+            } finally {
+                verifying = false
+            }
+        }
+    }
+
+    @Volatile private var verifying = false
+
+    // ---------------------------------------------------------------- unfinished forms (ADR-0010)
+
+    private val draftsFile = File(context.noBackupFilesDir, "drafts.bin")
+
+    /** Drafts are only restored by the same app version: saved classes and form layouts may change. */
+    private val appVersion: Long by lazy {
+        runCatching {
+            androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(context.packageManager.getPackageInfo(context.packageName, 0))
+        }.getOrDefault(-1L)
+    }
+
+    /** One background thread: saves, clears and reads happen in the order they were asked for. */
+    private val draftWriter = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /**
+     * Encodes the draft now (on the caller's thread, the main thread, so it is one consistent moment of the
+     * form) and encrypts and writes it in the background.
+     */
+    fun saveDraftsLater(draft: android.os.Bundle) {
+        val bytes = runCatching {
+            draft.putLong(DRAFT_VERSION, appVersion)
+            ir.sabou.app.ui.Drafts.marshall(draft)
+        }.getOrNull()
+        draftWriter.execute { if (bytes == null) draftsFile.delete() else writeDraft(bytes) }
+    }
+
+    private fun writeDraft(bytes: ByteArray) {
+        runCatching {
+            val tmp = File(draftsFile.path + ".tmp")
+            java.io.FileOutputStream(tmp).use { out -> out.write(keys.seal(bytes)); out.fd.sync() }
+            check(tmp.renameTo(draftsFile))
+        }.onFailure { draftsFile.delete() }   // best effort: a draft is a convenience, never a requirement
+    }
+
+    /** Test hook and synchronous variant of [saveDraftsLater]. */
+    internal fun saveDrafts(draft: android.os.Bundle) {
+        saveDraftsLater(draft)
+        draftWriter.submit {}.get()
+    }
+
+    /**
+     * Reads and removes the stored draft (after any save still queued). Anything unreadable, or written by
+     * another app version, is dropped.
+     */
+    fun takeDrafts(): android.os.Bundle? = draftWriter.submit(java.util.concurrent.Callable {
+        if (!draftsFile.exists()) return@Callable null
+        try {
+            ir.sabou.app.ui.Drafts.unmarshall(keys.open(draftsFile.readBytes()), context.classLoader)
+                .takeIf { it.getLong(DRAFT_VERSION, Long.MIN_VALUE) == appVersion }
+        } catch (e: Throwable) {
+            null
+        } finally {
+            draftsFile.delete()
+        }
+    }).get()
+
+    /** Removes the draft after anything queued (restore, reset: it belongs to the replaced database). */
+    fun clearDrafts() { draftWriter.submit { draftsFile.delete() }.get() }
+    fun clearDraftsLater() { draftWriter.execute { draftsFile.delete() } }
+
+    /** Internal for the device tests (they swap database files while the app is closed). */
     @Synchronized
-    private fun close() {
+    internal fun close() {
         helper?.close()
         helper = null
     }
@@ -74,24 +164,72 @@ class AppContainer(private val context: Context) {
     /**
      * Writes an encrypted, password-protected backup (format 4) of the whole database to [target].
      * The core checks the signed-in user's permission, verifies the full audit chain and audits it first.
+     *
+     * No plaintext copy ever touches the disk: the database is exported into a temporary SQLCipher file
+     * under a fresh random key, and the backup carries that key and file inside its password encryption
+     * (payload v2: MAGIC + key + encrypted database).
      */
     @Synchronized
     fun backup(core: SabouCore, password: CharArray, target: Uri) {
         core.authorizeBackup()
         val db = checkNotNull(helper) { "DATABASE_CLOSED" }.writableDatabase
-        val plain = File(context.cacheDir, BACKUP_PLAIN).also { it.delete() }
+        val sealed = File(context.cacheDir, BACKUP_SEALED).also { it.delete() }
+        val exportKey = randomHexKey()
         try {
-            db.execSQL("ATTACH DATABASE ? AS plaintext KEY ''", arrayOf<Any?>(plain.absolutePath))
+            db.execSQL("ATTACH DATABASE ? AS export KEY '$exportKey'", arrayOf<Any?>(sealed.absolutePath))
             try {
-                db.query("SELECT sqlcipher_export('plaintext')").use { it.moveToFirst() }
+                db.query("SELECT sqlcipher_export('export')").use { it.moveToFirst() }
             } finally {
-                db.execSQL("DETACH DATABASE plaintext")
+                db.execSQL("DETACH DATABASE export")
             }
             val out = context.contentResolver.openOutputStream(target, "w") ?: error("BACKUP_TARGET_UNAVAILABLE")
-            out.use { o -> plain.inputStream().use { i -> StreamingBackupCodec.encrypt(password, i, o) } }
+            out.use { o ->
+                sealed.inputStream().use { file ->
+                    val payload = java.io.SequenceInputStream(java.io.ByteArrayInputStream(PAYLOAD_MAGIC + exportKey.toByteArray(Charsets.US_ASCII)), file)
+                    StreamingBackupCodec.encrypt(password, payload, o)
+                }
+            }
         } finally {
-            plain.delete()
+            sealed.delete()
         }
+    }
+
+    private fun randomHexKey(): String =
+        ByteArray(32).also(java.security.SecureRandom()::nextBytes).joinToString("") { "%02x".format(it) }
+
+    /**
+     * Writes the decrypted payload to [file]: v2 (MAGIC + key + SQLCipher file) keeps the file encrypted
+     * and returns its key; a v1 payload (a plain SQLite file, older backups) is written as is → "".
+     */
+    private class PayloadSplitter(private val file: java.io.OutputStream) : java.io.OutputStream() {
+        private val head = java.io.ByteArrayOutputStream()
+        private var decided = false
+        var key: String = ""
+            private set
+
+        override fun write(b: Int) = write(byteArrayOf(b.toByte()), 0, 1)
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            if (decided) { file.write(b, off, len); return }
+            head.write(b, off, len)
+            if (head.size() >= HEADER) decide()
+        }
+        private fun decide() {
+            decided = true
+            val bytes = head.toByteArray()
+            if (bytes.size >= HEADER && bytes.copyOfRange(0, PAYLOAD_MAGIC.size).contentEquals(PAYLOAD_MAGIC)) {
+                key = String(bytes, PAYLOAD_MAGIC.size, KEY_CHARS, Charsets.US_ASCII)
+                require(key.all { it in '0'..'9' || it in 'a'..'f' }) { "bad_backup_key" }
+                file.write(bytes, HEADER, bytes.size - HEADER)
+            } else {
+                file.write(bytes)
+            }
+        }
+        override fun flush() = file.flush()
+        override fun close() {
+            if (!decided) decide()
+            file.close()
+        }
+        companion object { const val HEADER = 8 + KEY_CHARS }
     }
 
     /**
@@ -101,17 +239,23 @@ class AppContainer(private val context: Context) {
      */
     @Synchronized
     fun restore(current: SabouCore?, password: CharArray, source: Uri) {
-        context.deleteDatabase(RESTORE_PLAIN)
+        context.deleteDatabase(RESTORE_CANDIDATE)
         context.deleteDatabase(RESTORE_STAGED)
-        val plain = context.getDatabasePath(RESTORE_PLAIN).also { it.parentFile?.mkdirs() }
+        val plain = context.getDatabasePath(RESTORE_CANDIDATE).also { it.parentFile?.mkdirs() }
+        var payloadKey = ""
         val staged = context.getDatabasePath(RESTORE_STAGED)
         val epoch: String
         try {
             val input = context.contentResolver.openInputStream(source) ?: error("BACKUP_SOURCE_UNAVAILABLE")
-            input.use { i -> plain.outputStream().use { o -> StreamingBackupCodec.decrypt(password, i, o, MAX_RESTORE_BYTES) } }
+            // The candidate stays encrypted on disk under the backup's own key (v2); only v1 backups are plain.
+            input.use { i ->
+                val splitter = PayloadSplitter(plain.outputStream())
+                splitter.use { o -> StreamingBackupCodec.decrypt(password, i, o, MAX_RESTORE_BYTES) }
+                payloadKey = splitter.key
+            }
 
             // 1. Verify the candidate in isolation (schema version, full audit chain) with throwaway anchors.
-            val candidateHelper = openHelper(RESTORE_PLAIN, ByteArray(0))
+            val candidateHelper = openHelper(RESTORE_CANDIDATE, payloadKey.toByteArray(Charsets.US_ASCII))
             epoch = try {
                 val candidate = SabouCore.open(AndroidSqlDatabase(candidateHelper.writableDatabase), InMemoryAnchorStore())
                 val verdict = candidate.verifyStartup()
@@ -134,11 +278,11 @@ class AppContainer(private val context: Context) {
             val stagedHelper = openHelper(RESTORE_STAGED, passphrase)
             try {
                 val db = stagedHelper.writableDatabase
-                db.execSQL("ATTACH DATABASE ? AS plaintext KEY ''", arrayOf<Any?>(plain.absolutePath))
+                db.execSQL("ATTACH DATABASE ? AS candidate KEY '$payloadKey'", arrayOf<Any?>(plain.absolutePath))
                 try {
-                    db.query("SELECT sqlcipher_export('main', 'plaintext')").use { it.moveToFirst() }
+                    db.query("SELECT sqlcipher_export('main', 'candidate')").use { it.moveToFirst() }
                 } finally {
-                    db.execSQL("DETACH DATABASE plaintext")
+                    db.execSQL("DETACH DATABASE candidate")
                 }
             } finally {
                 stagedHelper.close()
@@ -148,7 +292,7 @@ class AppContainer(private val context: Context) {
             context.deleteDatabase(RESTORE_STAGED)
             throw e
         } finally {
-            context.deleteDatabase(RESTORE_PLAIN)
+            context.deleteDatabase(RESTORE_CANDIDATE)
         }
 
         // 3. Announce (authorized and audited by the core when signed in), then swap. From here on the
@@ -159,6 +303,7 @@ class AppContainer(private val context: Context) {
             context.deleteDatabase(RESTORE_STAGED)
             throw e
         }
+        clearDrafts()   // drafts belong to the replaced database
         try {
             close()
             // rename(2) replaces the live file atomically; only its side files are removed first.
@@ -174,6 +319,7 @@ class AppContainer(private val context: Context) {
     fun factoryReset(current: SabouCore?) {
         val epoch = SabouCore.newEpoch()
         if (current != null) current.acceptReplacement(epoch, "FACTORY_RESET") else anchorsRebase(epoch, "FACTORY_RESET")
+        clearDrafts()
         try {
             close()
             context.deleteDatabase(DB_NAME)
@@ -203,7 +349,11 @@ class AppContainer(private val context: Context) {
     companion object {
         const val DB_NAME = "sabou.db"
         private const val BACKUP_PLAIN = "backup-plain.db"
-        private const val RESTORE_PLAIN = "restore-plain.db"
+        private const val BACKUP_SEALED = "backup-sealed.db"
+        private val PAYLOAD_MAGIC = "SABOUDB2".toByteArray(Charsets.US_ASCII)
+        private const val KEY_CHARS = 64
+        private const val DRAFT_VERSION = "app_version"
+        private const val RESTORE_CANDIDATE = "restore-plain.db"
         private const val RESTORE_STAGED = "sabou-restore.db"
         private const val MAX_RESTORE_BYTES = 2L * 1024 * 1024 * 1024
     }

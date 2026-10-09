@@ -7,7 +7,7 @@ import androidx.compose.runtime.setValue
 import ir.sabou.kernel.GlobalId
 
 /** Every page of the app. Tabs are the five roots of the bottom navigation (ADR-0005). */
-sealed interface Route {
+sealed interface Route : java.io.Serializable {
     sealed interface Tab : Route
     data object Home : Tab
     data object Sales : Tab
@@ -68,7 +68,52 @@ class UiState {
         return true
     }
 
+    // ------------------------------------------------------------ unfinished forms (ADR-0010)
+
+    /** Registry of the page on screen (set by the shell). */
+    internal var pageRegistry: androidx.compose.runtime.saveable.SaveableStateRegistry? = null
+    private var restoredPage: Map<String, List<Any?>>? = null
+
+    internal fun discardRestoredDraft() {
+        restoredPage = null
+        stack.clear(); stack.add(Route.Home)
+    }
+
+    /** Values for the first page composed after a restoration; later pages start empty. */
+    internal fun takeRestoredPage(): Map<String, List<Any?>>? = restoredPage.also { restoredPage = null }
+
+    /** What the signed-in user is doing right now, or null when nobody is signed in. Main thread. */
+    fun draftSnapshot(now: Long): android.os.Bundle? {
+        val s = session ?: return null
+        val page = pageRegistry?.performSave().orEmpty()
+        return android.os.Bundle().apply {
+            putString("user", s.actor.userId.value)
+            putLong("at", now)
+            putSerializable("stack", ArrayList(stack))
+            putString("branch", s.branchId?.value?.value)
+            putBundle("page", Drafts.toBundle(page))
+        }
+    }
+
+    /** Re-enters the page the same user left, if the draft is theirs, recent, and its branch still allowed. */
+    fun restoreDraft(draft: android.os.Bundle, session: AppSession, allowedBranches: Set<ir.sabou.kernel.BranchId>, now: Long) {
+        if (draft.getString("user") != session.actor.userId.value) return
+        if (now - draft.getLong("at") !in 0..Drafts.MAX_AGE_MILLIS) return
+        @Suppress("DEPRECATION")
+        val saved = (draft.getSerializable("stack") as? ArrayList<*>)?.map { it as Route }
+            ?.takeIf { it.isNotEmpty() && it.first() is Route.Tab } ?: return
+        val page = draft.getBundle("page")?.let(Drafts::fromBundle)   // decoded now, so a bad draft fails here
+        val branch = draft.getString("branch")?.let { runCatching { ir.sabou.kernel.BranchId(GlobalId.parse(it)) }.getOrNull() }
+        if (branch != null) {
+            if (branch !in allowedBranches) return
+            session.branchId = branch
+        }
+        stack.clear(); stack.addAll(saved)
+        restoredPage = page
+    }
+
     fun signOut() {
+        restoredPage = null
         session?.core?.identity?.logout()
         session?.close()
         session = null

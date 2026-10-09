@@ -47,6 +47,22 @@ class DeviceKeys(private val context: Context) {
         check(prefs.edit().remove(WRAPPED_DB_KEY).commit()) { "key_not_removed" }
     }
 
+    /** Encrypts small local data (unfinished forms) with its own Keystore key. */
+    fun seal(plain: ByteArray): ByteArray {
+        val cipher = Cipher.getInstance(AES_GCM)
+        cipher.init(Cipher.ENCRYPT_MODE, aesKey(DRAFT_ALIAS))
+        return cipher.iv + cipher.doFinal(plain)
+    }
+
+    /** Throws when the data was not sealed on this device or was altered. */
+    fun open(sealed: ByteArray): ByteArray {
+        require(sealed.size > IV_BYTES) { "bad_sealed_data" }
+        val key = keyStore().getKey(DRAFT_ALIAS, null) as? SecretKey ?: error("KEYSTORE_KEY_MISSING")
+        val cipher = Cipher.getInstance(AES_GCM)
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, sealed.copyOfRange(0, IV_BYTES)))
+        return cipher.doFinal(sealed.copyOfRange(IV_BYTES, sealed.size))
+    }
+
     fun hmac(data: ByteArray): ByteArray = Mac.getInstance(HMAC).run {
         init(hmacKey())
         doFinal(data)
@@ -54,7 +70,7 @@ class DeviceKeys(private val context: Context) {
 
     private fun wrap(value: ByteArray): String {
         val cipher = Cipher.getInstance(AES_GCM)
-        cipher.init(Cipher.ENCRYPT_MODE, aesKey())
+        cipher.init(Cipher.ENCRYPT_MODE, aesKey(AES_ALIAS))
         return Base64.encodeToString(cipher.iv + cipher.doFinal(value), Base64.NO_WRAP)
     }
 
@@ -70,11 +86,11 @@ class DeviceKeys(private val context: Context) {
 
     private fun keyStore(): KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
 
-    private fun aesKey(): SecretKey {
-        (keyStore().getKey(AES_ALIAS, null) as? SecretKey)?.let { return it }
+    private fun aesKey(alias: String): SecretKey {
+        (keyStore().getKey(alias, null) as? SecretKey)?.let { return it }
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE).run {
             init(
-                KeyGenParameterSpec.Builder(AES_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                     .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                     .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                     .setKeySize(256)
@@ -103,6 +119,7 @@ class DeviceKeys(private val context: Context) {
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val AES_ALIAS = "sabou_db_wrap"
         private const val HMAC_ALIAS = "sabou_anchor_hmac"
+        private const val DRAFT_ALIAS = "sabou_drafts"
         private const val AES_GCM = "AES/GCM/NoPadding"
         private const val HMAC = "HmacSHA256"
         private const val PASSPHRASE_BYTES = 32

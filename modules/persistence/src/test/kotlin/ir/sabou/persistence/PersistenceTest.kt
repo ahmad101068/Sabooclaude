@@ -62,4 +62,34 @@ class PersistenceTest {
         db.execute("INSERT INTO items(id, doc) VALUES ('i', '{}')"); db.execute("INSERT INTO locations(id, doc) VALUES ('l', '{}')")
         assertFailsWith<Exception> { db.execute("INSERT INTO stock_balances VALUES ('i', 'l', -1, 0)") }
     }
+
+    @Test fun employmentDatesPartialMonthsAndProrationSurviveTheDatabase() {
+        val db = memoryDb(); Schema.migrate(db)
+        val branch = ir.sabou.kernel.Scope.Branch(ir.sabou.kernel.BranchId(ir.sabou.kernel.GlobalId.new()))
+        val people = SqlPersonnelStore(db)
+        val e = ir.sabou.payroll.Employee(ir.sabou.kernel.GlobalId.new(), "گارسون", "0499370899", branch, ir.sabou.kernel.Money.of(1_000),
+            isActive = false, startDate = ir.sabou.kernel.BusinessDate(20_010), endDate = ir.sabou.kernel.BusinessDate(20_020))
+        people.saveEmployee(e)
+        assertEquals(e, people.employee(e.id))
+        val plain = e.copy(id = ir.sabou.kernel.GlobalId.new(), nationalId = "0084575948", isActive = true, startDate = null, endDate = null)
+        people.saveEmployee(plain)
+        assertEquals(plain, people.employee(plain.id))
+
+        val policy = ir.sabou.payroll.StatutoryPolicy(
+            version = "T", from = ir.sabou.kernel.BusinessDate(20_000), to = ir.sabou.kernel.BusinessDate(20_100), standardMonthlyMinutes = 11_520,
+            overtimeMultiplierPercent = 140, employeeInsuranceBp = 700, employerInsuranceBp = 2_000, unemploymentInsuranceBp = 300,
+            maxInsurableMonthly = ir.sabou.kernel.Money.of(1_000_000), insuranceTaxExemptNumerator = 2, insuranceTaxExemptDenominator = 7,
+            taxBrackets = listOf(ir.sabou.payroll.TaxBracket(null, 0)), prorationDays = 31,
+        )
+        SqlPolicyStore(db).save(policy)
+        assertEquals(listOf(policy), SqlPolicyStore(db).all())
+
+        val runs = SqlPayrollStore(db)
+        val slips = listOf(policy.calculate(e.id, ir.sabou.kernel.Money.of(31_000), 0, 0, payableDays = 10), policy.calculate(plain.id, ir.sabou.kernel.Money.of(1_000), 0, 0))
+        val run = ir.sabou.payroll.PayrollRun(ir.sabou.kernel.GlobalId.new(), branch, ir.sabou.kernel.BusinessDate(20_000), ir.sabou.kernel.BusinessDate(20_029), "T",
+            slips, ir.sabou.payroll.RunStatus.DRAFT, ir.sabou.kernel.GlobalId.new(), null, null)
+        runs.saveRun(run)
+        assertEquals(run, runs.run(run.id))
+        assertEquals(10, runs.run(run.id)!!.payslips.first().payableDays)
+    }
 }

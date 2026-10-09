@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -183,12 +184,12 @@ object FinanceScreens {
     ) {
         val session = LocalSession.current
         val accounts by load(session) { overview.treasury().map { it.account } }
-        var accountId by remember { mutableStateOf<GlobalId?>(null) }
-        var purpose by remember { mutableStateOf(purposes?.firstOrNull()?.value) }
-        var amount by remember { mutableStateOf<Money?>(null) }
-        var date by remember { mutableStateOf(session.today) }
-        var note by remember { mutableStateOf("") }
-        val commandId = remember { mutableStateOf(GlobalId.new()) }
+        var accountId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var purpose by rememberSaveable { mutableStateOf(purposes?.firstOrNull()?.value) }
+        var amount by rememberSaveable { mutableStateOf<Money?>(null) }
+        var date by rememberSaveable { mutableStateOf(session.today) }
+        var note by rememberSaveable { mutableStateOf("") }
+        val commandId = rememberSaveable { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
             Header(title, onBack = nav.back)
@@ -237,10 +238,10 @@ object FinanceScreens {
     fun ReconcileForm(nav: Nav) {
         val session = LocalSession.current
         val balances by load(session) { overview.treasury() }
-        var accountId by remember { mutableStateOf<GlobalId?>(null) }
-        var counted by remember { mutableStateOf<Money?>(null) }
-        var note by remember { mutableStateOf("شمارش پایان روز") }
-        val commandId = remember { mutableStateOf(GlobalId.new()) }
+        var accountId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var counted by rememberSaveable { mutableStateOf<Money?>(null) }
+        var note by rememberSaveable { mutableStateOf("شمارش پایان روز") }
+        val commandId = rememberSaveable { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
             Header("شمارش صندوق", onBack = nav.back)
@@ -271,12 +272,12 @@ object FinanceScreens {
     fun TransferForm(nav: Nav) {
         val session = LocalSession.current
         val accounts by load(session) { overview.treasury().map { it.account } }
-        var source by remember { mutableStateOf<GlobalId?>(null) }
-        var target by remember { mutableStateOf<GlobalId?>(null) }
-        var amount by remember { mutableStateOf<Money?>(null) }
-        var date by remember { mutableStateOf(session.today) }
-        var note by remember { mutableStateOf("") }
-        val commandId = remember { mutableStateOf(GlobalId.new()) }
+        var source by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var target by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var amount by rememberSaveable { mutableStateOf<Money?>(null) }
+        var date by rememberSaveable { mutableStateOf(session.today) }
+        var note by rememberSaveable { mutableStateOf("") }
+        val commandId = rememberSaveable { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
             Header("انتقال وجه", "مثلاً واریز نقد صندوق به بانک", onBack = nav.back)
@@ -310,7 +311,7 @@ object FinanceScreens {
         val session = LocalSession.current
         val data by load(session, accountId) { overview.accountHistory(accountId) }
         var reverse by remember { mutableStateOf<TreasuryMovement?>(null) }
-        var reason by remember { mutableStateOf("") }
+        var reason by rememberSaveable { mutableStateOf("") }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
             val title = (data.orNull()?.first?.account?.name) ?: "گردش حساب"
@@ -377,10 +378,10 @@ object FinanceScreens {
             val open = overview.receivable(receivableId)
             Triple(open.receivable, open.outstanding, overview.paymentAccounts(open.receivable.scope))
         }
-        var accountId by remember { mutableStateOf<GlobalId?>(null) }
-        var amount by remember { mutableStateOf<Money?>(null) }
-        var date by remember { mutableStateOf(session.today) }
-        val commandId = remember { mutableStateOf(GlobalId.new()) }
+        var accountId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var amount by rememberSaveable { mutableStateOf<Money?>(null) }
+        var date by rememberSaveable { mutableStateOf(session.today) }
+        val commandId = rememberSaveable { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
             Header("دریافت از مشتری", onBack = nav.back)

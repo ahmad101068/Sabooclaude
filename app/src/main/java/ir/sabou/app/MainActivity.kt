@@ -14,7 +14,24 @@ class MainActivity : ComponentActivity() {
         // Financial data: keep it out of screenshots and the recent-apps preview.
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
-        val container = (application as SabouApplication).container
+        val app = application as SabouApplication
+        val container = app.container
+        lifecycle.addObserver(androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                // Going to the background: the system may kill the process, so keep the unfinished form
+                // (taken on the main thread, encrypted and written off it).
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    // Nobody signed in (e.g. the PIN screen after a restart): keep the draft waiting for sign-in.
+                    runCatching { app.ui.draftSnapshot(System.currentTimeMillis()) }.getOrNull()?.let(container::saveDraftsLater)
+                }
+                // Back in the foreground with the process alive: nothing to restore later.
+                androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                    if (app.ui.session != null) container.clearDraftsLater()
+                    container.verifyInBackgroundIfDue()
+                }
+                else -> Unit
+            }
+        })
         setContent {
             SabouTheme {
                 AppRoot(container, (application as SabouApplication).ui)

@@ -100,9 +100,16 @@ fun AppRoot(container: AppContainer, ui: UiState) {
                     session != null && session.core === s.core -> Shell(ui, session)
                     else -> Gate(s.core, container) { actor ->
                         rootScope.launch {
-                            val first = withContext(Dispatchers.IO) { s.core.identity.accessibleBranches(actor).firstOrNull()?.id }
+                            val (allowed, draft) = withContext(Dispatchers.IO) {
+                                s.core.identity.accessibleBranches(actor).map { it.id } to container.takeDrafts()
+                            }
                             ui.session?.close()   // e.g. the session of a database replaced by restore or reset
-                            ui.session = AppSession(s.core, actor, first) { ui.signOut() }
+                            val session = AppSession(s.core, actor, allowed.firstOrNull()) { ui.signOut(); container.clearDraftsLater() }
+                            // Back to the unfinished form this user left when the system closed the app.
+                            // A draft that cannot be decoded is dropped, never a crash.
+                            if (draft != null) runCatching { ui.restoreDraft(draft, session, allowed.toSet(), System.currentTimeMillis()) }
+                                .onFailure { ui.discardRestoredDraft() }
+                            ui.session = session
                         }
                     }
                 }
@@ -146,10 +153,46 @@ private fun RecoveryScreen(container: AppContainer, detail: String, title: Strin
         }
     }
     if (confirmReset) {
-        Confirm("پاک کردن همه داده‌ها؟", "این کار برگشت‌پذیر نیست. فقط وقتی انجام دهید که فایل پشتیبان ندارید یا نمی‌خواهید.", "پاک کن",
-            onConfirm = { scope.launch(Dispatchers.IO) { container.factoryReset(null) } }, onDismiss = { confirmReset = false }, danger = true)
+        EraseConfirm(onConfirm = { scope.launch(Dispatchers.IO) { container.factoryReset(null) } }, onDismiss = { confirmReset = false })
     }
 }
+
+/**
+ * Erasing everything is reachable without signing in (the PINs live in the database that may be unreadable),
+ * so it is made hard to do by accident or in passing: type the word, then wait for the countdown.
+ */
+@Composable
+internal fun EraseConfirm(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    var typed by remember { mutableStateOf("") }
+    var seconds by remember { mutableStateOf(ERASE_WAIT_SECONDS) }
+    LaunchedEffect(Unit) {
+        while (seconds > 0) { kotlinx.coroutines.delay(1_000); seconds-- }
+    }
+    // Arabic and Persian keyboards differ in kaf/yeh: both spellings count.
+    val ready = typed.trim().replace('ك', 'ک').replace('ي', 'ی') == ERASE_WORD && seconds == 0
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("پاک کردن همه داده‌ها", style = SabouType.section, color = Sabou.colors.danger) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("همه فروش‌ها، حساب‌ها، انبار و حقوق این دستگاه برای همیشه پاک می‌شود. اگر فایل پشتیبان دارید، به‌جای این کار «بازیابی» را بزنید.",
+                    style = SabouType.body)
+                TextInput("برای تأیید بنویسید: $ERASE_WORD", typed, { typed = it })
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { onDismiss(); onConfirm() }, enabled = ready) {
+                Text(if (seconds > 0) "پاک کن (${Fa.number(seconds.toLong())})" else "پاک کن", style = SabouType.bodyStrong,
+                    color = if (ready) Sabou.colors.danger else Sabou.colors.subtle)
+            }
+        },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("انصراف", style = SabouType.bodyStrong, color = Sabou.colors.muted) } },
+        containerColor = Sabou.colors.surface,
+    )
+}
+
+private const val ERASE_WORD = "پاک"
+private const val ERASE_WAIT_SECONDS = 10
 
 /** Restore from a backup file (recovery screen, and first run on a new or reinstalled device). */
 @Composable
@@ -295,16 +338,35 @@ private fun Shell(ui: UiState, session: AppSession) {
     BackHandler(enabled = ui.stack.size > 1 || ui.stack.first() != Route.Home) { if (!ui.back()) ui.go(Route.Home) }
     val route = ui.current
     val nav = Nav(go = ui::go, back = { ui.back() })
+    // Each page keeps its form values in its own registry, saved when the app goes to the background.
+    val registry = remember(route, ui.stack.size) {
+        androidx.compose.runtime.saveable.SaveableStateRegistry(ui.takeRestoredPage(), Drafts::canBeSaved)
+    }
+    androidx.compose.runtime.DisposableEffect(registry) {
+        ui.pageRegistry = registry
+        onDispose { if (ui.pageRegistry === registry) ui.pageRegistry = null }
+    }
+    session.notice?.let { message ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { session.notice = null },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { session.notice = null }) { Text("متوجه شدم", style = SabouType.bodyStrong, color = Sabou.colors.primary) } },
+            title = { Text("ثبت قبلی انجام نشد", style = SabouType.section) },
+            text = { Text("$message\nآن کار را دوباره انجام دهید.", style = SabouType.body) },
+            containerColor = Sabou.colors.surface,
+        )
+    }
     CompositionLocalProvider(LocalSession provides session) {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                when (route) {
-                    Route.Home -> HomeScreen(nav)
-                    Route.Sales -> SalesScreen(nav)
-                    Route.Operations -> OperationsScreens.Hub(nav)
-                    Route.Finance -> FinanceScreens.Hub(nav)
-                    Route.Me -> MeScreens.Hub(nav, onSignOut = ui::signOut)
-                    else -> Pages(route, nav)
+                CompositionLocalProvider(androidx.compose.runtime.saveable.LocalSaveableStateRegistry provides registry) {
+                    when (route) {
+                        Route.Home -> HomeScreen(nav)
+                        Route.Sales -> SalesScreen(nav)
+                        Route.Operations -> OperationsScreens.Hub(nav)
+                        Route.Finance -> FinanceScreens.Hub(nav)
+                        Route.Me -> MeScreens.Hub(nav, onSignOut = ui::signOut)
+                        else -> Pages(route, nav)
+                    }
                 }
             }
             val activeTab = ui.stack.first()

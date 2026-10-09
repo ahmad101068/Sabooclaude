@@ -12,7 +12,19 @@ data class Employee(
     val scope: Scope.Branch,
     val monthlySalary: Money,
     val isActive: Boolean = true,
-)
+    /** First day of work; null = employed before any period the app knows of. */
+    val startDate: BusinessDate? = null,
+    /** Last day of work once the employment has ended. */
+    val endDate: BusinessDate? = null,
+) {
+    /** Days of [from]..[to] on which this person was employed (0 when not employed at all). */
+    fun employedDays(from: BusinessDate, to: BusinessDate): Int {
+        if (!isActive && endDate == null) return 0
+        val first = maxOf(from.epochDay, startDate?.epochDay ?: Long.MIN_VALUE)
+        val last = minOf(to.epochDay, endDate?.epochDay ?: Long.MAX_VALUE)
+        return if (last < first) 0 else (last - first + 1).toInt()
+    }
+}
 
 data class AttendanceRecord(
     val id: GlobalId,
@@ -36,6 +48,8 @@ data class Payslip(
     val taxableIncome: Money,
     val incomeTax: Money,
     val net: Money,
+    /** Paid days when the person worked only part of the month (hired or left during it); null = whole month. */
+    val payableDays: Int? = null,
 )
 
 enum class RunStatus { DRAFT, APPROVED, REVERSED }

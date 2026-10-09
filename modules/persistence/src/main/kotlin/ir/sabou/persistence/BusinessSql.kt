@@ -237,6 +237,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
 class SqlPersonnelStore(db: SqlDatabase) : SqlTable(db), PersonnelStore {
     private fun employeeOf(d: Doc) = Employee(
         Codec.id(d.str("id")), d.str("name"), d.str("nationalId"), Codec.branchOf(d.str("scope")), Codec.money(d.long("salary")), d.bool("active"),
+        startDate = d.longOrNull("start")?.let(Codec::date), endDate = d.longOrNull("end")?.let(Codec::date),
     )
     override fun employee(id: GlobalId) = doc("SELECT doc FROM employees WHERE id = ?", id.value)?.let(::employeeOf)
     override fun employees(scope: Scope.Branch) = docs("SELECT doc FROM employees WHERE scope = ? ORDER BY rowid", Codec.scope(scope)).map(::employeeOf)
@@ -248,6 +249,7 @@ class SqlPersonnelStore(db: SqlDatabase) : SqlTable(db), PersonnelStore {
                 mapOf(
                     "id" to employee.id.value, "name" to employee.name, "nationalId" to employee.nationalId, "scope" to Codec.scope(employee.scope),
                     "salary" to employee.monthlySalary.rial, "active" to employee.isActive,
+                    "start" to employee.startDate?.epochDay, "end" to employee.endDate?.epochDay,
                 ),
             ),
         ),
@@ -279,11 +281,13 @@ class SqlPayrollStore(db: SqlDatabase) : SqlTable(db), PayrollStore {
         "employee" to p.employeeId.value, "base" to p.baseSalary.rial, "absence" to p.absenceDeduction.rial, "overtime" to p.overtimePay.rial,
         "gross" to p.gross.rial, "insurable" to p.insurableBase.rial, "empIns" to p.employeeInsurance.rial, "erIns" to p.employerInsurance.rial,
         "unemp" to p.unemploymentInsurance.rial, "taxable" to p.taxableIncome.rial, "tax" to p.incomeTax.rial, "net" to p.net.rial,
+        "days" to p.payableDays?.toLong(),
     )
     private fun slipOf(d: Doc) = Payslip(
         Codec.id(d.str("employee")), Codec.money(d.long("base")), Codec.money(d.long("absence")), Codec.money(d.long("overtime")),
         Codec.money(d.long("gross")), Codec.money(d.long("insurable")), Codec.money(d.long("empIns")), Codec.money(d.long("erIns")),
         Codec.money(d.long("unemp")), Codec.money(d.long("taxable")), Codec.money(d.long("tax")), Codec.money(d.long("net")),
+        d.longOrNull("days")?.toInt(),
     )
     private fun runOf(d: Doc) = PayrollRun(
         Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.date(d.long("from")), Codec.date(d.long("to")), d.str("policy"),
@@ -351,6 +355,7 @@ class SqlPolicyStore(db: SqlDatabase) : SqlTable(db), PolicyStore {
             maxInsurableMonthly = Codec.money(d.long("maxInsurable")),
             insuranceTaxExemptNumerator = d.int("exemptNum"), insuranceTaxExemptDenominator = d.int("exemptDen"),
             taxBrackets = d.docs("brackets").map { TaxBracket(it.longOrNull("upTo")?.let(Codec::money), it.int("bp")) },
+            prorationDays = d.longOrNull("prorationDays")?.toInt() ?: 30,   // policies saved before this field: 30
         )
     }
 
@@ -366,6 +371,7 @@ class SqlPolicyStore(db: SqlDatabase) : SqlTable(db), PolicyStore {
                 "maxInsurable" to policy.maxInsurableMonthly.rial, "exemptNum" to policy.insuranceTaxExemptNumerator,
                 "exemptDen" to policy.insuranceTaxExemptDenominator,
                 "brackets" to policy.taxBrackets.map { mapOf("upTo" to it.upToMonthly?.rial, "bp" to it.rateBasisPoints) },
+                "prorationDays" to policy.prorationDays,
             ),
         ),
     )

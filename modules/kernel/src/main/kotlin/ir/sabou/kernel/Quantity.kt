@@ -2,7 +2,7 @@ package ir.sabou.kernel
 
 /** A non-negative quantity in micro-units (1 unit = 1,000,000 micros). */
 @JvmInline
-value class Quantity private constructor(val micros: Long) : Comparable<Quantity> {
+value class Quantity private constructor(val micros: Long) : Comparable<Quantity>, java.io.Serializable {
     operator fun plus(other: Quantity) = of(Math.addExact(micros, other.micros))
     operator fun minus(other: Quantity): Quantity {
         if (other.micros > micros) throw DomainException(DomainError.InvalidInput("quantity", "نتیجه مقدار منفی می‌شود."))

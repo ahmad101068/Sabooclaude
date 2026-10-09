@@ -12,10 +12,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +70,7 @@ import ir.sabou.payroll.CalculatePayroll
 import ir.sabou.payroll.LiabilityKind
 import ir.sabou.payroll.PaySalary
 import ir.sabou.payroll.RecordAttendance
+import ir.sabou.payroll.EndEmployment
 import ir.sabou.payroll.RegisterEmployee
 import ir.sabou.payroll.RemitLiability
 import ir.sabou.payroll.ReversePayroll
@@ -142,8 +142,8 @@ object OperationsScreens {
             Header("موجودی انبار", onBack = nav.back) { BranchSwitcher() }
             WithBranch { branch ->
                 val inv by invData(branch)
-                var locationId by remember(branch) { mutableStateOf<GlobalId?>(null) }
-                var opening by remember { mutableStateOf(false) }
+                var locationId by rememberSaveable(branch) { mutableStateOf<GlobalId?>(null) }
+                var opening by rememberSaveable { mutableStateOf(false) }
                 Page {
                     Loaded(inv) { d ->
                         val loc = locationId ?: d.locations.firstOrNull()?.id
@@ -185,11 +185,11 @@ object OperationsScreens {
     @Composable
     private fun OpeningForm(branch: Scope.Branch, d: InvData, locationId: GlobalId?, done: () -> Unit) {
         val session = LocalSession.current
-        var itemId by remember { mutableStateOf<GlobalId?>(null) }
-        var qty by remember { mutableStateOf<Quantity?>(null) }
-        var value by remember { mutableStateOf<Money?>(null) }
+        var itemId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var qty by rememberSaveable { mutableStateOf<Quantity?>(null) }
+        var value by rememberSaveable { mutableStateOf<Money?>(null) }
         val action = rememberAction()
-        val id = remember { GlobalId.new() }
+        val id = rememberSaveable { GlobalId.new() }
         FormCard("موجودی اول دوره") {
             Text("کالایی که از قبل در انبار دارید با ارزش آن ثبت می‌شود (طرف مقابل: سرمایه).", style = SabouType.caption, color = Sabou.colors.muted)
             Picker("کالا", d.items.map { Choice(it.id, it.name, unitName(it.unit)) }, itemId, { itemId = it })
@@ -214,13 +214,13 @@ object OperationsScreens {
             Header("ثبت ضایعات", onBack = nav.back)
             WithBranch { branch ->
                 val inv by invData(branch)
-                var locationId by remember { mutableStateOf<GlobalId?>(null) }
-                var itemId by remember { mutableStateOf<GlobalId?>(null) }
-                var qty by remember { mutableStateOf<Quantity?>(null) }
-                var reason by remember { mutableStateOf(WasteReason.SPOILAGE) }
-                var note by remember { mutableStateOf("") }
-                var date by remember { mutableStateOf(session.today) }
-                val id = remember { mutableStateOf(GlobalId.new()) }
+                var locationId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+                var itemId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+                var qty by rememberSaveable { mutableStateOf<Quantity?>(null) }
+                var reason by rememberSaveable { mutableStateOf(WasteReason.SPOILAGE) }
+                var note by rememberSaveable { mutableStateOf("") }
+                var date by rememberSaveable { mutableStateOf(session.today) }
+                val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
                 val action = rememberAction()
                 Page {
                     Loaded(inv) { d ->
@@ -251,7 +251,7 @@ object OperationsScreens {
             Header("انبارگردانی", onBack = nav.back)
             WithBranch { branch ->
                 val inv by invData(branch)
-                var locationId by remember { mutableStateOf<GlobalId?>(null) }
+                var locationId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
                 Page {
                     Loaded(inv) { d ->
                         val loc = locationId ?: d.locations.firstOrNull()?.id
@@ -267,8 +267,8 @@ object OperationsScreens {
     private fun CountSheet(nav: Nav, branch: Scope.Branch, locationId: GlobalId, items: List<Item>) {
         val session = LocalSession.current
         val balances by load(session, locationId) { overview.stock(locationId) }
-        val counted = remember { mutableStateMapOf<GlobalId, Quantity?>() }
-        val id = remember { GlobalId.new() }
+        val counted = ir.sabou.app.ui.rememberValueMap<GlobalId, Quantity?>()
+        val id = rememberSaveable { GlobalId.new() }
         var confirm by remember { mutableStateOf(false) }
         val action = rememberAction()
         Loaded(balances) { list ->
@@ -301,13 +301,13 @@ object OperationsScreens {
                 val data by load(session, branch) {
                     Triple(overview.items().filter { it.isActive }, overview.locations(branch).filter { it.isActive }, overview.transferTargets())
                 }
-                var source by remember { mutableStateOf<GlobalId?>(null) }
-                var target by remember { mutableStateOf<GlobalId?>(null) }
-                var itemId by remember { mutableStateOf<GlobalId?>(null) }
-                var qty by remember { mutableStateOf<Quantity?>(null) }
-                val lines = remember { mutableStateListOf<IssueLine>() }
-                var note by remember { mutableStateOf("") }
-                val id = remember { mutableStateOf(GlobalId.new()) }
+                var source by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+                var target by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+                var itemId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+                var qty by rememberSaveable { mutableStateOf<Quantity?>(null) }
+                val lines = ir.sabou.app.ui.rememberRows<IssueLine>({ listOf(it.itemId, it.quantity) }, { IssueLine(it[0] as GlobalId, it[1] as Quantity) }) { emptyList() }
+                var note by rememberSaveable { mutableStateOf("") }
+                val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
                 val action = rememberAction()
                 Page {
                     Loaded(data) { (items, own, all) ->
@@ -376,16 +376,17 @@ object OperationsScreens {
                         InvData(overview.items().filter { it.isActive }, overview.locations(branch).filter { it.isActive }),
                         if (session.can(Permission.PURCHASE_PAY)) overview.paymentAccounts(branch) else emptyList())
                 }
-                var supplier by remember { mutableStateOf<GlobalId?>(null) }
-                var number by remember { mutableStateOf("") }
-                var locationId by remember { mutableStateOf<GlobalId?>(null) }
-                var date by remember { mutableStateOf(session.today) }
-                var due by remember { mutableStateOf(session.today.plusDays(30)) }
-                val lines = remember { mutableStateListOf(LineDraft(null, null, null)) }
-                var payNow by remember { mutableStateOf(false) }
-                var payAccount by remember { mutableStateOf<GlobalId?>(null) }
-                var payAmount by remember { mutableStateOf<Money?>(null) }
-                val id = remember { mutableStateOf(GlobalId.new()) }
+                var supplier by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+                var number by rememberSaveable { mutableStateOf("") }
+                var locationId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+                var date by rememberSaveable { mutableStateOf(session.today) }
+                var due by rememberSaveable { mutableStateOf(session.today.plusDays(30)) }
+                val lines = ir.sabou.app.ui.rememberRows<LineDraft>({ listOf(it.item, it.qty, it.value) },
+                    { LineDraft(it[0] as GlobalId?, it[1] as Quantity?, it[2] as Money?) }) { listOf(LineDraft(null, null, null)) }
+                var payNow by rememberSaveable { mutableStateOf(false) }
+                var payAccount by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+                var payAmount by rememberSaveable { mutableStateOf<Money?>(null) }
+                val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
                 val action = rememberAction()
                 Page {
                     Loaded(data) { (sups, inv, accounts) ->
@@ -407,7 +408,7 @@ object OperationsScreens {
                                             if (lines.size > 1) Text("حذف", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable { lines.remove(l) }.padding(6.dp))
                                         }
                                         Picker("کالا", inv.items.map { Choice(it.id, it.name, unitName(it.unit)) }, l.item, { l.item = it })
-                                        QuantityInput("مقدار", inv.items.firstOrNull { it.id == l.item }?.let { unitName(it.unit) } ?: "", { l.qty = it })
+                                        QuantityInput("مقدار", inv.items.firstOrNull { it.id == l.item }?.let { unitName(it.unit) } ?: "", { l.qty = it }, value = l.qty)
                                         MoneyInput("مبلغ کل ردیف", l.value, { l.value = it })
                                         Divider()
                                     }
@@ -464,12 +465,12 @@ object OperationsScreens {
                 accounts = if (session.can(Permission.PURCHASE_PAY)) overview.paymentAccounts() else emptyList(),
             )
         }
-        var payAccount by remember { mutableStateOf<GlobalId?>(null) }
-        var payAmount by remember { mutableStateOf<Money?>(null) }
-        var reason by remember { mutableStateOf("") }
+        var payAccount by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var payAmount by rememberSaveable { mutableStateOf<Money?>(null) }
+        var reason by rememberSaveable { mutableStateOf("") }
         var confirmReverse by remember { mutableStateOf(false) }
-        var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
-        val id = remember { mutableStateOf(GlobalId.new()) }
+        var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }   // holds an action: not saveable
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
         pending?.let { (title, act) -> Confirm(title, "سند برگشتی ثبت می‌شود و سابقه حذف نمی‌شود.", "برگشت بزن", act, { pending = null }, danger = true) }
         Column(Modifier.fillMaxSize()) {
@@ -538,9 +539,9 @@ object OperationsScreens {
     @Composable
     private fun ReturnForm(scope: Scope.Branch, invoiceId: GlobalId, items: List<Choice<GlobalId>>) {
         val session = LocalSession.current
-        var itemId by remember { mutableStateOf<GlobalId?>(null) }
-        var qty by remember { mutableStateOf<Quantity?>(null) }
-        var reason by remember { mutableStateOf("") }
+        var itemId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var qty by rememberSaveable { mutableStateOf<Quantity?>(null) }
+        var reason by rememberSaveable { mutableStateOf("") }
         val action = rememberAction()
         Picker("کالای مرجوعی", items, itemId, { itemId = it })
         QuantityInput("مقدار مرجوعی", "", { qty = it })
@@ -555,9 +556,9 @@ object OperationsScreens {
     fun Suppliers(nav: Nav) {
         val session = LocalSession.current
         val data by load(session) { overview.suppliers().map { it.supplier to it.owed } }
-        var name by remember { mutableStateOf("") }
-        var phone by remember { mutableStateOf("") }
-        val id = remember { mutableStateOf(GlobalId.new()) }
+        var name by rememberSaveable { mutableStateOf("") }
+        var phone by rememberSaveable { mutableStateOf("") }
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
             Header("تأمین‌کنندگان", onBack = nav.back)
@@ -591,25 +592,60 @@ object OperationsScreens {
             Header("کارکنان", onBack = nav.back) { BranchSwitcher() }
             WithBranch { branch ->
                 val data by load(session, branch) { overview.employees(branch) }
-                var name by remember { mutableStateOf("") }
-                var nationalId by remember { mutableStateOf("") }
-                var salary by remember { mutableStateOf<Money?>(null) }
-                val id = remember { mutableStateOf(GlobalId.new()) }
+                var name by rememberSaveable { mutableStateOf("") }
+                var nationalId by rememberSaveable { mutableStateOf("") }
+                var salary by rememberSaveable { mutableStateOf<Money?>(null) }
+                var midMonth by rememberSaveable { mutableStateOf(false) }
+                var start by rememberSaveable { mutableStateOf(session.today) }
+                var ending by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+                var lastDay by rememberSaveable { mutableStateOf(session.today) }
+                val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
+                val endId = rememberSaveable { mutableStateOf(GlobalId.new()) }
                 val action = rememberAction()
                 Page {
                     Loaded(data) { list ->
                         if (list.isEmpty()) EmptyState("کارمندی برای این شعبه ثبت نشده است.")
-                        list.forEach { e -> SCard { KeyValue(e.name, "حقوق ${Fa.tomanShort(e.monthlySalary.rial)}"); Text("کد ملی ${Fa.digits(e.nationalId)}", style = SabouType.caption, color = Sabou.colors.muted) } }
+                        list.forEach { e ->
+                            SCard {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(e.name, style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                                    if (e.endDate != null) Chip("پایان همکاری ${Fa.date(e.endDate!!)}", ChipKind.NEUTRAL)
+                                }
+                                KeyValue("حقوق ماهانه", Fa.toman(e.monthlySalary))
+                                Text("کد ملی ${Fa.digits(e.nationalId)}" + (e.startDate?.let { " · شروع کار ${Fa.date(it)}" } ?: ""),
+                                    style = SabouType.caption, color = Sabou.colors.muted)
+                                if (e.endDate == null && e.isActive && session.can(Permission.PERSONNEL_MANAGE)) {
+                                    if (ending == e.id) {
+                                        DateInput("آخرین روز کار", lastDay, { lastDay = it }, session.today)
+                                        Text("حقوق ماه آخر به نسبت روزهای کار تا این تاریخ حساب می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
+                                        action.error?.let { Banner(it) }
+                                        PrimaryButton("ثبت پایان همکاری", {
+                                            action.run({ payroll.endEmployment(EndEmployment(endId.value, branch, e.id, lastDay)) }) {
+                                                ending = null; endId.value = GlobalId.new()
+                                            }
+                                        }, busy = action.busy)
+                                        SecondaryButton("انصراف", { ending = null })
+                                    } else {
+                                        SecondaryButton("پایان همکاری", { ending = e.id; lastDay = session.today; endId.value = GlobalId.new() })
+                                    }
+                                }
+                            }
+                        }
                     }
                     if (session.can(Permission.PERSONNEL_MANAGE)) {
                         FormCard("کارمند جدید") {
                             TextInput("نام و نام خانوادگی", name, { name = it })
                             TextInput("کد ملی", nationalId, { nationalId = it }, keyboard = KeyboardType.Number)
                             MoneyInput("حقوق پایه ماهانه", salary, { salary = it })
-                            action.error?.let { Banner(it) }
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { midMonth = !midMonth }) {
+                                androidx.compose.material3.Checkbox(checked = midMonth, onCheckedChange = { midMonth = it })
+                                Text("از وسط ماه شروع به کار کرده (حقوق ماه اول به نسبت روزها)", style = SabouType.body, color = Sabou.colors.ink)
+                            }
+                            if (midMonth) DateInput("تاریخ شروع کار", start, { start = it }, session.today)
+                            if (ending == null) action.error?.let { Banner(it) }
                             PrimaryButton("ثبت", {
-                                action.run({ payroll.registerEmployee(RegisterEmployee(id.value, branch, name, nationalId, salary!!)) }) {
-                                    name = ""; nationalId = ""; salary = null; id.value = GlobalId.new()
+                                action.run({ payroll.registerEmployee(RegisterEmployee(id.value, branch, name, nationalId, salary!!, startDate = start.takeIf { midMonth })) }) {
+                                    name = ""; nationalId = ""; salary = null; midMonth = false; id.value = GlobalId.new()
                                 }
                             }, enabled = name.isNotBlank() && nationalId.isNotBlank() && salary != null, busy = action.busy)
                         }
@@ -622,7 +658,7 @@ object OperationsScreens {
     @Composable
     fun Attendance(nav: Nav) {
         val session = LocalSession.current
-        var date by remember { mutableStateOf(session.today) }
+        var date by rememberSaveable { mutableStateOf(session.today) }
         Column(Modifier.fillMaxSize()) {
             Header("حضور و غیاب", onBack = nav.back)
             WithBranch { branch ->
@@ -642,9 +678,9 @@ object OperationsScreens {
     private fun AttendanceRow(branch: Scope.Branch, date: BusinessDate, employeeId: GlobalId, name: String, record: ir.sabou.payroll.AttendanceRecord?) {
         fun hours(min: Int?) = min?.takeIf { it > 0 }?.let { Fa.quantity(Quantity.of(it.toLong() * Quantity.SCALE / 60)) } ?: ""
         fun minutes(text: String): Int? = if (text.isBlank()) 0 else Fa.parseQuantity(text)?.let { (it.micros * 60 / Quantity.SCALE).toInt() }
-        var worked by remember { mutableStateOf(hours(record?.workedMinutes)) }
-        var overtime by remember { mutableStateOf(hours(record?.overtimeMinutes)) }
-        var absent by remember { mutableStateOf(hours(record?.absentMinutes)) }
+        var worked by rememberSaveable { mutableStateOf(hours(record?.workedMinutes)) }
+        var overtime by rememberSaveable { mutableStateOf(hours(record?.overtimeMinutes)) }
+        var absent by rememberSaveable { mutableStateOf(hours(record?.absentMinutes)) }
         val action = rememberAction()
         FormCard(name) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -681,7 +717,7 @@ object OperationsScreens {
                 Choice(Fa.fromJalali(y, m, 1) to Fa.fromJalali(y, m, Fa.monthLength(y, m)), "${Fa.monthNames[m - 1]} ${Fa.digits(y.toString())}")
             }
         }
-        var period by remember { mutableStateOf(months.first().value) }
+        var period by rememberSaveable { mutableStateOf(months.first().value) }
         val fromDate = period.first
         val toDate = period.second
         Column(Modifier.fillMaxSize()) {
@@ -695,10 +731,10 @@ object OperationsScreens {
                     )
                 }
                 val action = rememberAction()
-                var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+                var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }   // holds an action: not saveable
                 pending?.let { (title, act) -> Confirm(title, "سند حقوق این دوره برگشت می‌خورد؛ می‌توانید دوباره محاسبه و تأیید کنید.", "برگشت بزن", act, { pending = null }, danger = true) }
-                val calcId = remember { mutableStateOf(GlobalId.new()) }
-                var payAccount by remember { mutableStateOf<GlobalId?>(null) }
+                val calcId = rememberSaveable { mutableStateOf(GlobalId.new()) }
+                var payAccount by rememberSaveable { mutableStateOf<GlobalId?>(null) }
                 Page {
                     if (session.can(Permission.PAYROLL_CALCULATE)) {
                         FormCard("محاسبه حقوق دوره") {
@@ -723,6 +759,9 @@ object OperationsScreens {
                                 run.payslips.forEach { p ->
                                     Divider()
                                     KeyValue(d.names[p.employeeId] ?: "", "خالص ${Fa.toman(p.net)}")
+                                    p.payableDays?.let { days ->
+                                        Text("ماه ناقص: ${Fa.number(days.toLong())} روز کار · حقوق این ماه ${Fa.toman(p.baseSalary)}", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
+                                    }
                                     Text("ناخالص ${Fa.toman(p.gross)} · بیمه ${Fa.toman(p.employeeInsurance)} · مالیات ${Fa.toman(p.incomeTax)}",
                                         style = SabouType.caption, color = Sabou.colors.muted)
                                     val unpaid = d.unpaid[run.id]?.get(p.employeeId)

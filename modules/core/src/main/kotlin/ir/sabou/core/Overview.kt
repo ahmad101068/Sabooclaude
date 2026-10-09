@@ -256,7 +256,8 @@ class Overview internal constructor(private val core: SabouCore) {
     fun attendance(branch: Scope.Branch, date: BusinessDate): List<Pair<Employee, AttendanceRecord?>> {
         val a = actor(Permission.ATTENDANCE_RECORD, Permission.PERSONNEL_VIEW)
         a.require(branch)
-        return core.personnel.employees(branch).filter { it.isActive }
+        // Everyone employed on that day (an end date entered ahead of time still lets the last days be recorded).
+        return core.personnel.employees(branch).filter { it.employedDays(date, date) == 1 }
             .map { it.copy(monthlySalary = Money.ZERO, nationalId = "") to core.personnel.attendanceOn(it.id, date) }
     }
 

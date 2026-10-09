@@ -16,9 +16,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -129,7 +129,7 @@ object MeScreens {
     fun Branches(nav: Nav) {
         val session = LocalSession.current
         val data by load(session) { overview.branches() }
-        var name by remember { mutableStateOf("") }
+        var name by rememberSaveable { mutableStateOf("") }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
             Header("شعب", onBack = nav.back)
@@ -148,13 +148,13 @@ object MeScreens {
     fun Users(nav: Nav) {
         val session = LocalSession.current
         val data by load(session) { overview.users() to overview.allBranches().filter { it.isActive } }
-        var username by remember { mutableStateOf("") }
-        var display by remember { mutableStateOf("") }
-        var role by remember { mutableStateOf(Role.CASHIER) }
+        var username by rememberSaveable { mutableStateOf("") }
+        var display by rememberSaveable { mutableStateOf("") }
+        var role by rememberSaveable { mutableStateOf(Role.CASHIER) }
         var pin by remember { mutableStateOf("") }
-        val grants = remember { mutableStateListOf<BranchId>() }
+        val grants = ir.sabou.app.ui.rememberValueList<BranchId> { emptyList() }
         var editing by remember { mutableStateOf<ir.sabou.platform.User?>(null) }
-        var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+        var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }   // holds an action: not saveable
         val action = rememberAction()
         pending?.let { (title, act) -> Confirm(title, "این تغییر در سوابق ممیزی ثبت می‌شود.", "تأیید", act, { pending = null }) }
         Column(Modifier.fillMaxSize()) {
@@ -202,8 +202,8 @@ object MeScreens {
     /** Edit role and branches (never touches the PIN or active state), reactivate, deactivate, reset PIN. */
     @Composable
     private fun EditUser(u: ir.sabou.platform.User, branches: List<ir.sabou.platform.Branch>, close: () -> Unit, confirm: (String, () -> Unit) -> Unit) {
-        var role by remember { mutableStateOf(u.role) }
-        val grants = remember { mutableStateListOf<BranchId>().apply { addAll(u.branchGrants) } }
+        var role by rememberSaveable { mutableStateOf(u.role) }
+        val grants = ir.sabou.app.ui.rememberValueList { u.branchGrants.toList() }
         var newPin by remember { mutableStateOf("") }
         val action = rememberAction()
         FormCard("ویرایش ${u.displayName}") {
@@ -234,10 +234,10 @@ object MeScreens {
     fun Items(nav: Nav) {
         val session = LocalSession.current
         val data by load(session) { overview.items() }
-        var name by remember { mutableStateOf("") }
-        var unit by remember { mutableStateOf(StockUnit.KILOGRAM) }
-        var minimum by remember { mutableStateOf<Quantity?>(Quantity.ZERO) }
-        val id = remember { mutableStateOf(GlobalId.new()) }
+        var name by rememberSaveable { mutableStateOf("") }
+        var unit by rememberSaveable { mutableStateOf(StockUnit.KILOGRAM) }
+        var minimum by rememberSaveable { mutableStateOf<Quantity?>(Quantity.ZERO) }
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
             Header("کالاها", onBack = nav.back)
@@ -266,8 +266,8 @@ object MeScreens {
             Header("انبارها", onBack = nav.back) { BranchSwitcher() }
             WithBranch { branch ->
                 val data by load(session, branch) { overview.locations(branch) }
-                var name by remember { mutableStateOf("") }
-                val id = remember { mutableStateOf(GlobalId.new()) }
+                var name by rememberSaveable { mutableStateOf("") }
+                val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
                 val action = rememberAction()
                 Page {
                     Loaded(data) { list -> list.forEach { l -> SCard { Text(l.name, style = SabouType.bodyStrong, color = Sabou.colors.ink) } } }
@@ -295,10 +295,10 @@ object MeScreens {
             val menu = overview.menu()
             Triple(menu.map { it.item }, overview.items().associateBy { it.id }, menu.associate { it.item.id to it.latest })
         }
-        var name by remember { mutableStateOf("") }
-        var menuItem by remember { mutableStateOf<GlobalId?>(null) }
-        var from by remember { mutableStateOf(session.today) }
-        val rows = remember { mutableStateListOf(RecipeRow(null, null)) }
+        var name by rememberSaveable { mutableStateOf("") }
+        var menuItem by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var from by rememberSaveable { mutableStateOf(session.today) }
+        val rows = ir.sabou.app.ui.rememberRows<RecipeRow>({ listOf(it.item, it.qty) }, { RecipeRow(it[0] as GlobalId?, it[1] as Quantity?) }) { listOf(RecipeRow(null, null)) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
             Header("منو و رسپی", onBack = nav.back)
@@ -329,7 +329,7 @@ object MeScreens {
                             rows.forEach { r ->
                                 key(r) {
                                     Picker("ماده اولیه", items.values.filter { it.isActive }.map { Choice(it.id, it.name, unitName(it.unit)) }, r.item, { r.item = it })
-                                    QuantityInput("مقدار برای یک پرس", r.item?.let { items[it] }?.let { unitName(it.unit) } ?: "", { r.qty = it })
+                                    QuantityInput("مقدار برای یک پرس", r.item?.let { items[it] }?.let { unitName(it.unit) } ?: "", { r.qty = it }, value = r.qty)
                                     Divider()
                                 }
                             }
@@ -349,10 +349,10 @@ object MeScreens {
     fun Accounts(nav: Nav) {
         val session = LocalSession.current
         val data by load(session) { overview.treasury() to overview.branches() }
-        var name by remember { mutableStateOf("") }
-        var kind by remember { mutableStateOf(TreasuryKind.CASH) }
-        var orgLevel by remember { mutableStateOf(false) }
-        val id = remember { mutableStateOf(GlobalId.new()) }
+        var name by rememberSaveable { mutableStateOf("") }
+        var kind by rememberSaveable { mutableStateOf(TreasuryKind.CASH) }
+        var orgLevel by rememberSaveable { mutableStateOf(false) }
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
             Header("صندوق‌ها و حساب‌ها", onBack = nav.back) { BranchSwitcher() }
@@ -386,11 +386,11 @@ object MeScreens {
             Header("مشتریان اعتباری", onBack = nav.back) { BranchSwitcher() }
             WithBranch { branch ->
                 val data by load(session, branch) { overview.customers(branch).map { it.customer to it.owed } }
-                var name by remember { mutableStateOf("") }
-                var phone by remember { mutableStateOf("") }
-                var type by remember { mutableStateOf(CustomerType.COMPANY) }
-                var limit by remember { mutableStateOf<Money?>(null) }
-                val id = remember { mutableStateOf(GlobalId.new()) }
+                var name by rememberSaveable { mutableStateOf("") }
+                var phone by rememberSaveable { mutableStateOf("") }
+                var type by rememberSaveable { mutableStateOf(CustomerType.COMPANY) }
+                var limit by rememberSaveable { mutableStateOf<Money?>(null) }
+                val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
                 val action = rememberAction()
                 Page {
                     Loaded(data) { list ->
@@ -413,27 +413,28 @@ object MeScreens {
 
     // ------------------------------------------------------------ Payroll policies
 
-    private class BracketRow { var upTo by mutableStateOf<Money?>(null); var rate by mutableStateOf("") }
+    private class BracketRow(upTo: Money? = null, rate: String = "") { var upTo by mutableStateOf(upTo); var rate by mutableStateOf(rate) }
 
     @Composable
     fun Policies(nav: Nav) {
         val session = LocalSession.current
         val data by load(session) { overview.policies() }
         val j = Fa.jalali(session.today)
-        var version by remember { mutableStateOf(Fa.digits(j.year.toString())) }
-        var fromDate by remember { mutableStateOf(Fa.fromJalali(j.year, 1, 1)) }
-        var toDate by remember { mutableStateOf(Fa.fromJalali(j.year, 12, Fa.monthLength(j.year, 12))) }
-        var hours by remember { mutableStateOf("۱۹۲") }
-        var overtime by remember { mutableStateOf("۱۴۰") }
-        var empIns by remember { mutableStateOf("۷") }
-        var erIns by remember { mutableStateOf("۲۰") }
-        var unemp by remember { mutableStateOf("۳") }
-        var exemptNum by remember { mutableStateOf("۲") }
-        var exemptDen by remember { mutableStateOf("۷") }
-        var invalid by remember { mutableStateOf<String?>(null) }
-        var maxInsurable by remember { mutableStateOf<Money?>(null) }
-        val brackets = remember { mutableStateListOf(BracketRow(), BracketRow()) }
-        var topRate by remember { mutableStateOf("") }
+        var version by rememberSaveable { mutableStateOf(Fa.digits(j.year.toString())) }
+        var fromDate by rememberSaveable { mutableStateOf(Fa.fromJalali(j.year, 1, 1)) }
+        var toDate by rememberSaveable { mutableStateOf(Fa.fromJalali(j.year, 12, Fa.monthLength(j.year, 12))) }
+        var hours by rememberSaveable { mutableStateOf("۱۹۲") }
+        var overtime by rememberSaveable { mutableStateOf("۱۴۰") }
+        var empIns by rememberSaveable { mutableStateOf("۷") }
+        var erIns by rememberSaveable { mutableStateOf("۲۰") }
+        var unemp by rememberSaveable { mutableStateOf("۳") }
+        var exemptNum by rememberSaveable { mutableStateOf("۲") }
+        var exemptDen by rememberSaveable { mutableStateOf("۷") }
+        var invalid by rememberSaveable { mutableStateOf<String?>(null) }
+        var maxInsurable by rememberSaveable { mutableStateOf<Money?>(null) }
+        val brackets = ir.sabou.app.ui.rememberRows<BracketRow>({ listOf(it.upTo, it.rate) }, { BracketRow(it[0] as Money?, it[1] as String) }) { listOf(BracketRow(), BracketRow()) }
+        var topRate by rememberSaveable { mutableStateOf("") }
+        var prorationDays by rememberSaveable { mutableStateOf("۳۰") }
         val action = rememberAction()
         fun pct(t: String) = Fa.parseQuantity(t)?.let { (it.micros * 100 / Quantity.SCALE).toInt() }   // percent → basis points
         Column(Modifier.fillMaxSize()) {
@@ -441,7 +442,12 @@ object MeScreens {
             Page {
                 Banner("این مقادیر را هر سال پس از تأیید مشاور مالیاتی/بیمه وارد کنید. برای دوره‌ای که پارامتر ندارد، محاسبه حقوق انجام نمی‌شود.", ChipKind.ACCENT)
                 Loaded(data) { list ->
-                    list.forEach { p -> SCard { KeyValue("نسخه ${p.version}", "${Fa.date(p.from)} تا ${Fa.date(p.to)}") } }
+                    list.forEach { p ->
+                        SCard {
+                            KeyValue("نسخه ${p.version}", "${Fa.date(p.from)} تا ${Fa.date(p.to)}")
+                            Text("ماه ناقص: تقسیم بر ${Fa.number(p.prorationDays.toLong())} روز", style = SabouType.caption, color = Sabou.colors.muted)
+                        }
+                    }
                 }
                 FormCard("نسخه جدید") {
                     TextInput("نام نسخه", version, { version = it })
@@ -449,6 +455,8 @@ object MeScreens {
                     DateInput("تا", toDate, { toDate = it }, session.today)
                     TextInput("ساعت کار موظف ماهانه", hours, { hours = it }, keyboard = KeyboardType.Number)
                     TextInput("ضریب اضافه‌کار (درصد)", overtime, { overtime = it }, keyboard = KeyboardType.Number)
+                    TextInput("روزهای مبنای حقوق ماه ناقص", prorationDays, { prorationDays = it }, keyboard = KeyboardType.Number)
+                    Text("حقوق کسی که وسط ماه شروع یا تمام کرده = حقوق ماهانه × روزهای کار ÷ این عدد (معمولاً ۳۰).", style = SabouType.caption, color = Sabou.colors.muted)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextInput("بیمه سهم کارگر ٪", empIns, { empIns = it }, Modifier.weight(1f), keyboard = KeyboardType.Decimal)
                         TextInput("سهم کارفرما ٪", erIns, { erIns = it }, Modifier.weight(1f), keyboard = KeyboardType.Decimal)
@@ -477,7 +485,7 @@ object MeScreens {
                     val num = Fa.parseLong(exemptNum)?.toInt()
                     val den = Fa.parseLong(exemptDen)?.toInt()
                     val ready = minutes != null && Fa.parseLong(overtime) != null && pct(empIns) != null && pct(erIns) != null && pct(unemp) != null &&
-                        num != null && den != null && den > 0 && num in 0..den &&
+                        num != null && den != null && den > 0 && num in 0..den && Fa.parseLong(prorationDays)?.let { it in 28L..31L } == true &&
                         maxInsurable != null && brackets.all { it.upTo != null && pct(it.rate) != null } && pct(topRate) != null
                     PrimaryButton("ثبت پارامترها", {
                         invalid = null
@@ -487,6 +495,7 @@ object MeScreens {
                             employeeInsuranceBp = pct(empIns)!!, employerInsuranceBp = pct(erIns)!!, unemploymentInsuranceBp = pct(unemp)!!,
                             maxInsurableMonthly = maxInsurable!!, insuranceTaxExemptNumerator = num!!, insuranceTaxExemptDenominator = den!!,
                             taxBrackets = brackets.sortedBy { it.upTo!!.rial }.map { TaxBracket(it.upTo, pct(it.rate)!!) } + TaxBracket(null, pct(topRate)!!),
+                            prorationDays = Fa.parseLong(prorationDays)!!.toInt(),
                         ) } catch (e: IllegalArgumentException) {
                             invalid = "مقادیر با هم سازگار نیستند: نرخ‌ها باید بین ۰ و ۱۰۰٪ باشند، پله‌ها صعودی و بدون تکرار، و جمع بیمه سهم کارگر و بالاترین نرخ مالیات کمتر از ۱۰۰٪."
                             return@PrimaryButton
@@ -566,9 +575,9 @@ object MeScreens {
             }, onDismiss = { confirmRestore = false }, danger = true)
         }
         if (confirmReset) {
-            Confirm("پاک کردن همه داده‌ها؟", "این کار برگشت‌پذیر نیست. پیش از آن پشتیبان بگیرید.", "پاک کن", onConfirm = {
+            ir.sabou.app.ui.EraseConfirm(onConfirm = {
                 work("همه داده‌ها پاک شد.") { container.factoryReset(session.core) }
-            }, onDismiss = { confirmReset = false }, danger = true)
+            }, onDismiss = { confirmReset = false })
         }
     }
 }

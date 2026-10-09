@@ -45,6 +45,12 @@ class AppSession(
     val branch: Scope.Branch? get() = branchId?.let { Scope.Branch(it) }
     val today: BusinessDate get() = BusinessDate(LocalDate.now().toEpochDay())
 
+    /**
+     * A write that failed after its screen was left (the user had moved on): shown app-wide, because
+     * nobody else would tell them that, e.g., a payment was not recorded.
+     */
+    var notice by mutableStateOf<String?>(null)
+
     fun changed() { version++ }
     fun signedOut() = onSignedOut()
     fun close() = scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
@@ -108,6 +114,7 @@ class Action internal constructor(private val session: AppSession) {
             }.onFailure { e ->
                 if (e is DomainException && e.error == DomainError.AuthenticationRequired) session.signedOut()
                 error = Messages.of(e)
+                if (!attached) session.notice = Messages.of(e)
             }
         }
     }
@@ -126,7 +133,10 @@ fun rememberAction(): Action {
 
 /** A fresh command id per form instance, so a double tap or a retry is recognised as the same command. */
 @Composable
-fun rememberCommandId(vararg keys: Any?): MutableState<GlobalId> = remember(*keys) { mutableStateOf(GlobalId.new()) }
+fun rememberCommandId(vararg keys: Any?): MutableState<GlobalId> =
+    // Saved with the form: a write that may have completed just before the app was killed is retried
+    // with the same id after restoration, so it is recognised (idempotency) instead of recorded twice.
+    androidx.compose.runtime.saveable.rememberSaveable(*keys) { mutableStateOf(GlobalId.new()) }
 
 @Composable
 fun OnChange(key: Any?, block: () -> Unit) {
