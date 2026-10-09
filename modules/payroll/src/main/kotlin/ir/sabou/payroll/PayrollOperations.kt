@@ -145,6 +145,10 @@ class PayrollOperations(
         ensure(name.length in 2..120) { DomainError.InvalidInput("name", "نام کارمند الزامی است.") }
         ensure(NationalId.isValid(cmd.nationalId)) { DomainError.InvalidInput("nationalId", "کد ملی معتبر نیست.") }
         val nationalId = NationalId.normalize(cmd.nationalId)
+        // Days inside a month already approved could never be paid (that month is closed for attendance and recalculation).
+        cmd.startDate?.let { start ->
+            ensure(payroll.runs(cmd.scope).none { it.status == RunStatus.APPROVED && it.to >= start }) { DomainError.InvalidState("EMPLOYEE", "START_IN_APPROVED_PERIOD") }
+        }
         ensure(personnel.employees(cmd.scope).none { NationalId.normalize(it.nationalId) == nationalId }) { DomainError.InvalidState("EMPLOYEE", "DUPLICATE_NATIONAL_ID") }
         val employee = Employee(GlobalId.new(), name, nationalId, cmd.scope, cmd.monthlySalary, startDate = cmd.startDate)
         personnel.saveEmployee(employee)
@@ -190,15 +194,7 @@ class PayrollOperations(
         val overlapping = payroll.runs(cmd.scope).filter { it.status != RunStatus.REVERSED && it.from <= cmd.to && it.to >= cmd.from }
         ensure(overlapping.all { it.status == RunStatus.DRAFT && it.from == cmd.from && it.to == cmd.to }) { DomainError.InvalidState("PAYROLL_RUN", "PERIOD_OVERLAP") }
         val policy = policies.forPeriod(cmd.from, cmd.to)
-        val periodDays = days.toInt()
-        val payslips = personnel.employees(cmd.scope).mapNotNull { e ->
-            // Everyone employed on at least one day of the month; hired or left during it → prorated.
-            val employed = e.employedDays(cmd.from, cmd.to)
-            if (employed == 0) return@mapNotNull null
-            val records = personnel.attendance(e.id, cmd.from, cmd.to)
-            policy.calculate(e.id, e.monthlySalary, records.sumOf { it.absentMinutes.toLong() }, records.sumOf { it.overtimeMinutes.toLong() },
-                payableDays = employed.takeIf { it < periodDays })
-        }
+        val payslips = payslips(cmd.scope, cmd.from, cmd.to, policy)
         ensure(payslips.isNotEmpty()) { DomainError.InvalidState("PAYROLL_RUN", "NO_EMPLOYEES") }
         val run = PayrollRun(overlapping.firstOrNull()?.id ?: GlobalId.new(), cmd.scope, cmd.from, cmd.to, policy.version, payslips,
             RunStatus.DRAFT, ctx.actor.userId, null, null)
@@ -212,6 +208,11 @@ class PayrollOperations(
         val run = requireRun(cmd.runId, cmd.scope)
         ensure(run.status == RunStatus.DRAFT) { DomainError.InvalidState("PAYROLL_RUN", run.status.name) }
         ensure(run.calculatedBy != ctx.actor.userId) { DomainError.InvalidState("PAYROLL_RUN", "SAME_PERSON_CALCULATED") }
+        // What is approved must be what the data says now: a hire, a leaver, a salary or attendance change
+        // after the calculation makes the draft stale.
+        ensure(payslips(run.scope, run.from, run.to, policies.forPeriod(run.from, run.to)) == run.payslips) {
+            DomainError.InvalidState("PAYROLL_RUN", "STALE")
+        }
         val s = run.payslips
         val gross = Money.sum(s.map { it.gross })
         val employerCost = Money.sum(s.map { it.employerInsurance + it.unemploymentInsurance })
@@ -280,6 +281,18 @@ class PayrollOperations(
         payroll.saveRemittance(Remittance(id, cmd.scope, cmd.kind, cmd.amount, cmd.date))
         ctx.audit(AuditDraft("PAYROLL_REMIT", "PAYROLL_LIABILITY", id.value, "${cmd.kind}:${cmd.amount.rial}"))
         id
+    }
+
+    /** Everyone employed on at least one day of the month; someone hired or leaving during it is prorated. */
+    private fun payslips(scope: Scope.Branch, from: BusinessDate, to: BusinessDate, policy: StatutoryPolicy): List<Payslip> {
+        val periodDays = (to.epochDay - from.epochDay + 1).toInt()
+        return personnel.employees(scope).mapNotNull { e ->
+            val employed = e.employedDays(from, to)
+            if (employed == 0) return@mapNotNull null
+            val records = personnel.attendance(e.id, from, to)
+            policy.calculate(e.id, e.monthlySalary, records.sumOf { it.absentMinutes.toLong() }, records.sumOf { it.overtimeMinutes.toLong() },
+                payableDays = employed.takeIf { it < periodDays })
+        }
     }
 
     private fun requireEmployee(id: GlobalId, scope: Scope.Branch): Employee {

@@ -74,6 +74,11 @@ class UiState {
     internal var pageRegistry: androidx.compose.runtime.saveable.SaveableStateRegistry? = null
     private var restoredPage: Map<String, List<Any?>>? = null
 
+    internal fun discardRestoredDraft() {
+        restoredPage = null
+        stack.clear(); stack.add(Route.Home)
+    }
+
     /** Values for the first page composed after a restoration; later pages start empty. */
     internal fun takeRestoredPage(): Map<String, List<Any?>>? = restoredPage.also { restoredPage = null }
 
@@ -94,15 +99,17 @@ class UiState {
     fun restoreDraft(draft: android.os.Bundle, session: AppSession, allowedBranches: Set<ir.sabou.kernel.BranchId>, now: Long) {
         if (draft.getString("user") != session.actor.userId.value) return
         if (now - draft.getLong("at") !in 0..Drafts.MAX_AGE_MILLIS) return
-        @Suppress("DEPRECATION", "UNCHECKED_CAST")
-        val saved = (draft.getSerializable("stack") as? ArrayList<Route>)?.takeIf { it.isNotEmpty() && it.first() is Route.Tab } ?: return
+        @Suppress("DEPRECATION")
+        val saved = (draft.getSerializable("stack") as? ArrayList<*>)?.map { it as Route }
+            ?.takeIf { it.isNotEmpty() && it.first() is Route.Tab } ?: return
+        val page = draft.getBundle("page")?.let(Drafts::fromBundle)   // decoded now, so a bad draft fails here
         val branch = draft.getString("branch")?.let { runCatching { ir.sabou.kernel.BranchId(GlobalId.parse(it)) }.getOrNull() }
         if (branch != null) {
             if (branch !in allowedBranches) return
             session.branchId = branch
         }
         stack.clear(); stack.addAll(saved)
-        restoredPage = draft.getBundle("page")?.let(Drafts::fromBundle)
+        restoredPage = page
     }
 
     fun signOut() {

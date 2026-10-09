@@ -21,8 +21,8 @@ class MainActivity : ComponentActivity() {
                 // Going to the background: the system may kill the process, so keep the unfinished form
                 // (taken on the main thread, encrypted and written off it).
                 androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
-                    val draft = runCatching { app.ui.draftSnapshot(System.currentTimeMillis()) }.getOrNull()
-                    container.saveDraftsLater(draft)
+                    // Nobody signed in (e.g. the PIN screen after a restart): keep the draft waiting for sign-in.
+                    runCatching { app.ui.draftSnapshot(System.currentTimeMillis()) }.getOrNull()?.let(container::saveDraftsLater)
                 }
                 // Back in the foreground with the process alive: nothing to restore later.
                 androidx.lifecycle.Lifecycle.Event.ON_START -> {

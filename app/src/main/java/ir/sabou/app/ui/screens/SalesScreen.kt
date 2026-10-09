@@ -185,7 +185,7 @@ private fun saleFormSaver(data: SalesData, today: BusinessDate) = androidx.compo
         )
     },
     restore = { l ->
-        SaleForm(null, data, today).apply {
+        runCatching { SaleForm(null, data, today).apply {
             portions.putAll(l[0] as Map<GlobalId, Quantity?>)
             gross.putAll(l[1] as Map<GlobalId, Money?>)
             kitchen = l[2] as GlobalId? ?: kitchen
@@ -193,7 +193,7 @@ private fun saleFormSaver(data: SalesData, today: BusinessDate) = androidx.compo
             liquid.putAll(l[6] as Map<GlobalId, Money?>)
             (l[7] as List<List<Any?>>).forEach { c -> credits.add(CreditRow(c[0] as GlobalId?, c[1] as Money?, c[2] as BusinessDate)) }
             step = l[8] as Int
-        }
+        } }.getOrNull()   // a draft that does not fit the form starts it fresh
     },
 )
 
@@ -345,7 +345,7 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
     val action = rememberAction()
     var counted by rememberSaveable { mutableStateOf<Money?>(null) }
     var reason by rememberSaveable { mutableStateOf("") }
-    var confirmReverse by rememberSaveable { mutableStateOf(false) }
+    var confirmReverse by remember { mutableStateOf(false) }
     val commandId = rememberSaveable(sale.id) { mutableStateOf(GlobalId.new()) }
     val closed = data.day?.closed == true
 

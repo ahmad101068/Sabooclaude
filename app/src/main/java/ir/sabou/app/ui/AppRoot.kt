@@ -106,7 +106,9 @@ fun AppRoot(container: AppContainer, ui: UiState) {
                             ui.session?.close()   // e.g. the session of a database replaced by restore or reset
                             val session = AppSession(s.core, actor, allowed.firstOrNull()) { ui.signOut(); container.clearDraftsLater() }
                             // Back to the unfinished form this user left when the system closed the app.
-                            if (draft != null) ui.restoreDraft(draft, session, allowed.toSet(), System.currentTimeMillis())
+                            // A draft that cannot be decoded is dropped, never a crash.
+                            if (draft != null) runCatching { ui.restoreDraft(draft, session, allowed.toSet(), System.currentTimeMillis()) }
+                                .onFailure { ui.discardRestoredDraft() }
                             ui.session = session
                         }
                     }

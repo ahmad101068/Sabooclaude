@@ -214,8 +214,8 @@ class PayrollTest {
         val run = calculate(); ops.approve(ApprovePayroll(GlobalId.new(), branch, run))
         assertEquals("INVALID_STATE:EMPLOYEE:PERIOD_APPROVED", code { ops.endEmployment(EndEmployment(GlobalId.new(), branch, chef, from.plusDays(5))) })
         ops.endEmployment(EndEmployment(GlobalId.new(), branch, chef, to))   // the approved month's last day is fine
-        val newcomer = ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "صندوقدار", "0499370899", rial(1_000), startDate = to)).resultId
-        assertEquals("INVALID_INPUT:lastDay", code { ops.endEmployment(EndEmployment(GlobalId.new(), branch, newcomer, from)) })
+        val newcomer = ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "صندوقدار", "0499370899", rial(1_000), startDate = to.plusDays(1))).resultId
+        assertEquals("INVALID_INPUT:lastDay", code { ops.endEmployment(EndEmployment(GlobalId.new(), branch, newcomer, to)) })
     }
 
     @Test fun attendanceOnlyOnEmployedDays() {
@@ -225,6 +225,30 @@ class PayrollTest {
         ops.endEmployment(EndEmployment(GlobalId.new(), branch, waiter, from.plusDays(12)))   // entered ahead of time
         ops.recordAttendance(RecordAttendance(GlobalId.new(), branch, waiter, from.plusDays(12), 480, 0, 0))
         assertEquals("INVALID_STATE:EMPLOYEE:NOT_EMPLOYED_ON_DATE", code { ops.recordAttendance(RecordAttendance(GlobalId.new(), branch, waiter, from.plusDays(13), 480, 0, 0)) })
+    }
+
+    @Test fun aDraftThatNoLongerMatchesTheDataCannotBeApproved() {
+        val run = calculate()
+        ops.endEmployment(EndEmployment(GlobalId.new(), branch, chef, from.plusDays(14)))   // leaves after the calculation
+        assertEquals("INVALID_STATE:PAYROLL_RUN:STALE", code { ops.approve(ApprovePayroll(GlobalId.new(), branch, run)) })
+        val again = calculate()                                                         // recalculating updates the same draft
+        assertEquals(run, again)
+        ops.approve(ApprovePayroll(GlobalId.new(), branch, again))
+        assertEquals(16_700_000, ledger.balance(StandardAccounts.SALARIES, branch).rial)
+    }
+
+    @Test fun attendanceChangedAfterTheCalculationAlsoMakesItStale() {
+        val run = calculate()
+        ops.recordAttendance(RecordAttendance(GlobalId.new(), branch, chef, from.plusDays(5), 0, 0, 480))
+        assertEquals("INVALID_STATE:PAYROLL_RUN:STALE", code { ops.approve(ApprovePayroll(GlobalId.new(), branch, run)) })
+    }
+
+    @Test fun aStartDateCannotFallInAnApprovedMonth() {
+        ops.approve(ApprovePayroll(GlobalId.new(), branch, calculate()))
+        assertEquals("INVALID_STATE:EMPLOYEE:START_IN_APPROVED_PERIOD", code {
+            ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "گارسون", "0499370899", rial(1_000), startDate = from.plusDays(3)))
+        })
+        ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "گارسون", "0499370899", rial(1_000), startDate = to.plusDays(1)))
     }
 
     @Test fun prorationDaysAreBounded() {

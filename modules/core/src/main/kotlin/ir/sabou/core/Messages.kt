@@ -22,6 +22,8 @@ object Messages {
         "EMPLOYEE:DUPLICATE_NATIONAL_ID" to "کارمندی با این کد ملی قبلاً ثبت شده است.",
         "EMPLOYEE:ALREADY_ENDED" to "همکاری این کارمند قبلاً پایان یافته است.",
         "EMPLOYEE:PERIOD_APPROVED" to "حقوق کامل ماهی که بعد از این تاریخ تمام می‌شود تأیید شده است؛ تاریخ پایان را آخرین روز آن ماه یا بعد از آن بگذارید.",
+        "EMPLOYEE:START_IN_APPROVED_PERIOD" to "حقوق ماهی که این تاریخ شروع در آن است تأیید شده است؛ تاریخ شروع را بعد از آخرین ماه تأییدشده بگذارید.",
+        "PAYROLL_RUN:STALE" to "از زمان محاسبه، اطلاعات کارکنان یا حضور و غیاب تغییر کرده است. لیست حقوق را دوباره محاسبه کنید.",
         "EMPLOYEE:NOT_EMPLOYED_ON_DATE" to "این کارمند در این روز مشغول به کار نبوده است.",
         "ITEM:DUPLICATE_NAME" to "کالایی با این نام وجود دارد.",
         "ITEM:INACTIVE" to "این کالا غیرفعال است.",
@@ -78,6 +80,8 @@ object Messages {
 
     fun of(error: DomainError): String = when (error) {
         is DomainError.InvalidState -> states["${error.entity}:${error.state.substringBefore(':')}"] ?: error.userMessage
+        // Usually a form restored after the app was closed, whose first submission had already gone through.
+        is DomainError.IdempotencyConflict -> "این فرم قبلاً ثبت شده است (احتمالاً پیش از بسته شدن برنامه). فهرست را بررسی کنید؛ برای ثبت مورد تازه، صفحه را از نو باز کنید."
         is DomainError.InsufficientFunds -> "موجودی حساب کافی نیست (موجود: ${Fa.toman(error.available)} تومان)."
         is DomainError.InsufficientStock -> "موجودی انبار کافی نیست (موجود: ${Fa.quantity(ir.sabou.kernel.Quantity.of(error.available))})."
         else -> error.userMessage

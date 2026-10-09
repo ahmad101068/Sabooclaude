@@ -86,7 +86,7 @@ object Drafts {
 /** A list of form rows, kept across process death. Each row is saved as a list of its field values. */
 fun <R> rowsSaver(fields: (R) -> List<Any?>, row: (List<Any?>) -> R): Saver<SnapshotStateList<R>, Any> = listSaver(
     save = { rows -> rows.map { ArrayList(fields(it)) } },
-    restore = { saved -> saved.map { @Suppress("UNCHECKED_CAST") row(it as List<Any?>) }.toMutableStateList() },
+    restore = { saved -> runCatching { saved.map { @Suppress("UNCHECKED_CAST") row(it as List<Any?>) }.toMutableStateList() }.getOrNull() },
 )
 
 @Composable
@@ -100,7 +100,7 @@ fun <K, V> rememberValueMap(): SnapshotStateMap<K, V> = rememberSaveable(
         save = { m -> m.entries.flatMap { listOf(it.key, it.value) } },
         restore = { flat ->
             @Suppress("UNCHECKED_CAST")
-            flat.chunked(2).map { (k, v) -> (k as K) to (v as V) }.toMutableStateMap()
+            runCatching { flat.chunked(2).map { (k, v) -> (k as K) to (v as V) }.toMutableStateMap() }.getOrNull()
         },
     ),
 ) { androidx.compose.runtime.mutableStateMapOf() }

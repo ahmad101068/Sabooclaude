@@ -517,11 +517,11 @@ object MeScreens {
         var password by remember { mutableStateOf("") }
         var password2 by remember { mutableStateOf("") }
         var restorePassword by remember { mutableStateOf("") }
-        var message by rememberSaveable { mutableStateOf<Pair<String, Boolean>?>(null) }
-        var busy by rememberSaveable { mutableStateOf(false) }
+        var message by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+        var busy by remember { mutableStateOf(false) }
         var restoreUri by remember { mutableStateOf<Uri?>(null) }
-        var confirmRestore by rememberSaveable { mutableStateOf(false) }
-        var confirmReset by rememberSaveable { mutableStateOf(false) }
+        var confirmRestore by remember { mutableStateOf(false) }
+        var confirmReset by remember { mutableStateOf(false) }
 
         fun work(ok: String, block: () -> Unit) {
             busy = true; message = null

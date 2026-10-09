@@ -269,7 +269,7 @@ object OperationsScreens {
         val balances by load(session, locationId) { overview.stock(locationId) }
         val counted = ir.sabou.app.ui.rememberValueMap<GlobalId, Quantity?>()
         val id = rememberSaveable { GlobalId.new() }
-        var confirm by rememberSaveable { mutableStateOf(false) }
+        var confirm by remember { mutableStateOf(false) }
         val action = rememberAction()
         Loaded(balances) { list ->
             val book = list.associateBy({ it.itemId }, { it.quantity })
@@ -468,7 +468,7 @@ object OperationsScreens {
         var payAccount by rememberSaveable { mutableStateOf<GlobalId?>(null) }
         var payAmount by rememberSaveable { mutableStateOf<Money?>(null) }
         var reason by rememberSaveable { mutableStateOf("") }
-        var confirmReverse by rememberSaveable { mutableStateOf(false) }
+        var confirmReverse by remember { mutableStateOf(false) }
         var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }   // holds an action: not saveable
         val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()

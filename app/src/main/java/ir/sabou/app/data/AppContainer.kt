@@ -76,10 +76,11 @@ class AppContainer(private val context: Context) {
 
     private fun verifyInBackgroundIfDue(core: SabouCore) {
         if (verifying) return
-        if (!runCatching { core.backgroundVerificationDue() }.getOrDefault(false)) return
         verifying = true
         kotlin.concurrent.thread(name = "sabou-audit-verify", isDaemon = true) {
             try {
+                // Even "is it due" reads the database: never on the main thread (a backup may hold it).
+                if (!runCatching { core.backgroundVerificationDue() }.getOrDefault(false)) return@thread
                 // A transient error (e.g. the database being replaced meanwhile) just means: try next time.
                 val verdict = runCatching { core.verifyAuditInBackground() }.getOrNull()
                 if (verdict is StartupVerdict.RollbackDetected) synchronized(this) {
@@ -97,34 +98,61 @@ class AppContainer(private val context: Context) {
 
     private val draftsFile = File(context.noBackupFilesDir, "drafts.bin")
 
-    /** Stores the draft encrypted with a device key; null removes it. */
-    fun saveDrafts(draft: android.os.Bundle?) {
-        if (draft == null) { draftsFile.delete(); return }
+    /** Drafts are only restored by the same app version: saved classes and form layouts may change. */
+    private val appVersion: Long by lazy {
+        runCatching {
+            androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(context.packageManager.getPackageInfo(context.packageName, 0))
+        }.getOrDefault(-1L)
+    }
+
+    /** One background thread: saves, clears and reads happen in the order they were asked for. */
+    private val draftWriter = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /**
+     * Encodes the draft now (on the caller's thread, the main thread, so it is one consistent moment of the
+     * form) and encrypts and writes it in the background.
+     */
+    fun saveDraftsLater(draft: android.os.Bundle) {
+        val bytes = runCatching {
+            draft.putLong(DRAFT_VERSION, appVersion)
+            ir.sabou.app.ui.Drafts.marshall(draft)
+        }.getOrNull()
+        draftWriter.execute { if (bytes == null) draftsFile.delete() else writeDraft(bytes) }
+    }
+
+    private fun writeDraft(bytes: ByteArray) {
         runCatching {
             val tmp = File(draftsFile.path + ".tmp")
-            java.io.FileOutputStream(tmp).use { out -> out.write(keys.seal(ir.sabou.app.ui.Drafts.marshall(draft))); out.fd.sync() }
+            java.io.FileOutputStream(tmp).use { out -> out.write(keys.seal(bytes)); out.fd.sync() }
             check(tmp.renameTo(draftsFile))
         }.onFailure { draftsFile.delete() }   // best effort: a draft is a convenience, never a requirement
     }
 
-    /** Reads and removes the stored draft; anything unreadable is simply dropped. */
-    fun takeDrafts(): android.os.Bundle? {
-        if (!draftsFile.exists()) return null
-        return try {
+    /** Test hook and synchronous variant of [saveDraftsLater]. */
+    internal fun saveDrafts(draft: android.os.Bundle) {
+        saveDraftsLater(draft)
+        draftWriter.submit {}.get()
+    }
+
+    /**
+     * Reads and removes the stored draft (after any save still queued). Anything unreadable, or written by
+     * another app version, is dropped.
+     */
+    fun takeDrafts(): android.os.Bundle? = draftWriter.submit(java.util.concurrent.Callable {
+        if (!draftsFile.exists()) return@Callable null
+        try {
             ir.sabou.app.ui.Drafts.unmarshall(keys.open(draftsFile.readBytes()), context.classLoader)
+                .takeIf { it.getLong(DRAFT_VERSION, Long.MIN_VALUE) == appVersion }
         } catch (e: Throwable) {
             null
         } finally {
             draftsFile.delete()
         }
-    }
+    }).get()
 
-    fun clearDrafts() { draftsFile.delete() }
-
-    /** One background thread keeps saves and clears in the order they were asked for. */
-    private val draftWriter = java.util.concurrent.Executors.newSingleThreadExecutor()
-    fun saveDraftsLater(draft: android.os.Bundle?) { draftWriter.execute { saveDrafts(draft) } }
-    fun clearDraftsLater() { draftWriter.execute { clearDrafts() } }
+    /** Removes the draft after anything queued (restore, reset: it belongs to the replaced database). */
+    fun clearDrafts() { draftWriter.submit { draftsFile.delete() }.get() }
+    fun clearDraftsLater() { draftWriter.execute { draftsFile.delete() } }
 
     /** Internal for the device tests (they swap database files while the app is closed). */
     @Synchronized
@@ -324,6 +352,7 @@ class AppContainer(private val context: Context) {
         private const val BACKUP_SEALED = "backup-sealed.db"
         private val PAYLOAD_MAGIC = "SABOUDB2".toByteArray(Charsets.US_ASCII)
         private const val KEY_CHARS = 64
+        private const val DRAFT_VERSION = "app_version"
         private const val RESTORE_CANDIDATE = "restore-plain.db"
         private const val RESTORE_STAGED = "sabou-restore.db"
         private const val MAX_RESTORE_BYTES = 2L * 1024 * 1024 * 1024
