@@ -50,6 +50,7 @@ import ir.sabou.app.ui.components.Page
 import ir.sabou.app.ui.components.PrimaryButton
 import ir.sabou.app.ui.components.SecondaryButton
 import ir.sabou.app.ui.components.TextInput
+import ir.sabou.app.ui.screens.BooksScreens
 import ir.sabou.app.ui.screens.FinanceScreens
 import ir.sabou.app.ui.screens.HomeScreen
 import ir.sabou.app.ui.screens.KitchenScreens
@@ -438,6 +439,15 @@ private fun Pages(route: Route, nav: Nav) {
         Route.ReviewQueue -> PurchaseScreens.ReviewQueue(nav)
         Route.PriceChanges -> PurchaseScreens.PriceChanges(nav)
         Route.Suggestions -> PurchaseScreens.Suggestions(nav)
+        Route.PendingApprovals -> PurchaseScreens.PendingApprovals(nav)
+        Route.ApprovalRules -> PurchaseScreens.ApprovalRules(nav)
+        Route.Cheques -> BooksScreens.Cheques(nav)
+        is Route.ChequeDetail -> BooksScreens.ChequeDetail(nav, route.chequeId)
+        Route.Budget -> BooksScreens.Budget(nav)
+        Route.BudgetReport -> BooksScreens.BudgetReport(nav)
+        Route.Assets -> BooksScreens.Assets(nav)
+        Route.NewAsset -> BooksScreens.NewAsset(nav)
+        is Route.AssetDetail -> BooksScreens.AssetDetail(nav, route.assetId)
         Route.Personnel -> OperationsScreens.Personnel(nav)
         Route.Attendance -> OperationsScreens.Attendance(nav)
         Route.Payroll -> OperationsScreens.Payroll(nav)

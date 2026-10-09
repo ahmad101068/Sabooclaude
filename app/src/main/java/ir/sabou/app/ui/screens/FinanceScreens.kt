@@ -82,6 +82,12 @@ object FinanceScreens {
             "SUPPLIER_PAYMENT", "PURCHASE_INVOICE" -> "پرداخت به تأمین‌کننده"
             "SALARY_PAYMENT" -> "پرداخت حقوق"
             "PAYROLL_REMITTANCE" -> "پرداخت بیمه / مالیات"
+            "CHEQUE_COLLECT" -> "وصول چک"
+            "CHEQUE_CLEAR" -> "پاس شدن چک"
+            "CHEQUE_BOUNCE" -> "برگشت چک"
+            "CHEQUE_SETTLE" -> "تسویه چک برگشتی"
+            "ASSET_ACQUISITION" -> "خرید دارایی ثابت"
+            "ASSET_DISPOSAL" -> "فروش دارایی ثابت"
             else -> "گردش"
         }
         return if (m.reversalOf != null) "برگشت $base" else base
@@ -92,6 +98,7 @@ object FinanceScreens {
         ModuleId.SALES -> Chip("فروش", ChipKind.SALES)
         ModuleId.PURCHASING -> Chip("خرید", ChipKind.PURCHASE)
         ModuleId.PAYROLL -> Chip("حقوق", ChipKind.PURCHASE)
+        ModuleId.ASSETS -> Chip("دارایی", ChipKind.PURCHASE)
         else -> Chip("خزانه", ChipKind.TREASURY)
     }
 
@@ -176,19 +183,29 @@ object FinanceScreens {
                 if (session.can(Permission.SALES_VIEW)) item { NavRow(R.drawable.ic_person, "طلب از مشتریان", "دریافت نسیه‌ها", onClick = { nav.go(Route.Receivables) }) }
                 if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "بدهی به تأمین‌کنندگان", "فاکتورهای پرداخت‌نشده", onClick = { nav.go(Route.Purchases) }) }
                 if (session.can(Permission.LEDGER_VIEW)) item { NavRow(R.drawable.ic_finance, "تراز آزمایشی", "مانده همه حساب‌های دفتر کل", onClick = { nav.go(Route.TrialBalance) }) }
+                if (session.can(Permission.TREASURY_VIEW) || session.can(Permission.CHEQUE_MANAGE)) item {
+                    NavRow(R.drawable.ic_payment, "چک‌ها", "دریافتی و پرداختی، سررسیدها، وصول و برگشت", tint = Sabou.colors.bank, tile = Sabou.colors.bankSoft, onClick = { nav.go(Route.Cheques) })
+                }
+                if (session.can(Permission.LEDGER_VIEW)) item { NavRow(R.drawable.ic_finance, "بودجه", "بودجه در برابر عملکرد", onClick = { nav.go(Route.BudgetReport) }) }
+                if (session.can(Permission.ASSET_VIEW) || session.can(Permission.ASSET_MANAGE)) item {
+                    NavRow(R.drawable.ic_settings, "دارایی‌های ثابت", "ثبت، استهلاک و فروش", onClick = { nav.go(Route.Assets) })
+                }
             }
         }
     }
 
     // ------------------------------------------------------------ Forms
 
+    /** A receipt or payment; a cheque box or cheque book also takes the cheque (ADR-0013). */
     @Composable
     private fun MoneyForm(
         nav: Nav,
         title: String,
         submit: String,
         purposes: List<Choice<String>>?,
-        submitAction: ir.sabou.core.SabouCore.(account: ir.sabou.treasury.TreasuryAccount, purpose: String?, amount: Money, date: ir.sabou.kernel.BusinessDate, note: String, commandId: GlobalId) -> Unit,
+        payment: Boolean,
+        submitAction: ir.sabou.core.SabouCore.(account: ir.sabou.treasury.TreasuryAccount, purpose: String?, amount: Money, date: ir.sabou.kernel.BusinessDate, note: String,
+                                              commandId: GlobalId, cheque: ir.sabou.treasury.ChequeDetails?, chequeId: GlobalId?) -> Unit,
     ) {
         val session = LocalSession.current
         val accounts by load(session) { overview.treasury().map { it.account } }
@@ -197,24 +214,36 @@ object FinanceScreens {
         var amount by rememberSaveable { mutableStateOf<Money?>(null) }
         var date by rememberSaveable { mutableStateOf(session.today) }
         var note by rememberSaveable { mutableStateOf("") }
+        var heldCheque by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        val chequeFields = ir.sabou.app.ui.rememberChequeFields()
         val commandId = rememberSaveable { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
             Header(title, onBack = nav.back)
             Page {
                 Loaded(accounts) { list ->
+                    // A payment can come from a cheque book (our cheque) or a cheque box (a customer's cheque passed on);
+                    // a receipt can go into a cheque box.
+                    val usable = list.filter { it.kind.isOrdinary || (if (payment) true else it.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES) }
+                    val account = usable.firstOrNull { it.id == accountId }
+                    val newCheque = account != null && ((payment && account.kind == ir.sabou.treasury.TreasuryKind.ISSUED_CHEQUES) ||
+                        (!payment && account.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES))
+                    val passOn = payment && account?.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES
                     FormCard {
-                        Picker("حساب", accountChoices(list), accountId, { accountId = it })
+                        Picker("حساب", accountChoices(usable, cheques = true), accountId, { accountId = it; heldCheque = null })
                         if (purposes != null) Picker("بابت", purposes, purpose, { purpose = it })
-                        MoneyInput("مبلغ", amount, { amount = it })
+                        if (passOn) ir.sabou.app.ui.HeldChequePicker(account!!.scope, account.id, heldCheque) { row -> heldCheque = row.cheque.id; amount = row.cheque.amount }
+                        else MoneyInput("مبلغ", amount, { amount = it })
+                        if (passOn) amount?.let { KeyValue("مبلغ چک", Fa.toman(it) + " تومان") }
                         DateInput("تاریخ", date, { date = it }, session.today)
                         TextInput("شرح", note, { note = it })
+                        if (newCheque) ir.sabou.app.ui.ChequeInputs(chequeFields, session.today, "", payment, list.filter { it.scope == account!!.scope })
+                        val cheque = if (newCheque) ir.sabou.app.ui.chequeDetails(chequeFields, session.today, "", payment) else null
                         action.error?.let { Banner(it) }
                         PrimaryButton(submit, {
-                            val account = list.first { it.id == accountId }
                             val a = amount ?: return@PrimaryButton
-                            action.run({ submitAction(account, purpose, a, date, note, commandId.value) }) { nav.back() }
-                        }, enabled = accountId != null && amount != null && note.isNotBlank(), busy = action.busy)
+                            action.run({ submitAction(account!!, purpose, a, date, note, commandId.value, cheque, heldCheque.takeIf { passOn }) }) { nav.back() }
+                        }, enabled = account != null && amount != null && note.isNotBlank() && (!newCheque || cheque != null) && (!passOn || heldCheque != null), busy = action.busy)
                     }
                 }
             }
@@ -233,13 +262,13 @@ object FinanceScreens {
     )
 
     @Composable
-    fun ReceiptForm(nav: Nav) = MoneyForm(nav, "دریافت وجه", "ثبت دریافت", receiptPurposes) { account, purpose, amount, date, note, id ->
-        treasury.receipt(RecordReceipt(id, account.scope, account.id, ReceiptPurpose.valueOf(purpose!!), amount, date, note))
+    fun ReceiptForm(nav: Nav) = MoneyForm(nav, "دریافت وجه", "ثبت دریافت", receiptPurposes, payment = false) { account, purpose, amount, date, note, id, cheque, _ ->
+        treasury.receipt(RecordReceipt(id, account.scope, account.id, ReceiptPurpose.valueOf(purpose!!), amount, date, note, cheque))
     }
 
     @Composable
-    fun PaymentForm(nav: Nav) = MoneyForm(nav, "پرداخت هزینه", "ثبت پرداخت", paymentPurposes) { account, purpose, amount, date, note, id ->
-        treasury.payment(RecordPayment(id, account.scope, account.id, PaymentPurpose.valueOf(purpose!!), amount, date, note))
+    fun PaymentForm(nav: Nav) = MoneyForm(nav, "پرداخت هزینه", "ثبت پرداخت", paymentPurposes, payment = true) { account, purpose, amount, date, note, id, cheque, chequeId ->
+        treasury.payment(RecordPayment(id, account.scope, account.id, PaymentPurpose.valueOf(purpose!!), amount, date, note, cheque, chequeId))
     }
 
     @Composable
@@ -391,21 +420,28 @@ object FinanceScreens {
         var accountId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
         var amount by rememberSaveable { mutableStateOf<Money?>(null) }
         var date by rememberSaveable { mutableStateOf(session.today) }
+        val chequeFields = ir.sabou.app.ui.rememberChequeFields()
         val commandId = rememberSaveable { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
+        val customer by load(session, receivableId) { overview.receivable(receivableId).customer }
         Column(Modifier.fillMaxSize()) {
             Header("دریافت از مشتری", onBack = nav.back)
             Page {
                 Loaded(data) { (r, outstanding, accounts) ->
+                    val usable = accounts.filter { it.kind.isOrdinary || it.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES }
+                    val byCheque = usable.firstOrNull { it.id == accountId }?.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES
+                    val party = customer.orNull().orEmpty()
                     FormCard {
                         KeyValue("مانده طلب", Fa.toman(outstanding) + " تومان", strong = true)
-                        Picker("واریز به", accountChoices(accounts), accountId, { accountId = it })
-                        MoneyInput("مبلغ دریافتی", amount, { amount = it })
+                        Picker("واریز به", accountChoices(usable, cheques = true), accountId, { accountId = it })
+                        MoneyInput(if (byCheque) "مبلغ چک" else "مبلغ دریافتی", amount, { amount = it })
                         DateInput("تاریخ", date, { date = it }, session.today)
+                        if (byCheque) ir.sabou.app.ui.ChequeInputs(chequeFields, session.today, party, issued = false, banks = emptyList())
+                        val cheque = if (byCheque) ir.sabou.app.ui.chequeDetails(chequeFields, session.today, party, issued = false) else null
                         action.error?.let { Banner(it) }
                         PrimaryButton("ثبت دریافت", {
-                            action.run({ salesOps.collect(CollectReceivable(commandId.value, r.scope, r.id, accountId!!, amount!!, date)) }) { nav.back() }
-                        }, enabled = accountId != null && amount != null && session.can(Permission.RECEIVABLE_COLLECT), busy = action.busy)
+                            action.run({ salesOps.collect(CollectReceivable(commandId.value, r.scope, r.id, accountId!!, amount!!, date, cheque)) }) { nav.back() }
+                        }, enabled = accountId != null && amount != null && (!byCheque || cheque != null) && session.can(Permission.RECEIVABLE_COLLECT), busy = action.busy)
                     }
                 }
             }

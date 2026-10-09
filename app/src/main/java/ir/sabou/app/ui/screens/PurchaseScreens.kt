@@ -146,6 +146,8 @@ object PurchaseScreens {
                     SCard { KeyValue("جمع بدهی (تومان)", Fa.toman(Money.sum(list.filter { it.invoice.status == InvoiceStatus.POSTED }.map { it.outstanding })), strong = true) }
                     NavRow(R.drawable.ic_purchase, "سفارش‌های خرید", "پیشنهاد خرید، سفارش و تحویل", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft,
                         onClick = { nav.go(Route.Orders) })
+                    if (session.can(Permission.PURCHASE_APPROVE) || session.can(Permission.APPROVAL_RULES)) NavRow(R.drawable.ic_check, "در انتظار تأیید", "تأیید فاکتورها پیش از پرداخت",
+                        onClick = { nav.go(Route.PendingApprovals) })
                     NavRow(R.drawable.ic_alert, "در انتظار بررسی", if (review > 0) "${Fa.number(review.toLong())} ردیف کالای ناشناخته" else "ردیفی در انتظار نیست",
                         tint = if (review > 0) Sabou.colors.danger else Sabou.colors.primary, onClick = { nav.go(Route.ReviewQueue) })
                     NavRow(R.drawable.ic_alert, "تغییر قیمت‌ها", if (changes > 0) "${Fa.number(changes.toLong())} تغییر قیمت در ۳۰ روز اخیر" else "تغییر قیمت مهمی نبوده",
@@ -406,6 +408,8 @@ object PurchaseScreens {
         var payAccount by rememberSaveable { mutableStateOf<GlobalId?>(null) }
         var payAmount by rememberSaveable { mutableStateOf<Money?>(null) }
         var creditAmount by rememberSaveable { mutableStateOf<Money?>(null) }
+        var heldCheque by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        val chequeFields = ir.sabou.app.ui.rememberChequeFields()
         var reason by rememberSaveable { mutableStateOf("") }
         var confirmReverse by rememberSaveable { mutableStateOf(false) }
         var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }   // holds an action: not saveable
@@ -524,15 +528,26 @@ object PurchaseScreens {
                             }, enabled = creditAmount != null, busy = action.busy)
                         }
                     }
+                    if (inv.requiredApprovals > 0 || inv.approvals.isNotEmpty()) {
+                        ApprovalCard(inv, action)
+                    }
                     if (inv.status == InvoiceStatus.POSTED && !v.outstanding.isZero && session.can(Permission.PURCHASE_PAY)) {
                         FormCard("پرداخت به تأمین‌کننده") {
-                            Picker("از حساب", accountChoices(d.accounts), payAccount, { payAccount = it })
-                            MoneyInput("مبلغ", payAmount, { payAmount = it }, hint = "مانده: ${Fa.toman(v.outstanding)} تومان")
+                            if (!inv.approved) Banner("پرداخت پس از تأیید فاکتور ممکن است.", ChipKind.ACCENT)
+                            val account = d.accounts.firstOrNull { it.id == payAccount }
+                            val ourCheque = account?.kind == ir.sabou.treasury.TreasuryKind.ISSUED_CHEQUES
+                            val passOn = account?.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES
+                            Picker("از حساب", accountChoices(d.accounts, cheques = true), payAccount, { payAccount = it; heldCheque = null })
+                            if (passOn) ir.sabou.app.ui.HeldChequePicker(account!!.scope, account.id, heldCheque) { row -> heldCheque = row.cheque.id; payAmount = row.cheque.amount }
+                            else MoneyInput("مبلغ", payAmount, { payAmount = it }, hint = "مانده: ${Fa.toman(v.outstanding)} تومان")
+                            if (passOn) payAmount?.let { KeyValue("مبلغ چک", Fa.toman(it) + " تومان") }
+                            if (ourCheque) ir.sabou.app.ui.ChequeInputs(chequeFields, session.today, v.supplier, issued = true, banks = d.accounts.filter { it.scope == account!!.scope })
+                            val cheque = if (ourCheque) ir.sabou.app.ui.chequeDetails(chequeFields, session.today, v.supplier, issued = true) else null
                             PrimaryButton("ثبت پرداخت", {
-                                action.run({ purchasing.payInvoice(PaySupplierInvoice(id.value, inv.scope, inv.id, payAccount!!, payAmount!!, session.today)) }) {
-                                    id.value = GlobalId.new(); payAmount = null
+                                action.run({ purchasing.payInvoice(PaySupplierInvoice(id.value, inv.scope, inv.id, payAccount!!, payAmount!!, session.today, cheque, heldCheque.takeIf { passOn })) }) {
+                                    id.value = GlobalId.new(); payAmount = null; heldCheque = null; chequeFields.clear()
                                 }
-                            }, enabled = payAccount != null && payAmount != null, busy = action.busy)
+                            }, enabled = inv.approved && payAccount != null && payAmount != null && (!ourCheque || cheque != null) && (!passOn || heldCheque != null), busy = action.busy)
                         }
                     }
                     if (inv.status == InvoiceStatus.POSTED && session.can(Permission.PURCHASE_REVERSE)) {
@@ -658,6 +673,114 @@ object PurchaseScreens {
                     }
                 }
                 ExportButtons("تغییر-قیمت") { listOf(ReportTables.priceChanges(buying.priceChanges(from, to, threshold), from, to)) }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ Approvals
+
+    @Composable
+    private fun ApprovalCard(inv: ir.sabou.purchasing.PurchaseInvoice, action: ir.sabou.app.ui.Action) {
+        val session = LocalSession.current
+        var reason by rememberSaveable { mutableStateOf("") }
+        var confirm by rememberSaveable { mutableStateOf(false) }
+        SCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("تأیید برای پرداخت", style = SabouType.section, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                Chip("${Fa.number(inv.approvals.size.toLong())} از ${Fa.number(inv.requiredApprovals.toLong())}", if (inv.approved) ChipKind.PRIMARY else ChipKind.ACCENT)
+            }
+            inv.approvals.forEach { a -> Text("تأیید: ${a.name}", style = SabouType.caption, color = Sabou.colors.muted) }
+            if (inv.status == InvoiceStatus.POSTED && !inv.approved && session.can(Permission.PURCHASE_APPROVE)) {
+                PrimaryButton("تأیید می‌کنم", { action.run({ approvals.approve(ir.sabou.purchasing.ApproveInvoice(GlobalId.new(), inv.scope, inv.id)) }) }, busy = action.busy)
+            }
+            if (inv.status == InvoiceStatus.POSTED && inv.approvals.isNotEmpty() && session.can(Permission.PURCHASE_UNAPPROVE)) {
+                TextInput("دلیل لغو تأیید", reason, { reason = it })
+                SecondaryButton("لغو همه‌ی تأییدها", { confirm = true }, enabled = reason.trim().length >= 3, danger = true)
+            }
+        }
+        if (confirm) Confirm("لغو تأییدها؟", "فاکتور تا تأیید دوباره پرداخت نمی‌شود.", "لغو تأیید",
+            onConfirm = { confirm = false; action.run({ approvals.unapprove(ir.sabou.purchasing.UnapproveInvoice(GlobalId.new(), inv.scope, inv.id, reason)) }) { reason = "" } },
+            onDismiss = { confirm = false }, danger = true)
+    }
+
+    @Composable
+    fun PendingApprovals(nav: Nav) {
+        val session = LocalSession.current
+        val data by load(session) { books.pendingApprovals() }
+        Column(Modifier.fillMaxSize()) {
+            Header("در انتظار تأیید", "فاکتورهایی که پیش از پرداخت تأیید لازم دارند", onBack = nav.back)
+            Page {
+                if (session.can(Permission.APPROVAL_RULES)) NavRow(R.drawable.ic_settings, "قانون‌های تأیید", "بر اساس شعبه، تأمین‌کننده، نوع و مبلغ", onClick = { nav.go(Route.ApprovalRules) })
+                Loaded(data) { list ->
+                    if (list.isEmpty()) EmptyState("فاکتوری در انتظار تأیید نیست.")
+                    list.forEach { item ->
+                        val inv = item.invoice.invoice
+                        NavRow(R.drawable.ic_purchase, item.invoice.supplier,
+                            "${Fa.digits(inv.supplierInvoiceNo)} · سررسید ${Fa.date(inv.dueDate)} · ${Fa.number(inv.approvals.size.toLong())} از ${Fa.number(inv.requiredApprovals.toLong())} تأیید",
+                            Fa.tomanShort(inv.total.rial), tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.PurchaseDetail(inv.id)) })
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun ApprovalRules(nav: Nav) {
+        val session = LocalSession.current
+        val data by load(session) { Triple(books.approvalRules(), overview.branches(), overview.suppliers().map { it.supplier }) }
+        var name by rememberSaveable { mutableStateOf("") }
+        var branchId by rememberSaveable { mutableStateOf<BranchId?>(null) }
+        var supplierId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var category by rememberSaveable { mutableStateOf(0) }
+        var minAmount by rememberSaveable { mutableStateOf<Money?>(null) }
+        var steps by rememberSaveable { mutableStateOf(0) }
+        val id = rememberCommandId()
+        val action = rememberAction()
+        val categories = listOf(null, ir.sabou.purchasing.InvoiceCategory.GOODS, ir.sabou.purchasing.InvoiceCategory.EXPENSES, ir.sabou.purchasing.InvoiceCategory.MIXED)
+        fun categoryName(c: ir.sabou.purchasing.InvoiceCategory?) = when (c) {
+            null -> "همه"; ir.sabou.purchasing.InvoiceCategory.GOODS -> "کالا"; ir.sabou.purchasing.InvoiceCategory.EXPENSES -> "هزینه"; ir.sabou.purchasing.InvoiceCategory.MIXED -> "ترکیبی"
+        }
+        Column(Modifier.fillMaxSize()) {
+            Header("قانون‌های تأیید فاکتور", onBack = nav.back)
+            Page {
+                Text("فاکتوری که با یک قانون جور باشد، پیش از پرداخت به همان تعداد تأییدِ افراد مختلف نیاز دارد (سخت‌ترین قانون ملاک است). " +
+                    "قانون فقط بر فاکتورهای بعد از تعریفش اثر دارد. ثبت‌کننده‌ی فاکتور نمی‌تواند آن را تأیید کند.", style = SabouType.caption, color = Sabou.colors.muted)
+                Loaded(data) { (rules, branches, suppliers) ->
+                    if (rules.isEmpty()) EmptyState("قانونی تعریف نشده است؛ همه‌ی فاکتورها بدون تأیید پرداخت می‌شوند.")
+                    rules.forEach { r ->
+                        SCard {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(r.name, style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                                Chip(if (r.isActive) "فعال" else "غیرفعال", if (r.isActive) ChipKind.PRIMARY else ChipKind.NEUTRAL)
+                            }
+                            Text(listOf(
+                                r.branch?.let { b -> branches.firstOrNull { it.id == b.branchId }?.name } ?: "همه‌ی شعب",
+                                r.supplierId?.let { s -> suppliers.firstOrNull { it.id == s }?.name } ?: "همه‌ی تأمین‌کنندگان",
+                                "نوع: ${categoryName(r.category)}", "از ${Fa.toman(r.minAmount)} تومان", "${Fa.number(r.steps.toLong())} تأیید",
+                            ).joinToString(" · "), style = SabouType.caption, color = Sabou.colors.muted)
+                            if (session.can(Permission.APPROVAL_RULES)) SecondaryButton(if (r.isActive) "غیرفعال کن" else "فعال کن", {
+                                action.run({ approvals.saveRule(ir.sabou.purchasing.SaveApprovalRule(GlobalId.new(), r.id, r.name, r.branch, r.supplierId, r.category, r.minAmount, r.steps, !r.isActive)) })
+                            })
+                        }
+                    }
+                    if (session.can(Permission.APPROVAL_RULES)) FormCard("قانون جدید") {
+                        TextInput("نام", name, { name = it }, placeholder = "مثلاً خریدهای بالای ۱۰ میلیون")
+                        Picker("شعبه", listOf(Choice<BranchId?>(null, "همه‌ی شعب")) + branches.map { Choice<BranchId?>(it.id, it.name) }, branchId, { branchId = it })
+                        Picker("تأمین‌کننده", listOf(Choice<GlobalId?>(null, "همه")) + suppliers.map { Choice<GlobalId?>(it.id, it.name) }, supplierId, { supplierId = it })
+                        Text("نوع فاکتور", style = SabouType.caption, color = Sabou.colors.muted)
+                        Segmented(categories.map(::categoryName), category, { category = it })
+                        MoneyInput("از مبلغ", minAmount, { minAmount = it }, hint = "خالی = هر مبلغی")
+                        Text("تعداد تأیید", style = SabouType.caption, color = Sabou.colors.muted)
+                        Segmented(listOf("۱", "۲", "۳"), steps, { steps = it })
+                        action.error?.let { Banner(it) }
+                        PrimaryButton("ثبت قانون", {
+                            action.run({
+                                approvals.saveRule(ir.sabou.purchasing.SaveApprovalRule(id.value, null, name, branchId?.let { Scope.Branch(it) }, supplierId, categories[category],
+                                    minAmount ?: Money.ZERO, steps + 1))
+                            }) { name = ""; minAmount = null; id.value = GlobalId.new() }
+                        }, enabled = name.trim().length >= 2, busy = action.busy)
+                    }
+                }
             }
         }
     }
