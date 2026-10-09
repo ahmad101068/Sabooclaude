@@ -64,7 +64,9 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
     override fun saveInvoice(invoice: PurchaseInvoice) = upsert(
         "purchase_invoices", "id",
         mapOf(
-            "id" to invoice.id.value, "supplier_id" to invoice.supplierId.value, "number" to invoice.supplierInvoiceNo,
+            "id" to invoice.id.value, "supplier_id" to invoice.supplierId.value,
+            // The unique (supplier, number) column holds only POSTED numbers; a reversed one is retired.
+            "number" to if (invoice.status == InvoiceStatus.POSTED) invoice.supplierInvoiceNo else "${invoice.supplierInvoiceNo}#reversed#${invoice.id.value}",
             "doc" to Json.encode(
                 mapOf(
                     "id" to invoice.id.value, "supplier" to invoice.supplierId.value, "number" to invoice.supplierInvoiceNo,

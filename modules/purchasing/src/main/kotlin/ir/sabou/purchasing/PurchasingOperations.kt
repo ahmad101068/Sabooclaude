@@ -189,14 +189,25 @@ class PurchasingOperations(
     fun returnGoods(c: ReturnToSupplier): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
         val invoice = requireInvoice(cmd.invoiceId, cmd.scope)
         ensure(cmd.reason.trim().length in 3..300) { DomainError.InvalidInput("reason", "دلیل مرجوعی الزامی است.") }
-        val alreadyReturned = purchases.returns(invoice.id).flatMap { it.lines }.groupBy { it.itemId }
-            .mapValues { (_, l) -> l.sumOf { it.quantity.micros } }
+        ensure(cmd.date >= invoice.date) { DomainError.InvalidInput("date", "تاریخ مرجوعی قبل از تاریخ فاکتور است.") }
+        ensure(cmd.lines.isNotEmpty() && cmd.lines.map { it.itemId }.distinct().size == cmd.lines.size) {
+            DomainError.InvalidInput("lines", "هر کالا فقط یک‌بار در مرجوعی بیاید.")
+        }
+        // An item may appear on several invoice lines: price it per item over the whole invoice.
+        val boughtQty = invoice.lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } }
+        val boughtValue = invoice.lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.value.rial } }
+        val previous = purchases.returns(invoice.id).flatMap { it.lines }.groupBy { it.itemId }
         val priced = cmd.lines.map { line ->
-            val bought = invoice.lines.firstOrNull { it.itemId == line.itemId }
-                ?: throw DomainException(DomainError.InvalidInput("item", "این کالا در فاکتور نیست."))
-            val remaining = bought.quantity.micros - (alreadyReturned[line.itemId] ?: 0L)
-            ensure(line.quantity.micros <= remaining) { DomainError.InvalidInput("quantity", "مقدار مرجوعی از مقدار خریداری‌شده بیشتر است.") }
-            InvoiceLine(line.itemId, line.quantity, Money.of(Ratio.mulDiv(bought.value.rial, line.quantity.micros, bought.quantity.micros)))
+            val qty = boughtQty[line.itemId] ?: throw DomainException(DomainError.InvalidInput("item", "این کالا در فاکتور نیست."))
+            val value = boughtValue.getValue(line.itemId)
+            val returnedQty = previous[line.itemId].orEmpty().sumOf { it.quantity.micros }
+            val returnedValue = previous[line.itemId].orEmpty().sumOf { it.value.rial }
+            val remaining = qty - returnedQty
+            ensure(!line.quantity.isZero && line.quantity.micros <= remaining) { DomainError.InvalidInput("quantity", "مقدار مرجوعی از مقدار خریداری‌شده بیشتر است.") }
+            // The last unit takes the remainder, so returning everything credits exactly the invoice value.
+            val credit = if (line.quantity.micros == remaining) value - returnedValue
+            else Ratio.mulDiv(value, line.quantity.micros, qty)
+            InvoiceLine(line.itemId, line.quantity, Money.of(credit))
         }
         val credit = Money.sum(priced.map { it.value })
         ensure(credit <= outstanding(invoice.id)) { DomainError.InvalidState("PURCHASE_INVOICE", "RETURN_EXCEEDS_OUTSTANDING") }

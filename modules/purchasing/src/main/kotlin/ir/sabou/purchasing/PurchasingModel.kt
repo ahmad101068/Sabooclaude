@@ -51,6 +51,7 @@ interface SupplierStore {
 
 interface PurchaseStore {
     fun invoice(id: GlobalId): PurchaseInvoice?
+    /** The POSTED invoice with this number; a reversed invoice frees its number for the corrected one. */
     fun invoiceByNumber(supplierId: GlobalId, normalizedNo: String): PurchaseInvoice?
     fun invoices(): List<PurchaseInvoice>
     fun saveInvoice(invoice: PurchaseInvoice)

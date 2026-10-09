@@ -131,8 +131,9 @@ class PayrollOperations(
         val name = cmd.name.trim()
         ensure(name.length in 2..120) { DomainError.InvalidInput("name", "نام کارمند الزامی است.") }
         ensure(NationalId.isValid(cmd.nationalId)) { DomainError.InvalidInput("nationalId", "کد ملی معتبر نیست.") }
-        ensure(personnel.employees(cmd.scope).none { it.nationalId == cmd.nationalId.trim() }) { DomainError.InvalidState("EMPLOYEE", "DUPLICATE_NATIONAL_ID") }
-        val employee = Employee(GlobalId.new(), name, cmd.nationalId.trim(), cmd.scope, cmd.monthlySalary)
+        val nationalId = NationalId.normalize(cmd.nationalId)
+        ensure(personnel.employees(cmd.scope).none { NationalId.normalize(it.nationalId) == nationalId }) { DomainError.InvalidState("EMPLOYEE", "DUPLICATE_NATIONAL_ID") }
+        val employee = Employee(GlobalId.new(), name, nationalId, cmd.scope, cmd.monthlySalary)
         personnel.saveEmployee(employee)
         ctx.audit(AuditDraft("EMPLOYEE_REGISTER", "EMPLOYEE", employee.id.value, name))
         employee.id
@@ -156,6 +157,9 @@ class PayrollOperations(
     /** Creates (or recalculates) the draft run for a period. A draft has no accounting effect. */
     fun calculate(c: CalculatePayroll): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
         ensure(cmd.from <= cmd.to) { DomainError.InvalidInput("period", "بازه حقوق معتبر نیست.") }
+        // Salaries are monthly: a run covers one whole payroll month (29–31 days), never a fraction of one.
+        val days = cmd.to.epochDay - cmd.from.epochDay + 1
+        ensure(days in 29..31) { DomainError.InvalidInput("period", "دوره حقوق باید یک ماه کامل باشد.") }
         val overlapping = payroll.runs(cmd.scope).filter { it.status != RunStatus.REVERSED && it.from <= cmd.to && it.to >= cmd.from }
         ensure(overlapping.all { it.status == RunStatus.DRAFT && it.from == cmd.from && it.to == cmd.to }) { DomainError.InvalidState("PAYROLL_RUN", "PERIOD_OVERLAP") }
         val policy = policies.forPeriod(cmd.from, cmd.to)
@@ -183,14 +187,15 @@ class PayrollOperations(
         val insurance = Money.sum(s.map { it.employeeInsurance + it.employerInsurance + it.unemploymentInsurance })
         val tax = Money.sum(s.map { it.incomeTax })
         val lines = buildList {
-            add(LineDraft(StandardAccounts.SALARIES, debit = gross, memo = "حقوق ناخالص", by = capability))
+            if (!gross.isZero) add(LineDraft(StandardAccounts.SALARIES, debit = gross, memo = "حقوق ناخالص", by = capability))
             if (!employerCost.isZero) add(LineDraft(StandardAccounts.EMPLOYER_INSURANCE, debit = employerCost, memo = "بیمه سهم کارفرما و بیکاری", by = capability))
             if (!net.isZero) add(LineDraft(StandardAccounts.PAYROLL_PAYABLE, credit = net, memo = "خالص پرداختنی", by = capability))
             if (!insurance.isZero) add(LineDraft(StandardAccounts.INSURANCE_PAYABLE, credit = insurance, memo = "بیمه", by = capability))
             if (!tax.isZero) add(LineDraft(StandardAccounts.PAYROLL_TAX_PAYABLE, credit = tax, memo = "مالیات حقوق", by = capability))
         }
-        val journal = ledger.post(ctx, capability, JournalDraft(run.to, run.scope, RUN, run.id, "حقوق دوره", lines))
-        payroll.saveRun(run.copy(status = RunStatus.APPROVED, approvedBy = ctx.actor.userId, accrualJournalId = journal.id))
+        // A month in which nobody earned anything (all absent) is approved without an accounting entry.
+        val journal = if (lines.isEmpty()) null else ledger.post(ctx, capability, JournalDraft(run.to, run.scope, RUN, run.id, "حقوق دوره", lines))
+        payroll.saveRun(run.copy(status = RunStatus.APPROVED, approvedBy = ctx.actor.userId, accrualJournalId = journal?.id))
         ctx.audit(AuditDraft("PAYROLL_APPROVE", "PAYROLL_RUN", run.id.value, "gross=${gross.rial};net=${net.rial}"))
         run.id
     }
@@ -204,7 +209,7 @@ class PayrollOperations(
             outstandingLiability(run.scope, LiabilityKind.INSURANCE) >= Money.sum(run.payslips.map { it.employeeInsurance + it.employerInsurance + it.unemploymentInsurance }) &&
                 outstandingLiability(run.scope, LiabilityKind.INCOME_TAX) >= Money.sum(run.payslips.map { it.incomeTax }),
         ) { DomainError.InvalidState("PAYROLL_RUN", "LIABILITY_ALREADY_REMITTED") }
-        ledger.reverse(ctx, capability, emptySet(), requireNotNull(run.accrualJournalId), cmd.date, cmd.reason)
+        run.accrualJournalId?.let { ledger.reverse(ctx, capability, emptySet(), it, cmd.date, cmd.reason) }
         payroll.saveRun(run.copy(status = RunStatus.REVERSED))
         ctx.audit(AuditDraft("PAYROLL_REVERSE", "PAYROLL_RUN", run.id.value, cmd.reason.trim()))
         run.id
