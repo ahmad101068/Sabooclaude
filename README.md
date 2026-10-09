@@ -29,9 +29,12 @@ This is a ground-up rebuild. The previous code base (`sabou-manager-v3-`) was au
 python3 scripts/offline_build.py <jars-dir>        # offline fallback; enforces module boundaries
 ```
 
+### Dependency verification
+Gradle checks the SHA-256 of every downloaded artifact against `gradle/verification-metadata.xml` (generated on Linux CI). Building on another OS (Windows/macOS) needs that OS's `aapt2` checksum once: run `./gradlew --write-verification-metadata sha256 :app:assembleDebug` locally and review the diff before committing. When upgrading a dependency, regenerate the file the same way.
+
 ## Status (2026-10-09)
 
-- JVM modules: **86 tests passing** offline (unit, end-to-end on a real SQLite file, restart, rollback, replay, tamper and rollback detection, factory reset, 80-year Jalali round trip). Spot mutation checks confirm key rules are guarded.
+- JVM modules: **100+ tests passing** offline (unit, end-to-end on a real SQLite file, restart, rollback, replay, tamper and rollback detection, factory reset, 80-year Jalali round trip). Spot mutation checks confirm key rules are guarded.
 - CI (`.github/workflows/ci.yml`) is green on GitHub: Gradle `domainBuild` with all tests, then the Android app compiles, passes lint and produces a debug APK (artifact `sabou-debug-apk`).
 - Payroll legal values are not shipped: the owner enters each year's parameters (after professional review); payroll fails closed until then.
 - Not production ready until the app has been tested on real devices (UI flows, SQLCipher, Keystore, backup/restore).
