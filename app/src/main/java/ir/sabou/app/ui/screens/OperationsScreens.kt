@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import ir.sabou.app.R
+import ir.sabou.app.ui.ExportButtons
 import ir.sabou.app.ui.LocalSession
 import ir.sabou.app.ui.Nav
 import ir.sabou.app.ui.Route
@@ -51,6 +52,7 @@ import ir.sabou.app.ui.rememberAction
 import ir.sabou.app.ui.theme.Sabou
 import ir.sabou.app.ui.theme.SabouType
 import ir.sabou.core.Fa
+import ir.sabou.core.ReportTables
 import ir.sabou.inventory.CountLine
 import ir.sabou.inventory.IssueLine
 import ir.sabou.inventory.Item
@@ -91,7 +93,7 @@ object OperationsScreens {
     // ------------------------------------------------------------ Hub (design: Operations)
 
     /** Who sees which group: the hub only lists what the role may open (AUD-012). */
-    private val inventoryPerms = listOf(Permission.INVENTORY_VIEW, Permission.INVENTORY_COUNT, Permission.INVENTORY_WASTE, Permission.INVENTORY_TRANSFER, Permission.RECIPE_MANAGE)
+    private val inventoryPerms = listOf(Permission.INVENTORY_VIEW, Permission.INVENTORY_COUNT, Permission.INVENTORY_WASTE, Permission.INVENTORY_TRANSFER, Permission.RECIPE_MANAGE, Permission.INVENTORY_PRODUCE)
     private val purchasePerms = listOf(Permission.PURCHASE_VIEW, Permission.SUPPLIER_MANAGE)
     private val personnelPerms = listOf(Permission.PERSONNEL_VIEW, Permission.PERSONNEL_MANAGE, Permission.ATTENDANCE_RECORD, Permission.PAYROLL_CALCULATE, Permission.PAYROLL_APPROVE, Permission.PAYROLL_PAY)
     val allPerms = inventoryPerms + purchasePerms + personnelPerms
@@ -115,6 +117,8 @@ object OperationsScreens {
                 if (session.can(Permission.INVENTORY_TRANSFER)) item { NavRow(R.drawable.ic_transfer, "انتقال", "بین انبارها و شعب", onClick = { nav.go(Route.StockTransfer) }) }
                 if (session.can(Permission.INVENTORY_WASTE)) item { NavRow(R.drawable.ic_waste, "ضایعات", "ثبت با دلیل", onClick = { nav.go(Route.Waste) }) }
                 if (session.can(Permission.RECIPE_MANAGE)) item { NavRow(R.drawable.ic_recipe, "رسپی و بهای تمام‌شده", "نسخه‌های رسپی آیتم‌های منو", onClick = { nav.go(Route.Recipes) }) }
+                if (session.can(Permission.RECIPE_MANAGE)) item { NavRow(R.drawable.ic_recipe, "رسپی اقلام آماده", "سس، خمیر و هر چه در آشپزخانه ساخته می‌شود", onClick = { nav.go(Route.PrepRecipes) }) }
+                if (session.can(Permission.INVENTORY_PRODUCE)) item { NavRow(R.drawable.ic_recipe, "تولید اقلام آماده", "مواد از انبار کم و قلم آماده اضافه می‌شود", onClick = { nav.go(Route.Production) }) }
                 if (any(purchasePerms)) item { SectionTitle("خرید") }
                 if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "خرید و دریافت کالا", payable?.let { "بدهی ${Fa.tomanShort(it.rial)}" }, tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Purchases) }) }
                 if (any(purchasePerms)) item { NavRow(R.drawable.ic_supplier, "تأمین‌کنندگان", "فهرست و مانده حساب", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Suppliers) }) }
@@ -122,6 +126,8 @@ object OperationsScreens {
                 if (session.can(Permission.PERSONNEL_VIEW) || session.can(Permission.PERSONNEL_MANAGE)) item { NavRow(R.drawable.ic_person, "کارکنان", "ثبت و مشخصات", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Personnel) }) }
                 if (session.can(Permission.ATTENDANCE_RECORD) || session.can(Permission.PERSONNEL_VIEW)) item { NavRow(R.drawable.ic_clock, "حضور و غیاب", "ثبت روزانه کارکرد", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Attendance) }) }
                 if (listOf(Permission.PAYROLL_CALCULATE, Permission.PAYROLL_APPROVE, Permission.PAYROLL_PAY).any { session.can(it) }) item { NavRow(R.drawable.ic_payroll, "حقوق", "محاسبه، تأیید و پرداخت", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Payroll) }) }
+                if (FinanceScreens.reportPerms.any { session.can(it) }) item { SectionTitle("گزارش‌ها") }
+                if (FinanceScreens.reportPerms.any { session.can(it) }) item { NavRow(R.drawable.ic_count, "گزارش‌ها", "مصرف واقعی و تئوریک، پایان روز، کارکرد و …", onClick = { nav.go(Route.Reports) }) }
             }
         }
     }
@@ -170,6 +176,11 @@ object OperationsScreens {
                                     }
                                     Divider()
                                 }
+                            }
+                            if (loc != null) ExportButtons("موجودی-انبار") {
+                                val place = d.locations.firstOrNull { it.id == loc }?.name ?: "انبار"
+                                val items = overview.items().associateBy { it.id }
+                                listOf(ReportTables.stock(place, overview.stock(loc).mapNotNull { b -> items[b.itemId]?.let { it to b } }, session.today))
                             }
                         }
                         if (session.can(Permission.INVENTORY_OPENING)) {
@@ -274,8 +285,13 @@ object OperationsScreens {
         Loaded(balances) { list ->
             val book = list.associateBy({ it.itemId }, { it.quantity })
             FormCard("مقدار شمارش‌شده") {
-                Text("فقط کالاهایی را که شمردید وارد کنید؛ اختلاف به حساب مغایرت انبار ثبت می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
-                items.forEach { item ->
+                Text("فقط کالاهایی را که شمردید وارد کنید؛ اختلاف به حساب مغایرت انبار ثبت می‌شود. ترتیب فهرست به محل نگهداری است.", style = SabouType.caption, color = Sabou.colors.muted)
+                var lastShelf: String? = null
+                items.sortedWith(compareBy({ it.shelf.isBlank() }, { it.shelf }, { it.name })).forEach { item ->
+                    if (item.shelf != lastShelf) {
+                        lastShelf = item.shelf
+                        Text(item.shelf.ifBlank { "بدون محل" }, style = SabouType.bodyStrong, color = Sabou.colors.primary)
+                    }
                     key(item.id) {
                         QuantityInput("${item.name} — دفتری ${Fa.quantity(book[item.id] ?: Quantity.ZERO)}", unitName(item.unit), { counted[item.id] = it })
                     }
@@ -354,6 +370,7 @@ object OperationsScreens {
                             tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.PurchaseDetail(inv.id)) })
                     }
                 }
+                ExportButtons("فاکتورهای-خرید") { listOf(ReportTables.invoices(overview.invoices())) }
             }
         }
     }
@@ -568,6 +585,7 @@ object OperationsScreens {
                     list.forEach { (s, balance) ->
                         SCard { KeyValue(s.name + if (s.phone.isNotBlank()) " · ${Fa.digits(s.phone)}" else "", "بدهی ${Fa.toman(balance)}") }
                     }
+                    if (list.isNotEmpty() && session.can(Permission.PURCHASE_VIEW)) ExportButtons("تامین-کنندگان") { listOf(ReportTables.suppliers(overview.suppliers())) }
                 }
                 if (session.can(Permission.SUPPLIER_MANAGE)) {
                     FormCard("تأمین‌کننده جدید") {
@@ -769,6 +787,14 @@ object OperationsScreens {
                                         SecondaryButton("پرداخت ${Fa.toman(unpaid)} تومان", {
                                             action.run({ payroll.pay(PaySalary(GlobalId.new(), branch, run.id, p.employeeId, payAccount!!, unpaid, session.today)) })
                                         }, enabled = payAccount != null && !action.busy)
+                                    }
+                                }
+                                key(run.id) {
+                                    Text("لیست و فیش‌ها (هر فیش در یک صفحه‌ی PDF)", style = SabouType.caption, color = Sabou.colors.muted)
+                                    ExportButtons("حقوق-${Fa.latinDigits(Fa.date(run.from)).replace('/', '-')}") {
+                                        val place = overview.branches().firstOrNull { it.id == branch.branchId }?.name ?: "شعبه"
+                                        listOf(ReportTables.payrollRun(run, d.names, place)) +
+                                            run.payslips.map { ReportTables.payslip(run, it, d.names[it.employeeId].orEmpty(), place) }
                                     }
                                 }
                                 if (run.status == RunStatus.DRAFT && session.can(Permission.PAYROLL_APPROVE)) {

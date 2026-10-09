@@ -92,4 +92,59 @@ class PersistenceTest {
         assertEquals(run, runs.run(run.id))
         assertEquals(10, runs.run(run.id)!!.payslips.first().payableDays)
     }
+
+    @Test fun upgradingFromVersion1IndexesExistingStockMovements() {
+        val db = memoryDb()
+        // A database as version 1 left it, with one movement already recorded.
+        db.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+        Schema.migrations.first { it.version == 1 }.statements.forEach { db.execute(it) }
+        db.execute("INSERT INTO schema_version(version) VALUES (1)")
+        val branch = ir.sabou.kernel.Scope.Branch(ir.sabou.kernel.BranchId(ir.sabou.kernel.GlobalId.new()))
+        val items = SqlItemStore(db); val locations = SqlLocationStore(db)
+        val item = ir.sabou.inventory.Item(ir.sabou.kernel.GlobalId.new(), "برنج", ir.sabou.inventory.StockUnit.KILOGRAM, ir.sabou.kernel.Quantity.ZERO)
+        val loc = ir.sabou.inventory.Location(ir.sabou.kernel.GlobalId.new(), "انبار", branch)
+        items.save(item); locations.save(loc)
+        val old = ir.sabou.inventory.StockMovement(
+            ir.sabou.kernel.GlobalId.new(), item.id, loc.id, ir.sabou.inventory.MovementKind.RECEIPT, 5_000_000, 900_000,
+            ir.sabou.kernel.BusinessDate(20_000), null,
+            ir.sabou.ledger.SourceDocument(ir.sabou.platform.ModuleId.PURCHASING, "PURCHASE_INVOICE", ir.sabou.kernel.GlobalId.new()), null, 1L,
+        )
+        db.execute("INSERT INTO stock_movements (id, source_type, source_id, reversal_of, doc) VALUES (?, ?, ?, ?, ?)", old.id.value, "PURCHASE_INVOICE",
+            old.source.id.value, null,
+            Json.encode(mapOf("id" to old.id.value, "item" to item.id.value, "location" to loc.id.value, "kind" to "RECEIPT", "qty" to 5_000_000L,
+                "value" to 900_000L, "date" to 20_000L, "journal" to null, "source" to Codec.source(old.source), "reversalOf" to null, "recordedAt" to 1L)))
+        // An item stored by version 1 has none of the new fields: it reads with defaults.
+        db.execute("UPDATE items SET doc = ? WHERE id = ?", Json.encode(mapOf("id" to item.id.value, "name" to "برنج", "unit" to "KILOGRAM", "minimum" to 0L, "active" to true)), item.id.value)
+
+        Schema.migrate(db)
+        val stock = SqlStockStore(db)
+        assertEquals(listOf(old), stock.movementsAt(loc.id, ir.sabou.kernel.BusinessDate(20_000), ir.sabou.kernel.BusinessDate(20_000)))
+        assertEquals(5_000_000, stock.totalsBefore(loc.id, ir.sabou.kernel.BusinessDate(20_001)).single().quantity)
+        assertTrue(stock.totalsBefore(loc.id, ir.sabou.kernel.BusinessDate(20_000)).isEmpty())
+        assertEquals(item, items.byId(item.id))
+        // New movements are indexed as they are written.
+        val next = old.copy(id = ir.sabou.kernel.GlobalId.new(), kind = ir.sabou.inventory.MovementKind.ISSUE, quantityDelta = -1_000_000, valueDelta = -180_000,
+            date = ir.sabou.kernel.BusinessDate(20_003))
+        stock.insertMovement(next)
+        assertEquals(4_000_000, stock.totalsBefore(loc.id, ir.sabou.kernel.BusinessDate(20_004)).single().quantity)
+        assertEquals(listOf(next), stock.movementsAt(loc.id, ir.sabou.kernel.BusinessDate(20_001), ir.sabou.kernel.BusinessDate(20_010)))
+        // The index is as immutable as the movements.
+        assertTrue(assertFailsWith<Exception> { db.execute("DELETE FROM stock_movement_index") }.message!!.contains("IMMUTABLE"))
+    }
+
+    @Test fun itemDetailsRecipeYieldAndPrepRecipesSurviveTheDatabase() {
+        val db = memoryDb(); Schema.migrate(db)
+        val items = SqlItemStore(db)
+        val a = ir.sabou.kernel.GlobalId.new()
+        val item = ir.sabou.inventory.Item(ir.sabou.kernel.GlobalId.new(), "سس", ir.sabou.inventory.StockUnit.KILOGRAM, ir.sabou.kernel.Quantity.units(2),
+            parLevel = ir.sabou.kernel.Quantity.units(6), shelf = "یخچال ۱", allergens = "لبنیات", prepared = true, preferredSupplierId = a, approvedSupplierIds = setOf(a))
+        val tomato = item.copy(id = ir.sabou.kernel.GlobalId.new(), name = "گوجه", prepared = false, approvedSupplierIds = emptySet(), preferredSupplierId = null)
+        items.save(item); items.save(tomato)
+        assertEquals(item, items.byId(item.id))
+        val recipes = SqlRecipeStore(db)
+        val prep = ir.sabou.inventory.PrepRecipe(ir.sabou.kernel.GlobalId.new(), item.id, 1, ir.sabou.kernel.BusinessDate(20_000), ir.sabou.kernel.Quantity.units(4),
+            listOf(ir.sabou.inventory.RecipeLine(tomato.id, ir.sabou.kernel.Quantity.units(5), 90)))
+        recipes.savePrepVersion(prep)
+        assertEquals(listOf(prep), recipes.prepVersions(item.id))
+    }
 }

@@ -20,7 +20,7 @@ enum class Permission {
     // Purchasing & inventory
     PURCHASE_VIEW, PURCHASE_RECORD, PURCHASE_PAY, PURCHASE_REVERSE, SUPPLIER_MANAGE,
     INVENTORY_LOCATION_MANAGE, INVENTORY_WASTE, INVENTORY_COUNT, INVENTORY_OPENING,
-    INVENTORY_VIEW, INVENTORY_ITEM_MANAGE, INVENTORY_ADJUST, INVENTORY_TRANSFER, RECIPE_MANAGE,
+    INVENTORY_VIEW, INVENTORY_ITEM_MANAGE, INVENTORY_ADJUST, INVENTORY_TRANSFER, RECIPE_MANAGE, INVENTORY_PRODUCE,
     // Payroll
     PERSONNEL_VIEW, PERSONNEL_MANAGE, ATTENDANCE_RECORD, PAYROLL_CALCULATE, PAYROLL_APPROVE, PAYROLL_PAY,
     // Organization-wide data (non-branch documents)
@@ -51,7 +51,7 @@ enum class Role(val permissions: Set<Permission>) {
     STOREKEEPER(
         setOf(
             Permission.INVENTORY_VIEW, Permission.INVENTORY_ITEM_MANAGE, Permission.INVENTORY_TRANSFER,
-            Permission.INVENTORY_WASTE, Permission.INVENTORY_COUNT,
+            Permission.INVENTORY_WASTE, Permission.INVENTORY_COUNT, Permission.INVENTORY_PRODUCE,
             // Records invoices but does not create suppliers: creating a payee and billing it are kept apart.
             Permission.PURCHASE_VIEW, Permission.PURCHASE_RECORD,
         ),

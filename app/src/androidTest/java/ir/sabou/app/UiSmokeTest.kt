@@ -7,6 +7,10 @@ import ir.sabou.app.data.AppState
 import ir.sabou.app.ui.AppSession
 import ir.sabou.app.ui.Drafts
 import ir.sabou.app.ui.Route
+import ir.sabou.inventory.CreateItem
+import ir.sabou.inventory.StockUnit
+import ir.sabou.kernel.GlobalId
+import ir.sabou.kernel.Quantity
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,6 +30,8 @@ class UiSmokeTest {
         Route.Stock, Route.Waste, Route.Count, Route.StockTransfer, Route.Recipes, Route.Purchases, Route.NewPurchase,
         Route.Suppliers, Route.Personnel, Route.Attendance, Route.Payroll,
         Route.Branches, Route.Users, Route.Items, Route.Locations, Route.Menu, Route.Accounts, Route.Customers, Route.Policies, Route.Backup,
+        Route.Reports, Route.ProfitLoss, Route.DayFlash, Route.ProductMix, Route.Usage, Route.AttendanceReport,
+        Route.PrepRecipes, Route.Production,
     )
 
     @Test fun everyPageOpensAndItsDraftCanBeSaved() {
@@ -36,9 +42,14 @@ class UiSmokeTest {
         val actor = checkNotNull(core.session.currentActor())
         val branch = core.identity.accessibleBranches(actor).first().id
         instrumentation.runOnMainSync { app.ui.session = AppSession(core, actor, branch) {} }
+        val itemId = GlobalId.new()
+        core.inventory.createItem(CreateItem(itemId, "پیاز", StockUnit.KILOGRAM, Quantity.ZERO))
+        core.inventory.createItem(CreateItem(GlobalId.new(), "سس مخصوص", StockUnit.KILOGRAM, Quantity.ZERO, prepared = true))
+        val today = java.time.LocalDate.now().toEpochDay()
+        val allPages = pages + listOf(Route.ItemEdit(itemId), Route.LedgerDetail("4101", today - 30, today, null))
 
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            for (page in pages) {
+            for (page in allPages) {
                 scenario.onActivity { app.ui.go(page) }
                 instrumentation.waitForIdleSync()
                 Thread.sleep(600)                                    // let the page load its data

@@ -50,6 +50,17 @@ class DeviceTest {
         return (state as AppState.Ready).core
     }
 
+    @Test fun reportsRenderToPdfAndExcel() {
+        val (_, core) = fresh()
+        val tables = listOf(ir.sabou.core.ReportTables.trialBalance(core.overview.trialBalance(), BusinessDate(20_000))) +
+            ir.sabou.core.ReportTables.profitAndLoss(core.reports.profitAndLoss(BusinessDate(19_990), BusinessDate(20_000)), "همه‌ی شعب")
+        val pdf = java.io.ByteArrayOutputStream().also { ir.sabou.app.export.PdfReport.write(context, tables, it) }.toByteArray()
+        assertEquals("%PDF", String(pdf, 0, 4, Charsets.US_ASCII))
+        assertTrue(pdf.size > 1_000)
+        val xlsx = ir.sabou.core.Xlsx.write(tables)
+        assertEquals('P'.code.toByte(), xlsx[0]); assertEquals('K'.code.toByte(), xlsx[1])
+    }
+
     @Test fun encryptedDatabaseAndKeystoreKeySurviveAReopen() {
         val (container, _) = fresh()
         container.open()                                   // close + open: the wrapped key is unwrapped again

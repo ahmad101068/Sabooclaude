@@ -24,12 +24,61 @@ data class CreateItem(
     val name: String,
     val unit: StockUnit,
     val minimumStock: Quantity,
+    val prepared: Boolean = false,
 ) : Command {
     override val requiredPermission = Permission.INVENTORY_ITEM_MANAGE
     // The item catalogue is shared by all branches.
     override val scope: Scope = Scope.Organization
     override val sharedCatalog = true
-    override fun fingerprint() = "$name|$unit|${minimumStock.micros}"
+    override fun fingerprint() = "$name|$unit|${minimumStock.micros}|$prepared"
+}
+
+/** Edits an item's ordering and storage details. The unit never changes (it would revalue history). */
+data class UpdateItem(
+    override val commandId: GlobalId,
+    val itemId: GlobalId,
+    val name: String,
+    val minimumStock: Quantity,
+    val parLevel: Quantity,
+    val shelf: String,
+    val allergens: String,
+    val preferredSupplierId: GlobalId?,
+    val approvedSupplierIds: Set<GlobalId>,
+    val isActive: Boolean,
+) : Command {
+    override val requiredPermission = Permission.INVENTORY_ITEM_MANAGE
+    override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
+    override fun fingerprint() = "$itemId|$name|${minimumStock.micros}|${parLevel.micros}|$shelf|$allergens|$preferredSupplierId|" +
+        approvedSupplierIds.map { it.value }.sorted().joinToString(",") + "|$isActive"
+}
+
+/** A new version of how a prepared item is made; [lines] yield [outputQuantity] of it. */
+data class PublishPrepRecipe(
+    override val commandId: GlobalId,
+    val itemId: GlobalId,
+    val effectiveFrom: BusinessDate,
+    val outputQuantity: Quantity,
+    val lines: List<RecipeLine>,
+) : Command {
+    override val requiredPermission = Permission.RECIPE_MANAGE
+    override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
+    override fun fingerprint() = "$itemId|${effectiveFrom.epochDay}|${outputQuantity.micros}|" +
+        lines.joinToString(";") { "${it.itemId}:${it.quantityPerPortion.micros}:${it.yieldPercent}" }
+}
+
+/** Makes [quantity] of a prepared item at a location: ingredients out at average cost, the item in at that cost. */
+data class RecordProduction(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val locationId: GlobalId,
+    val itemId: GlobalId,
+    val quantity: Quantity,
+    val date: BusinessDate,
+) : Command {
+    override val requiredPermission = Permission.INVENTORY_PRODUCE
+    override fun fingerprint() = "$scope|$locationId|$itemId|${quantity.micros}|${date.epochDay}"
 }
 
 data class CreateLocation(override val commandId: GlobalId, override val scope: Scope.Branch, val name: String) : Command {
@@ -108,7 +157,7 @@ data class PublishRecipe(
     override val requiredPermission = Permission.RECIPE_MANAGE
     override val scope: Scope = Scope.Organization
     override val sharedCatalog = true
-    override fun fingerprint() = "$menuItemId|${effectiveFrom.epochDay}|" + lines.joinToString(";") { "${it.itemId}:${it.quantityPerPortion.micros}" }
+    override fun fingerprint() = "$menuItemId|${effectiveFrom.epochDay}|" + lines.joinToString(";") { "${it.itemId}:${it.quantityPerPortion.micros}:${it.yieldPercent}" }
 }
 
 class InventoryOperations(
@@ -124,10 +173,80 @@ class InventoryOperations(
         val name = cmd.name.trim()
         ensure(name.length in 2..80) { DomainError.InvalidInput("name", "نام کالا الزامی است.") }
         ensure(items.all().none { it.name == name }) { DomainError.InvalidState("ITEM", "DUPLICATE_NAME") }
-        val item = Item(GlobalId.new(), name, cmd.unit, cmd.minimumStock)
+        val item = Item(GlobalId.new(), name, cmd.unit, cmd.minimumStock, prepared = cmd.prepared)
         items.save(item)
         ctx.audit(AuditDraft("ITEM_CREATE", "ITEM", item.id.value, name))
         item.id
+    }
+
+    fun updateItem(c: UpdateItem): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val item = items.byId(cmd.itemId) ?: throw DomainException(DomainError.NotFound("ITEM"))
+        val name = cmd.name.trim()
+        ensure(name.length in 2..80) { DomainError.InvalidInput("name", "نام کالا الزامی است.") }
+        ensure(items.all().none { it.id != item.id && it.name == name }) { DomainError.InvalidState("ITEM", "DUPLICATE_NAME") }
+        ensure(cmd.parLevel.isZero || cmd.parLevel >= cmd.minimumStock) { DomainError.InvalidInput("parLevel", "سقف سفارش باید از حد سفارش بیشتر باشد.") }
+        ensure(cmd.shelf.length <= 80 && cmd.allergens.length <= 200) { DomainError.InvalidInput("text", "متن بیش از حد طولانی است.") }
+        ensure(cmd.preferredSupplierId == null || cmd.approvedSupplierIds.isEmpty() || cmd.preferredSupplierId in cmd.approvedSupplierIds) {
+            DomainError.InvalidInput("supplier", "تأمین‌کننده‌ی اصلی باید در فهرست مجاز باشد.")
+        }
+        if (item.isActive && !cmd.isActive) {
+            // An inactive item can no longer leave stock (sales, waste, counts, transfers refuse it):
+            // only items with nothing on hand and no current recipe may be deactivated.
+            ensure(locations.all().all { gateway.balance(item.id, it.id).quantity.isZero }) { DomainError.InvalidState("ITEM", "HAS_STOCK") }
+            val usedByMenu = recipes.menuItems().filter { it.isActive }.any { m -> recipes.versions(m.id).maxByOrNull { it.version }?.lines?.any { it.itemId == item.id } == true }
+            val usedByPrep = items.all().filter { it.prepared && it.isActive && it.id != item.id }
+                .any { p -> recipes.prepVersions(p.id).maxByOrNull { it.version }?.lines?.any { it.itemId == item.id } == true }
+            ensure(!usedByMenu && !usedByPrep) { DomainError.InvalidState("ITEM", "USED_IN_RECIPE") }
+        }
+        val next = item.copy(
+            name = name, minimumStock = cmd.minimumStock, parLevel = cmd.parLevel, shelf = cmd.shelf.trim(), allergens = cmd.allergens.trim(),
+            preferredSupplierId = cmd.preferredSupplierId, approvedSupplierIds = cmd.approvedSupplierIds, isActive = cmd.isActive,
+        )
+        items.save(next)
+        ctx.audit(AuditDraft("ITEM_UPDATE", "ITEM", item.id.value, name))
+        item.id
+    }
+
+    fun publishPrepRecipe(c: PublishPrepRecipe): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val item = gateway.item(cmd.itemId)
+        ensure(item.prepared) { DomainError.InvalidState("ITEM", "NOT_PREPARED") }
+        ensure(!cmd.outputQuantity.isZero) { DomainError.InvalidInput("output", "مقدار تولید باید بیشتر از صفر باشد.") }
+        validateLines(cmd.lines)
+        ensure(cmd.lines.none { it.itemId == item.id }) { DomainError.InvalidInput("lines", "کالای آماده نمی‌تواند ماده‌ی اولیه‌ی خودش باشد.") }
+        val existing = recipes.prepVersions(item.id)
+        ensure(existing.none { it.effectiveFrom >= cmd.effectiveFrom }) { DomainError.InvalidState("RECIPE", "NOT_AFTER_LATEST_VERSION") }
+        val version = PrepRecipe(GlobalId.new(), item.id, (existing.maxOfOrNull { it.version } ?: 0) + 1, cmd.effectiveFrom, cmd.outputQuantity, cmd.lines)
+        recipes.savePrepVersion(version)
+        ctx.audit(AuditDraft("PREP_RECIPE_PUBLISH", "RECIPE", version.id.value, "item=${item.id};v=${version.version}"))
+        version.id
+    }
+
+    /** Ingredients leave at their average cost and the prepared item enters at exactly that total: value is conserved. */
+    fun produce(c: RecordProduction): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val location = requireLocationScope(cmd.locationId, cmd.scope)
+        val item = gateway.item(cmd.itemId)
+        ensure(item.prepared) { DomainError.InvalidState("ITEM", "NOT_PREPARED") }
+        ensure(!cmd.quantity.isZero) { DomainError.InvalidInput("quantity", "مقدار تولید باید بیشتر از صفر باشد.") }
+        val requirements = RecipeBook(recipes).prepRequirements(item.id, cmd.date, cmd.quantity)
+        // A quantity so small that every ingredient rounds to nothing would create stock for free.
+        val recipeLines = RecipeBook(recipes).prepOn(item.id, cmd.date).lines.size
+        ensure(requirements.size == recipeLines) { DomainError.InvalidInput("quantity", "مقدار تولید آن‌قدر کم است که مواد آن قابل اندازه‌گیری نیست.") }
+        val priced = requirements.map { gateway.item(it.itemId); IssuedCost(it.itemId, it.quantity, gateway.valueOf(gateway.balance(it.itemId, location.id), it.quantity)) }
+        val total = Money.sum(priced.map { it.cost })
+        val docId = GlobalId.new()
+        val source = SourceDocument(ModuleId.INVENTORY, PRODUCTION, docId)
+        // One account, one branch: no journal is needed, inventory 1301 is unchanged.
+        priced.forEach { gateway.stockOut(ctx, it.itemId, location, it.quantity, it.cost, MovementKind.PRODUCTION_OUT, cmd.date, null, source, null) }
+        gateway.stockIn(ctx, item.id, location, cmd.quantity, total, MovementKind.PRODUCTION_IN, cmd.date, null, source, null)
+        ctx.audit(AuditDraft("PRODUCTION", "ITEM", item.id.value, "loc=${location.id};qty=${cmd.quantity.micros};cost=${total.rial}"))
+        docId
+    }
+
+    private fun validateLines(lines: List<RecipeLine>) {
+        ensure(lines.isNotEmpty() && lines.none { it.quantityPerPortion.isZero }) { DomainError.InvalidInput("lines", "رسپی حداقل یک ماده با مقدار مثبت لازم دارد.") }
+        ensure(lines.map { it.itemId }.distinct().size == lines.size) { DomainError.InvalidInput("lines", "هر ماده فقط یک‌بار بیاید.") }
+        ensure(lines.all { it.yieldPercent in 1..100 }) { DomainError.InvalidInput("yield", "درصد بازده باید بین ۱ و ۱۰۰ باشد.") }
+        lines.forEach { gateway.item(it.itemId) }
     }
 
     fun createLocation(c: CreateLocation): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
@@ -246,9 +365,7 @@ class InventoryOperations(
     /** Recipes are versioned: a new version applies from its date and never alters past sales. */
     fun publishRecipe(c: PublishRecipe): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
         recipes.menuItem(cmd.menuItemId) ?: throw DomainException(DomainError.NotFound("MENU_ITEM"))
-        ensure(cmd.lines.isNotEmpty() && cmd.lines.none { it.quantityPerPortion.isZero }) { DomainError.InvalidInput("lines", "رسپی حداقل یک ماده با مقدار مثبت لازم دارد.") }
-        ensure(cmd.lines.map { it.itemId }.distinct().size == cmd.lines.size) { DomainError.InvalidInput("lines", "هر ماده فقط یک‌بار بیاید.") }
-        cmd.lines.forEach { gateway.item(it.itemId) }
+        validateLines(cmd.lines)
         val existing = recipes.versions(cmd.menuItemId)
         ensure(existing.none { it.effectiveFrom >= cmd.effectiveFrom }) { DomainError.InvalidState("RECIPE", "NOT_AFTER_LATEST_VERSION") }
         val version = RecipeVersion(GlobalId.new(), cmd.menuItemId, (existing.maxOfOrNull { it.version } ?: 0) + 1, cmd.effectiveFrom, cmd.lines)
@@ -268,6 +385,7 @@ class InventoryOperations(
         const val WASTE = "INVENTORY_WASTE"
         const val COUNT = "INVENTORY_COUNT"
         const val TRANSFER = "INVENTORY_TRANSFER"
+        const val PRODUCTION = "INVENTORY_PRODUCTION"
     }
 }
 
@@ -277,8 +395,18 @@ class RecipeBook(private val recipes: RecipeStore) {
         recipes.versions(menuItemId).filter { it.effectiveFrom <= date }.maxByOrNull { it.effectiveFrom }
             ?: throw DomainException(DomainError.InvalidState("RECIPE", "NO_VERSION_ON_DATE"))
 
+    /** Stock taken for [portions] of a menu item, including each ingredient's preparation loss (yield). */
     fun requirements(menuItemId: GlobalId, date: BusinessDate, portions: Quantity): List<IssueLine> =
-        versionOn(menuItemId, date).lines.map {
-            IssueLine(it.itemId, Quantity.of(ir.sabou.kernel.Ratio.mulDiv(it.quantityPerPortion.micros, portions.micros, Quantity.SCALE)))
-        }
+        versionOn(menuItemId, date).lines.map { IssueLine(it.itemId, it.grossFor(portions)) }
+
+    fun prepOn(itemId: GlobalId, date: BusinessDate): PrepRecipe =
+        recipes.prepVersions(itemId).filter { it.effectiveFrom <= date }.maxByOrNull { it.effectiveFrom }
+            ?: throw DomainException(DomainError.InvalidState("RECIPE", "NO_VERSION_ON_DATE"))
+
+    /** Ingredients for producing [quantity] of a prepared item (its recipe scaled to that output). */
+    fun prepRequirements(itemId: GlobalId, date: BusinessDate, quantity: Quantity): List<IssueLine> {
+        val prep = prepOn(itemId, date)
+        val batches = Quantity.of(ir.sabou.kernel.Ratio.mulDiv(quantity.micros, Quantity.SCALE, prep.outputQuantity.micros))
+        return prep.lines.map { IssueLine(it.itemId, it.grossFor(batches)) }.filter { !it.quantity.isZero }
+    }
 }

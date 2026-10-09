@@ -48,6 +48,9 @@ data class DailySale(
     val revenueJournalId: GlobalId?,
     val cost: Money,
     val consumed: Boolean = false,
+    /** Statistics for reports (average check, covers); no accounting effect. */
+    val guests: Int = 0,
+    val transactions: Int = 0,
 ) {
     val gross: Money get() = Money.sum(lines.map { it.gross })
     val netFood: Money get() = gross - discount

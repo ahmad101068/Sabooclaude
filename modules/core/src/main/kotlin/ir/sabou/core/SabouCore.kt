@@ -110,7 +110,7 @@ class SabouCore private constructor(
     val treasury = TreasuryOperations(bus, treasuryGateway, treasuryCapability, treasuryAccounts)
     internal val inventoryGateway = InventoryGateway(ledger, registry.issue(ModuleId.INVENTORY), items, locations, stock)
     val inventory = InventoryOperations(bus, inventoryGateway, items, locations, recipes)
-    private val recipeBook = RecipeBook(recipes)
+    internal val recipeBook = RecipeBook(recipes)
     val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases)
     val salesOps = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventoryGateway, recipeBook, treasuryGateway, customers, sales)
     /** Stored policies (entered by the owner) plus any supplied by the caller (tests). */
@@ -119,6 +119,7 @@ class SabouCore private constructor(
     val payroll = PayrollOperations(bus, ledger, registry.issue(ModuleId.PAYROLL), treasuryGateway, personnel, payrollStore, policyRegistry)
 
     val overview = Overview(this)
+    val reports = Reports(this)
 
     /**
      * Startup check: the database must continue the anchored history, and the audit chain must verify

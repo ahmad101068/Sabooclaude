@@ -237,6 +237,7 @@ object MeScreens {
         var name by rememberSaveable { mutableStateOf("") }
         var unit by rememberSaveable { mutableStateOf(StockUnit.KILOGRAM) }
         var minimum by rememberSaveable { mutableStateOf<Quantity?>(Quantity.ZERO) }
+        var prepared by rememberSaveable { mutableStateOf(false) }
         val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
@@ -244,15 +245,31 @@ object MeScreens {
             Page {
                 Loaded(data) { list ->
                     if (list.isEmpty()) EmptyState("هنوز کالایی تعریف نشده است.")
-                    list.forEach { i -> SCard { KeyValue(i.name, unitName(i.unit) + if (!i.minimumStock.isZero) " · حداقل ${Fa.quantity(i.minimumStock)}" else "") } }
+                    list.forEach { i ->
+                        SCard(onClick = { nav.go(Route.ItemEdit(i.id)) }) {
+                            KeyValue(i.name + (if (!i.isActive) " (غیرفعال)" else "") + (if (i.prepared) " · تولید داخلی" else ""),
+                                unitName(i.unit) + if (!i.minimumStock.isZero) " · حداقل ${Fa.quantity(i.minimumStock)}" else "")
+                            val extra = listOfNotNull(
+                                i.parLevel.takeIf { !it.isZero }?.let { "سطح مطلوب ${Fa.quantity(it)}" },
+                                i.shelf.takeIf { it.isNotBlank() }?.let { "محل: $it" },
+                                i.allergens.takeIf { it.isNotBlank() }?.let { "آلرژن: $it" },
+                            )
+                            if (extra.isNotEmpty()) Text(extra.joinToString(" · "), style = SabouType.caption, color = Sabou.colors.muted)
+                        }
+                    }
+                    if (list.isNotEmpty()) Text("برای ویرایش سطح مطلوب، محل نگهداری و آلرژن‌ها روی هر کالا بزنید.", style = SabouType.caption, color = Sabou.colors.muted)
                 }
                 FormCard("کالای جدید") {
                     TextInput("نام کالا", name, { name = it })
                     Picker("واحد", units, unit, { unit = it })
                     QuantityInput("حداقل موجودی", unitName(unit), { minimum = it }, blankAs = Quantity.ZERO)
+                    Row(Modifier.clickable { prepared = !prepared }, verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = prepared, onCheckedChange = { prepared = it })
+                        Text("تولید داخلی (سس، خمیر، …) — با رسپی اقلام آماده ساخته می‌شود", style = SabouType.body, color = Sabou.colors.ink)
+                    }
                     action.error?.let { Banner(it) }
                     PrimaryButton("افزودن", {
-                        action.run({ inventory.createItem(CreateItem(id.value, name, unit, minimum ?: Quantity.ZERO)) }) { name = ""; id.value = GlobalId.new() }
+                        action.run({ inventory.createItem(CreateItem(id.value, name, unit, minimum ?: Quantity.ZERO, prepared)) }) { name = ""; prepared = false; id.value = GlobalId.new() }
                     }, enabled = name.trim().length >= 2 && minimum != null, busy = action.busy)
                 }
             }
@@ -283,9 +300,12 @@ object MeScreens {
         }
     }
 
-    private class RecipeRow(item: GlobalId?, qty: Quantity?) {
+    private class RecipeRow(item: GlobalId?, qty: Quantity?, yieldText: String = "") {
         var item by mutableStateOf(item)
         var qty by mutableStateOf(qty)
+        /** Usable share after trimming and cooking, percent; blank = 100. */
+        var yieldText by mutableStateOf(yieldText)
+        val yieldPercent: Int? get() = if (yieldText.isBlank()) 100 else Fa.latinDigits(yieldText).trim().toIntOrNull()?.takeIf { it in 1..100 }
     }
 
     @Composable
@@ -298,7 +318,7 @@ object MeScreens {
         var name by rememberSaveable { mutableStateOf("") }
         var menuItem by rememberSaveable { mutableStateOf<GlobalId?>(null) }
         var from by rememberSaveable { mutableStateOf(session.today) }
-        val rows = ir.sabou.app.ui.rememberRows<RecipeRow>({ listOf(it.item, it.qty) }, { RecipeRow(it[0] as GlobalId?, it[1] as Quantity?) }) { listOf(RecipeRow(null, null)) }
+        val rows = ir.sabou.app.ui.rememberRows<RecipeRow>({ listOf(it.item, it.qty, it.yieldText) }, { RecipeRow(it[0] as GlobalId?, it[1] as Quantity?, it[2] as String) }) { listOf(RecipeRow(null, null)) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
             Header("منو و رسپی", onBack = nav.back)
@@ -311,8 +331,11 @@ object MeScreens {
                             val v = latest[m.id]
                             if (v == null) Text("رسپی ندارد — فروش آن ثبت نهایی نمی‌شود.", style = SabouType.caption, color = Sabou.colors.danger)
                             else Text("نسخه ${Fa.number(v.version.toLong())} از ${Fa.date(v.effectiveFrom)}: " +
-                                v.lines.joinToString("، ") { "${items[it.itemId]?.name ?: ""} ${Fa.quantity(it.quantityPerPortion)}" },
+                                v.lines.joinToString("، ") { "${items[it.itemId]?.name ?: ""} ${Fa.quantity(it.quantityPerPortion)}" + if (it.yieldPercent < 100) " (بازده ${Fa.number(it.yieldPercent.toLong())}٪)" else "" },
                                 style = SabouType.caption, color = Sabou.colors.muted)
+                            val allergens = v?.lines.orEmpty().mapNotNull { items[it.itemId]?.allergens?.takeIf { a -> a.isNotBlank() } }
+                                .flatMap { it.split('،', ',') }.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                            if (allergens.isNotEmpty()) Text("آلرژن: " + allergens.joinToString("، "), style = SabouType.caption, color = Sabou.colors.danger)
                         }
                     }
                     if (session.can(Permission.RECIPE_MANAGE)) {
@@ -323,21 +346,23 @@ object MeScreens {
                                 enabled = name.trim().length >= 2, busy = action.busy)
                         }
                         FormCard("نسخه جدید رسپی") {
-                            Text("مصرف هر پرس. نسخه‌های قبلی تغییر نمی‌کنند؛ فروش هر روز با نسخه معتبر همان روز محاسبه می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
+                            Text("مصرف خالص هر پرس. بازده: درصدی از ماده که پس از پاک‌کردن و پخت می‌ماند؛ مصرف انبار = خالص ÷ بازده. نسخه‌های قبلی تغییر نمی‌کنند.", style = SabouType.caption, color = Sabou.colors.muted)
                             Picker("آیتم منو", menu.map { Choice(it.id, it.name) }, menuItem, { menuItem = it })
                             DateInput("معتبر از", from, { from = it }, session.today)
                             rows.forEach { r ->
                                 key(r) {
                                     Picker("ماده اولیه", items.values.filter { it.isActive }.map { Choice(it.id, it.name, unitName(it.unit)) }, r.item, { r.item = it })
-                                    QuantityInput("مقدار برای یک پرس", r.item?.let { items[it] }?.let { unitName(it.unit) } ?: "", { r.qty = it }, value = r.qty)
+                                    QuantityInput("مقدار خالص برای یک پرس", r.item?.let { items[it] }?.let { unitName(it.unit) } ?: "", { r.qty = it }, value = r.qty)
+                                    TextInput("بازده ٪ (خالی = ۱۰۰)", r.yieldText, { r.yieldText = it }, keyboard = KeyboardType.Number,
+                                        error = if (r.yieldPercent == null) "بین ۱ تا ۱۰۰" else null)
                                     Divider()
                                 }
                             }
                             SecondaryButton("افزودن ماده", { rows.add(RecipeRow(null, null)) })
                             PrimaryButton("انتشار نسخه", {
-                                val lines = rows.map { RecipeLine(it.item!!, it.qty!!) }
+                                val lines = rows.map { RecipeLine(it.item!!, it.qty!!, it.yieldPercent!!) }
                                 action.run({ inventory.publishRecipe(PublishRecipe(GlobalId.new(), menuItem!!, from, lines)) }) { rows.clear(); rows.add(RecipeRow(null, null)) }
-                            }, enabled = menuItem != null && rows.all { it.item != null && it.qty != null && !it.qty!!.isZero }, busy = action.busy)
+                            }, enabled = menuItem != null && rows.all { it.item != null && it.qty != null && !it.qty!!.isZero && it.yieldPercent != null }, busy = action.busy)
                         }
                     }
                 }

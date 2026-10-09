@@ -81,6 +81,19 @@ class SqlJournalStore(db: SqlDatabase) : SqlTable(db), JournalStore {
     override fun bySource(type: String, id: GlobalId) = entries("WHERE source_type = ? AND source_id = ? ORDER BY number", type, id.value)
     override fun all() = entries("ORDER BY number")
 
+    override fun dailyTotals(from: BusinessDate, to: BusinessDate) = db.query(
+        "SELECT account, scope, date, SUM(debit) AS d, SUM(credit) AS c FROM journal_lines WHERE date BETWEEN ? AND ? GROUP BY account, scope, date",
+        from.epochDay, to.epochDay,
+    ).map { ir.sabou.ledger.DailyAccountTotal(AccountCode.of(it.str("account")), Codec.scopeOf(it.str("scope")), Codec.date(it.long("date")), it.long("d"), it.long("c")) }
+
+    override fun entriesTouching(account: AccountCode, scope: Scope?, from: BusinessDate, to: BusinessDate): List<JournalEntry> {
+        val s = scope?.let(Codec::scope)
+        return entries(
+            "WHERE id IN (SELECT entry_id FROM journal_lines WHERE account = ? AND date BETWEEN ? AND ? AND (? IS NULL OR scope = ?)) ORDER BY date, number",
+            account.value, from.epochDay, to.epochDay, s, s,
+        )
+    }
+
     /** Computed in SQL; SQLite raises on integer overflow instead of wrapping. */
     override fun netDebit(account: AccountCode, scope: Scope?, upTo: BusinessDate?): Long {
         val s = scope?.let(Codec::scope)
