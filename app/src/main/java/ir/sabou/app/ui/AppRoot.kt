@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
@@ -69,6 +70,18 @@ fun AppRoot(container: AppContainer, ui: UiState) {
     val state by container.state.collectAsState()
     val rootScope = rememberCoroutineScope()
     LaunchedEffect(Unit) { withContext(Dispatchers.IO) { container.ensureOpen() } }
+
+    // Leaving the app always asks first. Screens deeper in the tree register their own (higher-priority)
+    // back handlers, so this one only runs at the root: the Home tab, sign-in, setup or recovery.
+    val activity = LocalContext.current as? android.app.Activity
+    var confirmExit by remember { mutableStateOf(false) }
+    BackHandler { confirmExit = true }
+    if (confirmExit) {
+        Confirm(
+            title = "خروج از برنامه", text = "از سابو خارج می‌شوید؟", confirm = "خروج",
+            onConfirm = { activity?.finish() }, onDismiss = { confirmExit = false },
+        )
+    }
 
     Box(Modifier.fillMaxSize().background(Sabou.colors.ground).safeDrawingPadding().imePadding()) {
         when (val s = state) {
@@ -269,7 +282,8 @@ private val tabs = listOf(
 
 @Composable
 private fun Shell(ui: UiState, session: AppSession) {
-    BackHandler(enabled = ui.stack.size > 1) { ui.back() }
+    // Back walks the page stack, then returns to the Home tab; only on Home does it reach the exit prompt.
+    BackHandler(enabled = ui.stack.size > 1 || ui.stack.first() != Route.Home) { if (!ui.back()) ui.go(Route.Home) }
     val route = ui.current
     val nav = Nav(go = ui::go, back = { ui.back() })
     CompositionLocalProvider(LocalSession provides session) {

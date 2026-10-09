@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -335,13 +337,23 @@ fun QuantityInput(
         error = if (text.isNotBlank() && Fa.parseQuantity(text) == null) "مقدار معتبر نیست" else null)
 }
 
-/** Jalali date field with quick choices. */
+/** Jalali date field: opens a month calendar; quick choices for today and yesterday. */
 @Composable
 fun DateInput(label: String, date: BusinessDate, onChange: (BusinessDate) -> Unit, today: BusinessDate) {
-    var text by remember(date) { mutableStateOf(Fa.date(date)) }
+    var open by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        TextInput(label, text, { t -> text = t; Fa.parseDate(t)?.let(onChange) }, keyboard = KeyboardType.Number,
-            error = if (Fa.parseDate(text) == null) "تاریخ را مثل ۱۴۰۵/۰۷/۱۶ وارد کنید" else null)
+        Text(label, style = SabouType.caption.copy(fontSize = SabouType.body.fontSize * 0.93f), color = Sabou.colors.muted)
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(SabouShapes.field).background(Sabou.colors.field)
+                .border(1.dp, Sabou.colors.borderStrong, SabouShapes.field).clickable(role = Role.Button, onClickLabel = "انتخاب تاریخ") { open = true }
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(Fa.date(date), style = SabouType.bodyStrong, color = Sabou.colors.ink)
+            Spacer(Modifier.width(10.dp))
+            Text(Fa.weekday(date), style = SabouType.caption, color = Sabou.colors.muted, modifier = Modifier.weight(1f))
+            Icon(painterResource(R.drawable.ic_calendar), contentDescription = "تقویم", tint = Sabou.colors.primary, modifier = Modifier.size(20.dp))
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("امروز" to today, "دیروز" to today.plusDays(-1)).forEach { (name, d) ->
                 Box(Modifier.clip(SabouShapes.chip).background(if (d == date) Sabou.colors.primarySoft else Sabou.colors.track).clickable { onChange(d) }
@@ -349,9 +361,92 @@ fun DateInput(label: String, date: BusinessDate, onChange: (BusinessDate) -> Uni
                     Text(name, style = SabouType.label, color = if (d == date) Sabou.colors.primary else Sabou.colors.muted)
                 }
             }
-            Spacer(Modifier.width(4.dp))
-            Text(Fa.dayTitle(date), style = SabouType.caption, color = Sabou.colors.muted, modifier = Modifier.align(Alignment.CenterVertically))
         }
+    }
+    if (open) JalaliCalendarDialog(date, today, onPick = { onChange(it); open = false }, onDismiss = { open = false })
+}
+
+private val weekdayInitials = listOf("ش", "ی", "د", "س", "چ", "پ", "ج")
+
+/** A Persian month view (weeks start on Saturday); arrows move by month, the title row by year. */
+@Composable
+fun JalaliCalendarDialog(selected: BusinessDate, today: BusinessDate, onPick: (BusinessDate) -> Unit, onDismiss: () -> Unit) {
+    val start = Fa.jalali(selected)
+    var year by remember { mutableStateOf(start.year) }
+    var month by remember { mutableStateOf(start.month) }
+    fun shift(months: Int) {
+        val index = year * 12 + (month - 1) + months
+        year = Math.floorDiv(index, 12); month = Math.floorMod(index, 12) + 1
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = { onPick(today) }) { Text("امروز", style = SabouType.bodyStrong, color = Sabou.colors.primary) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("انصراف", style = SabouType.bodyStrong, color = Sabou.colors.muted) } },
+        containerColor = Sabou.colors.surface,
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Year row
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    CalendarArrow(R.drawable.ic_chevron_right, "سال قبل") { shift(-12) }
+                    Text(Fa.digits(year.toString()), style = SabouType.label, color = Sabou.colors.muted,
+                        modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    CalendarArrow(R.drawable.ic_chevron_left, "سال بعد") { shift(12) }
+                }
+                // Month row
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    CalendarArrow(R.drawable.ic_chevron_right, "ماه قبل") { shift(-1) }
+                    Text(Fa.monthNames[month - 1], style = SabouType.section, color = Sabou.colors.ink,
+                        modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    CalendarArrow(R.drawable.ic_chevron_left, "ماه بعد") { shift(1) }
+                }
+                Row(Modifier.fillMaxWidth()) {
+                    weekdayInitials.forEach {
+                        Text(it, style = SabouType.caption, color = Sabou.colors.muted, modifier = Modifier.weight(1f),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    }
+                }
+                val first = Fa.fromJalali(year, month, 1)
+                val offset = Fa.weekdayIndex(first)          // 0 = Saturday
+                val days = Fa.monthLength(year, month)
+                val cells = ((offset + days + 6) / 7) * 7
+                (0 until cells step 7).forEach { rowStart ->
+                    Row(Modifier.fillMaxWidth()) {
+                        (rowStart until rowStart + 7).forEach { cell ->
+                            val day = cell - offset + 1
+                            Box(Modifier.weight(1f).aspectRatio(1f).padding(2.dp), contentAlignment = Alignment.Center) {
+                                if (day in 1..days) {
+                                    val d = first.plusDays((day - 1).toLong())
+                                    val isSelected = d == selected
+                                    val isToday = d == today
+                                    Box(
+                                        Modifier.fillMaxSize().clip(androidx.compose.foundation.shape.CircleShape)
+                                            .background(if (isSelected) Sabou.colors.primary else Color.Transparent)
+                                            .then(if (isToday && !isSelected) Modifier.border(1.dp, Sabou.colors.primary, androidx.compose.foundation.shape.CircleShape) else Modifier)
+                                            .clickable(role = Role.Button) { onPick(d) },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(Fa.digits(day.toString()), style = SabouType.bodyStrong,
+                                            color = when {
+                                                isSelected -> Sabou.colors.surface
+                                                cell % 7 == 6 -> Sabou.colors.danger   // Friday
+                                                else -> Sabou.colors.ink
+                                            })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun CalendarArrow(@DrawableRes icon: Int, description: String, onClick: () -> Unit) {
+    Box(Modifier.size(40.dp).clip(androidx.compose.foundation.shape.CircleShape).clickable(role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center) {
+        Icon(painterResource(icon), contentDescription = description, tint = Sabou.colors.ink, modifier = Modifier.size(20.dp))
     }
 }
 

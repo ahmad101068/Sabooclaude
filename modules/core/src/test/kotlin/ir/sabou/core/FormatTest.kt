@@ -63,4 +63,17 @@ class FormatTest {
             Messages.of(ir.sabou.kernel.DomainError.InsufficientFunds("x", 10_000, 20_000)))
         assertTrue(Messages.of(IllegalStateException("boom")).startsWith("عملیات انجام نشد"))
     }
+
+    @Test fun calendarWeekStartsOnSaturday() {
+        // 1405/01/01 = 2026-03-21, a Saturday; 1403/01/01 = 2024-03-20, a Wednesday.
+        assertEquals(0, Fa.weekdayIndex(Fa.fromJalali(1405, 1, 1)))
+        assertEquals(4, Fa.weekdayIndex(Fa.fromJalali(1403, 1, 1)))
+        assertEquals(6, Fa.weekdayIndex(day(2026, 10, 9)))   // Friday
+        // Every day of every month the calendar draws exists and is consecutive.
+        for (y in 1400..1410) for (m in 1..12) {
+            val first = Fa.fromJalali(y, m, 1)
+            val next = if (m == 12) Fa.fromJalali(y + 1, 1, 1) else Fa.fromJalali(y, m + 1, 1)
+            assertEquals(Fa.monthLength(y, m).toLong(), next.epochDay - first.epochDay)
+        }
+    }
 }
