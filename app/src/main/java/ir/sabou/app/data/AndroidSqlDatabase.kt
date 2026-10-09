@@ -25,6 +25,7 @@ class AndroidSqlDatabase(private val db: SupportSQLiteDatabase) : SqlDatabase {
                     null -> st.bindNull(i + 1)
                     is String -> st.bindString(i + 1, a)
                     is Long -> st.bindLong(i + 1, a)
+                    is ByteArray -> st.bindBlob(i + 1, a)
                     else -> error("sql_arg_unsupported")
                 }
             }
@@ -42,6 +43,7 @@ class AndroidSqlDatabase(private val db: SupportSQLiteDatabase) : SqlDatabase {
                         Cursor.FIELD_TYPE_NULL -> null
                         Cursor.FIELD_TYPE_INTEGER -> c.getLong(i)
                         Cursor.FIELD_TYPE_STRING -> c.getString(i)
+                        Cursor.FIELD_TYPE_BLOB -> c.getBlob(i)
                         else -> error("sql_column_type_unsupported:${c.getColumnName(i)}")
                     }
                 }

@@ -78,15 +78,6 @@ import ir.sabou.payroll.RemitLiability
 import ir.sabou.payroll.ReversePayroll
 import ir.sabou.payroll.RunStatus
 import ir.sabou.platform.Permission
-import ir.sabou.purchasing.ImmediatePayment
-import ir.sabou.purchasing.InvoiceLine
-import ir.sabou.purchasing.InvoiceStatus
-import ir.sabou.purchasing.PaySupplierInvoice
-import ir.sabou.purchasing.PostPurchaseInvoice
-import ir.sabou.purchasing.RegisterSupplier
-import ir.sabou.purchasing.ReturnToSupplier
-import ir.sabou.purchasing.ReversePurchaseInvoice
-import ir.sabou.purchasing.ReverseSupplierPayment
 
 object OperationsScreens {
 
@@ -94,7 +85,7 @@ object OperationsScreens {
 
     /** Who sees which group: the hub only lists what the role may open (AUD-012). */
     private val inventoryPerms = listOf(Permission.INVENTORY_VIEW, Permission.INVENTORY_COUNT, Permission.INVENTORY_WASTE, Permission.INVENTORY_TRANSFER, Permission.RECIPE_MANAGE, Permission.INVENTORY_PRODUCE)
-    private val purchasePerms = listOf(Permission.PURCHASE_VIEW, Permission.SUPPLIER_MANAGE)
+    private val purchasePerms = listOf(Permission.PURCHASE_VIEW, Permission.SUPPLIER_MANAGE, Permission.PURCHASE_ORDER)
     private val personnelPerms = listOf(Permission.PERSONNEL_VIEW, Permission.PERSONNEL_MANAGE, Permission.ATTENDANCE_RECORD, Permission.PAYROLL_CALCULATE, Permission.PAYROLL_APPROVE, Permission.PAYROLL_PAY)
     val allPerms = inventoryPerms + purchasePerms + personnelPerms
 
@@ -121,6 +112,7 @@ object OperationsScreens {
                 if (session.can(Permission.INVENTORY_PRODUCE)) item { NavRow(R.drawable.ic_recipe, "تولید اقلام آماده", "مواد از انبار کم و قلم آماده اضافه می‌شود", onClick = { nav.go(Route.Production) }) }
                 if (any(purchasePerms)) item { SectionTitle("خرید") }
                 if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "خرید و دریافت کالا", payable?.let { "بدهی ${Fa.tomanShort(it.rial)}" }, tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Purchases) }) }
+                if (session.can(Permission.PURCHASE_ORDER) || session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "سفارش خرید", "پیشنهاد خرید، سفارش و تحویل", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Orders) }) }
                 if (any(purchasePerms)) item { NavRow(R.drawable.ic_supplier, "تأمین‌کنندگان", "فهرست و مانده حساب", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Suppliers) }) }
                 if (any(personnelPerms)) item { SectionTitle("پرسنل") }
                 if (session.can(Permission.PERSONNEL_VIEW) || session.can(Permission.PERSONNEL_MANAGE)) item { NavRow(R.drawable.ic_person, "کارکنان", "ثبت و مشخصات", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Personnel) }) }
@@ -216,6 +208,8 @@ object OperationsScreens {
     private val wasteReasons = listOf(
         Choice(WasteReason.SPOILAGE, "فساد"), Choice(WasteReason.EXPIRED, "تاریخ گذشته"), Choice(WasteReason.PREPARATION, "ضایعات آماده‌سازی"),
         Choice(WasteReason.DAMAGE, "آسیب‌دیدگی"), Choice(WasteReason.OTHER, "سایر (با توضیح)"),
+        Choice(WasteReason.COMPLIMENTARY, "پذیرایی مهمان", "جدا از ضایعات"), Choice(WasteReason.STAFF_MEAL, "غذای پرسنل", "جدا از ضایعات"),
+        Choice(WasteReason.DONATION, "اهدایی", "جدا از ضایعات"),
     )
 
     @Composable
@@ -349,257 +343,6 @@ object OperationsScreens {
 
     @Composable
     fun Recipes(nav: Nav) = MeScreens.Menu(nav)
-
-    // ------------------------------------------------------------ Purchasing
-
-    @Composable
-    fun Purchases(nav: Nav) {
-        val session = LocalSession.current
-        val data by load(session) { overview.invoices() }
-        Column(Modifier.fillMaxSize()) {
-            Header("خرید و دریافت کالا", onBack = nav.back)
-            Page {
-                if (session.can(Permission.PURCHASE_RECORD)) PrimaryButton("ثبت فاکتور خرید", { nav.go(Route.NewPurchase) })
-                Loaded(data) { list ->
-                    SCard { KeyValue("جمع بدهی (تومان)", Fa.toman(Money.sum(list.filter { it.invoice.status == InvoiceStatus.POSTED }.map { it.outstanding })), strong = true) }
-                    if (list.isEmpty()) EmptyState("هنوز فاکتوری ثبت نشده است.")
-                    list.forEach { (inv, supplier, outstanding) ->
-                        val sub = "${Fa.digits(inv.supplierInvoiceNo)} · ${Fa.date(inv.date)}" +
-                            if (inv.status == InvoiceStatus.REVERSED) " · برگشت‌خورده" else if (outstanding.isZero) " · تسویه" else " · سررسید ${Fa.date(inv.dueDate)}"
-                        NavRow(R.drawable.ic_purchase, supplier, sub, Fa.tomanShort(outstanding.rial), tint = Sabou.colors.onAccentSoft,
-                            tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.PurchaseDetail(inv.id)) })
-                    }
-                }
-                ExportButtons("فاکتورهای-خرید") { listOf(ReportTables.invoices(overview.invoices())) }
-            }
-        }
-    }
-
-    private class LineDraft(item: GlobalId?, qty: Quantity?, value: Money?) {
-        var item by mutableStateOf(item)
-        var qty by mutableStateOf(qty)
-        var value by mutableStateOf(value)
-    }
-
-    @Composable
-    fun NewPurchase(nav: Nav) {
-        val session = LocalSession.current
-        Column(Modifier.fillMaxSize()) {
-            Header("فاکتور خرید", "دریافت کالا به انبار", onBack = nav.back)
-            WithBranch { branch ->
-                val data by load(session, branch) {
-                    // A storekeeper records invoices but may not pay: payment accounts load only with PURCHASE_PAY.
-                    Triple(overview.suppliers().map { it.supplier }.filter { it.isActive },
-                        InvData(overview.items().filter { it.isActive }, overview.locations(branch).filter { it.isActive }),
-                        if (session.can(Permission.PURCHASE_PAY)) overview.paymentAccounts(branch) else emptyList())
-                }
-                var supplier by rememberSaveable { mutableStateOf<GlobalId?>(null) }
-                var number by rememberSaveable { mutableStateOf("") }
-                var locationId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
-                var date by rememberSaveable { mutableStateOf(session.today) }
-                var due by rememberSaveable { mutableStateOf(session.today.plusDays(30)) }
-                val lines = ir.sabou.app.ui.rememberRows<LineDraft>({ listOf(it.item, it.qty, it.value) },
-                    { LineDraft(it[0] as GlobalId?, it[1] as Quantity?, it[2] as Money?) }) { listOf(LineDraft(null, null, null)) }
-                var payNow by rememberSaveable { mutableStateOf(false) }
-                var payAccount by rememberSaveable { mutableStateOf<GlobalId?>(null) }
-                var payAmount by rememberSaveable { mutableStateOf<Money?>(null) }
-                val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
-                val action = rememberAction()
-                Page {
-                    Loaded(data) { (sups, inv, accounts) ->
-                        val loc = locationId ?: inv.locations.firstOrNull()?.id
-                        FormCard {
-                            PickerOrHint("تأمین‌کننده", sups.map { Choice(it.id, it.name, it.phone) }, supplier, { supplier = it }, "تأمین‌کننده‌ای تعریف نشده است؛ مدیر یا مالک باید آن را تعریف کند.")
-                            if (sups.isEmpty() && session.can(Permission.SUPPLIER_MANAGE)) SecondaryButton("تعریف تأمین‌کننده", { nav.go(Route.Suppliers) })
-                            TextInput("شماره فاکتور تأمین‌کننده", number, { number = it })
-                            if (inv.locations.size > 1) Picker("انبار دریافت", inv.locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
-                            DateInput("تاریخ فاکتور", date, { date = it }, session.today)
-                            DateInput("سررسید", due, { due = it }, session.today)
-                        }
-                        FormCard("اقلام") {
-                            lines.forEachIndexed { i, l ->
-                                key(l) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text("ردیف ${Fa.number(i + 1L)}", style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
-                                            if (lines.size > 1) Text("حذف", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable { lines.remove(l) }.padding(6.dp))
-                                        }
-                                        Picker("کالا", inv.items.map { Choice(it.id, it.name, unitName(it.unit)) }, l.item, { l.item = it })
-                                        QuantityInput("مقدار", inv.items.firstOrNull { it.id == l.item }?.let { unitName(it.unit) } ?: "", { l.qty = it }, value = l.qty)
-                                        MoneyInput("مبلغ کل ردیف", l.value, { l.value = it })
-                                        Divider()
-                                    }
-                                }
-                            }
-                            SecondaryButton("افزودن ردیف", { lines.add(LineDraft(null, null, null)) })
-                            val total = lines.sumOf { it.value?.rial ?: 0 }
-                            KeyValue("جمع فاکتور (تومان)", Fa.toman(total), strong = true)
-                        }
-                        if (session.can(Permission.PURCHASE_PAY)) FormCard {
-                            Row(Modifier.clickable { payNow = !payNow }, verticalAlignment = Alignment.CenterVertically) {
-                                androidx.compose.material3.Checkbox(checked = payNow, onCheckedChange = { payNow = it })
-                                Text("همین الان پرداخت می‌کنم", style = SabouType.bodyStrong, color = Sabou.colors.ink)
-                            }
-                            if (payNow) {
-                                Picker("از حساب", accountChoices(accounts), payAccount, { payAccount = it })
-                                MoneyInput("مبلغ پرداخت", payAmount, { payAmount = it })
-                            }
-                        }
-                        action.error?.let { Banner(it) }
-                        val ready = supplier != null && number.isNotBlank() && loc != null &&
-                            lines.all { it.item != null && it.qty != null && it.value != null } && (!payNow || (payAccount != null && payAmount != null))
-                        PrimaryButton("ثبت فاکتور", {
-                            val invoiceLines = lines.map { InvoiceLine(it.item!!, it.qty!!, it.value!!) }
-                            val pay = if (payNow) ImmediatePayment(payAccount!!, payAmount!!) else null
-                            action.run({ purchasing.postInvoice(PostPurchaseInvoice(id.value, branch, supplier!!, number, loc!!, date, due, invoiceLines, pay)) }) { nav.back() }
-                        }, enabled = ready, busy = action.busy)
-                    }
-                }
-            }
-        }
-    }
-
-    private class PurchaseView(
-        val invoice: ir.sabou.purchasing.PurchaseInvoice,
-        val supplier: String,
-        val outstanding: Money,
-        val payments: List<ir.sabou.purchasing.SupplierPayment>,
-        val items: Map<GlobalId, Item>,
-        val accounts: List<ir.sabou.treasury.TreasuryAccount>,
-    )
-
-    @Composable
-    fun PurchaseDetail(nav: Nav, invoiceId: GlobalId) {
-        val session = LocalSession.current
-        val data by load(session, invoiceId) {
-            val v = overview.invoice(invoiceId)
-            PurchaseView(
-                invoice = v.invoice,
-                supplier = v.supplier,
-                outstanding = v.outstanding,
-                payments = v.payments,
-                items = overview.items().associateBy { it.id },
-                accounts = if (session.can(Permission.PURCHASE_PAY)) overview.paymentAccounts() else emptyList(),
-            )
-        }
-        var payAccount by rememberSaveable { mutableStateOf<GlobalId?>(null) }
-        var payAmount by rememberSaveable { mutableStateOf<Money?>(null) }
-        var reason by rememberSaveable { mutableStateOf("") }
-        var confirmReverse by remember { mutableStateOf(false) }
-        var pending by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }   // holds an action: not saveable
-        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
-        val action = rememberAction()
-        pending?.let { (title, act) -> Confirm(title, "سند برگشتی ثبت می‌شود و سابقه حذف نمی‌شود.", "برگشت بزن", act, { pending = null }, danger = true) }
-        Column(Modifier.fillMaxSize()) {
-            Header("فاکتور خرید", onBack = nav.back)
-            Page {
-                Loaded(data) { d ->
-                    val inv = d.invoice
-                    SCard {
-                        Text(d.supplier, style = SabouType.section, color = Sabou.colors.ink)
-                        KeyValue("شماره", Fa.digits(inv.supplierInvoiceNo))
-                        KeyValue("تاریخ / سررسید", "${Fa.date(inv.date)} / ${Fa.date(inv.dueDate)}")
-                        Divider()
-                        inv.lines.forEach { l -> KeyValue("${d.items[l.itemId]?.name ?: ""} × ${Fa.quantity(l.quantity)}", Fa.toman(l.value)) }
-                        Divider()
-                        KeyValue("جمع فاکتور", Fa.toman(inv.total))
-                        KeyValue("مانده (تومان)", Fa.toman(d.outstanding), strong = true)
-                        if (inv.status == InvoiceStatus.REVERSED) Chip("برگشت‌خورده", ChipKind.DANGER)
-                    }
-                    if (d.payments.isNotEmpty()) SCard {
-                        Text("پرداخت‌ها", style = SabouType.section, color = Sabou.colors.ink)
-                        d.payments.forEach { p ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("${Fa.date(p.date)} · ${d.accounts.firstOrNull { it.id == p.treasuryAccountId }?.name ?: ""}" + if (p.reversed) " · برگشت‌خورده" else "",
-                                    style = SabouType.body, color = Sabou.colors.muted, modifier = Modifier.weight(1f))
-                                Text(Fa.toman(p.amount), style = SabouType.bodyStrong, color = Sabou.colors.moneyOut)
-                                if (!p.reversed && session.can(Permission.PURCHASE_REVERSE)) {
-                                    Text("برگشت", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable {
-                                        pending = "برگشت این پرداخت؟" to {
-                                            action.run({ purchasing.reversePayment(ReverseSupplierPayment(GlobalId.new(), inv.scope, p.id, session.today, "اصلاح پرداخت")) })
-                                        }
-                                    }.padding(start = 10.dp))
-                                }
-                            }
-                        }
-                    }
-                    action.error?.let { Banner(it) }
-                    if (inv.status == InvoiceStatus.POSTED && !d.outstanding.isZero && session.can(Permission.PURCHASE_PAY)) {
-                        FormCard("پرداخت به تأمین‌کننده") {
-                            Picker("از حساب", accountChoices(d.accounts), payAccount, { payAccount = it })
-                            MoneyInput("مبلغ", payAmount, { payAmount = it }, hint = "مانده: ${Fa.toman(d.outstanding)} تومان")
-                            PrimaryButton("ثبت پرداخت", {
-                                action.run({ purchasing.payInvoice(PaySupplierInvoice(id.value, inv.scope, inv.id, payAccount!!, payAmount!!, session.today)) }) {
-                                    id.value = GlobalId.new(); payAmount = null
-                                }
-                            }, enabled = payAccount != null && payAmount != null, busy = action.busy)
-                        }
-                    }
-                    if (inv.status == InvoiceStatus.POSTED && session.can(Permission.PURCHASE_REVERSE)) {
-                        FormCard("مرجوعی یا برگشت فاکتور") {
-                            ReturnForm(inv.scope, inv.id, inv.lines.map { it.itemId }.distinct().map { Choice(it, d.items[it]?.name ?: "") })
-                            Divider()
-                            TextInput("دلیل برگشت کل فاکتور", reason, { reason = it })
-                            SecondaryButton("برگشت کل فاکتور", { confirmReverse = true }, enabled = reason.trim().length >= 3, danger = true)
-                        }
-                    }
-                    if (confirmReverse) {
-                        Confirm("برگشت فاکتور؟", "کالاها از انبار خارج و بدهی تأمین‌کننده خنثی می‌شود. ابتدا پرداخت‌ها و مرجوعی‌ها باید برگشت خورده باشند.", "برگشت بزن",
-                            onConfirm = { action.run({ purchasing.reverseInvoice(ReversePurchaseInvoice(GlobalId.new(), inv.scope, inv.id, session.today, reason)) }) { nav.back() } },
-                            onDismiss = { confirmReverse = false }, danger = true)
-                    }
-                }
-            }
-        }
-    }
-
-    @Composable
-    private fun ReturnForm(scope: Scope.Branch, invoiceId: GlobalId, items: List<Choice<GlobalId>>) {
-        val session = LocalSession.current
-        var itemId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
-        var qty by rememberSaveable { mutableStateOf<Quantity?>(null) }
-        var reason by rememberSaveable { mutableStateOf("") }
-        val action = rememberAction()
-        Picker("کالای مرجوعی", items, itemId, { itemId = it })
-        QuantityInput("مقدار مرجوعی", "", { qty = it })
-        TextInput("دلیل مرجوعی", reason, { reason = it })
-        action.error?.let { Banner(it) }
-        SecondaryButton("ثبت مرجوعی (به قیمت فاکتور)", {
-            action.run({ purchasing.returnGoods(ReturnToSupplier(GlobalId.new(), scope, invoiceId, listOf(IssueLine(itemId!!, qty!!)), session.today, reason)) })
-        }, enabled = itemId != null && qty != null && reason.isNotBlank() && !action.busy)
-    }
-
-    @Composable
-    fun Suppliers(nav: Nav) {
-        val session = LocalSession.current
-        val data by load(session) { overview.suppliers().map { it.supplier to it.owed } }
-        var name by rememberSaveable { mutableStateOf("") }
-        var phone by rememberSaveable { mutableStateOf("") }
-        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
-        val action = rememberAction()
-        Column(Modifier.fillMaxSize()) {
-            Header("تأمین‌کنندگان", onBack = nav.back)
-            Page {
-                Loaded(data) { list ->
-                    if (list.isEmpty()) EmptyState("هنوز تأمین‌کننده‌ای ثبت نشده است.")
-                    list.forEach { (s, balance) ->
-                        SCard { KeyValue(s.name + if (s.phone.isNotBlank()) " · ${Fa.digits(s.phone)}" else "", "بدهی ${Fa.toman(balance)}") }
-                    }
-                    if (list.isNotEmpty() && session.can(Permission.PURCHASE_VIEW)) ExportButtons("تامین-کنندگان") { listOf(ReportTables.suppliers(overview.suppliers())) }
-                }
-                if (session.can(Permission.SUPPLIER_MANAGE)) {
-                    FormCard("تأمین‌کننده جدید") {
-                        TextInput("نام", name, { name = it })
-                        TextInput("تلفن", phone, { phone = it }, keyboard = KeyboardType.Phone)
-                        action.error?.let { Banner(it) }
-                        PrimaryButton("ثبت", {
-                            action.run({ purchasing.registerSupplier(RegisterSupplier(id.value, name, phone)) }) { name = ""; phone = ""; id.value = GlobalId.new() }
-                        }, enabled = name.trim().length >= 2, busy = action.busy)
-                    }
-                }
-            }
-        }
-    }
 
     // ------------------------------------------------------------ Personnel and payroll
 

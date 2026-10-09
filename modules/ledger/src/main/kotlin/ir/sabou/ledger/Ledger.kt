@@ -20,6 +20,8 @@ class Ledger(
     private val journals: JournalStore,
     private val periods: PeriodStore,
 ) {
+    fun account(code: AccountCode): Account? = accounts.byCode(code)
+
     fun post(context: CommandContext, owner: PostingCapability, draft: JournalDraft): JournalEntry {
         requireOwner(context, owner)
         ensure(draft.description.isNotBlank() && draft.description.length <= 300) { DomainError.InvalidInput("description", "شرح سند الزامی است.") }

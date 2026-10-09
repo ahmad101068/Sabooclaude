@@ -85,6 +85,36 @@ object Schema {
                 }
             },
         ),
+        Migration(
+            3,
+            listOf(
+                // Photos and PDFs of documents, inside the encrypted database (so backups carry them).
+                "CREATE TABLE attachments (id TEXT PRIMARY KEY, owner_type TEXT NOT NULL, owner_id TEXT NOT NULL, file_name TEXT NOT NULL, mime TEXT NOT NULL, " +
+                    "sha256 TEXT NOT NULL, size INTEGER NOT NULL, recorded_at INTEGER NOT NULL, bytes BLOB NOT NULL)",
+                "CREATE INDEX attachments_owner ON attachments(owner_type, owner_id)",
+                // What each supplier calls our items.
+                "CREATE TABLE supplier_item_aliases (supplier_id TEXT NOT NULL REFERENCES suppliers(id), name TEXT NOT NULL, item_id TEXT NOT NULL REFERENCES items(id), PRIMARY KEY (supplier_id, name))",
+                // Return credit set against invoices.
+                "CREATE TABLE credit_allocations (id TEXT PRIMARY KEY, supplier_id TEXT NOT NULL, scope TEXT NOT NULL, invoice_id TEXT NOT NULL REFERENCES purchase_invoices(id), doc TEXT NOT NULL)",
+                "CREATE INDEX credit_allocations_invoice ON credit_allocations(invoice_id)",
+                "CREATE INDEX credit_allocations_supplier ON credit_allocations(supplier_id, scope)",
+                "CREATE TABLE purchase_orders (id TEXT PRIMARY KEY, number INTEGER NOT NULL UNIQUE, doc TEXT NOT NULL)",
+            ) + immutable("attachments"),
+            backfill = { db ->
+                // Before v3 a return's credit always settled its own invoice: record that as an allocation.
+                db.query("SELECT r.id AS id, r.doc AS doc, i.doc AS invoice FROM purchase_returns r JOIN purchase_invoices i ON i.id = r.invoice_id ORDER BY r.rowid").forEach { row ->
+                    val ret = Doc.parse(row.str("doc")); val inv = Doc.parse(row.str("invoice"))
+                    if (ret.long("credit") <= 0) return@forEach
+                    val id = ir.sabou.kernel.GlobalId.new().value
+                    db.execute(
+                        "INSERT INTO credit_allocations (id, supplier_id, scope, invoice_id, doc) VALUES (?, ?, ?, ?, ?)",
+                        id, inv.str("supplier"), inv.str("scope"), inv.str("id"),
+                        Json.encode(mapOf("id" to id, "supplier" to inv.str("supplier"), "scope" to inv.str("scope"), "invoice" to inv.str("id"),
+                            "amount" to ret.long("credit"), "date" to ret.long("date"), "return" to row.str("id"), "released" to false)),
+                    )
+                }
+            },
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

@@ -46,7 +46,17 @@ sealed interface Route : java.io.Serializable {
     data object Purchases : Route
     data object NewPurchase : Route
     data class PurchaseDetail(val invoiceId: GlobalId) : Route
+    /** The invoice form filled from an order that has just been delivered. */
+    data class PurchaseFromOrder(val orderId: GlobalId) : Route
     data object Suppliers : Route
+    data class SupplierEdit(val supplierId: GlobalId) : Route
+    data object Orders : Route
+    /** A new order, optionally filled from the suggested-purchase list. */
+    data class NewOrder(val supplierId: GlobalId? = null, val locationId: GlobalId? = null, val lines: List<OrderDraftLine> = emptyList()) : Route
+    data class OrderDetail(val orderId: GlobalId) : Route
+    data object ReviewQueue : Route
+    data object PriceChanges : Route
+    data object Suggestions : Route
     data object Personnel : Route
     data object Attendance : Route
     data object Payroll : Route
@@ -63,6 +73,9 @@ sealed interface Route : java.io.Serializable {
     data object Policies : Route
     data object Backup : Route
 }
+
+/** One line of a prefilled order: item, quantity in micro-units, expected price per unit in rial. */
+data class OrderDraftLine(val itemId: GlobalId, val quantity: Long, val unitPrice: Long) : java.io.Serializable
 
 /** Process-wide UI state: the signed-in session and the back stack survive activity re-creation. */
 class UiState {

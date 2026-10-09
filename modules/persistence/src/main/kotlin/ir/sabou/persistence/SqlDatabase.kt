@@ -4,7 +4,7 @@ import ir.sabou.platform.UnitOfWork
 
 /**
  * The smallest SQL surface the stores need. On Android it wraps SQLCipher's
- * SupportSQLiteDatabase; in JVM tests it wraps sqlite-jdbc. Arguments are String, Long, Int or null.
+ * SupportSQLiteDatabase; in JVM tests it wraps sqlite-jdbc. Arguments are String, Long, Int, ByteArray or null.
  */
 interface SqlDatabase {
     fun execute(sql: String, vararg args: Any?)
@@ -22,6 +22,7 @@ class SqlRow(private val values: Map<String, Any?>) {
     fun strOrNull(column: String): String? = values[column] as String?
     fun long(column: String): Long = (values[column] as Number).toLong()
     fun longOrNull(column: String): Long? = (values[column] as Number?)?.toLong()
+    fun bytes(column: String): ByteArray = values[column] as ByteArray
 }
 
 /** One transaction per command; nested calls join it. */

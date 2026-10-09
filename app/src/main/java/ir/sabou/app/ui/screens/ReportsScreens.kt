@@ -346,6 +346,7 @@ object ReportsScreens {
                             KeyValue("مصرف واقعی (تومان)", Fa.toman(u.actualValue), strong = true)
                             KeyValue("مصرف تئوریک (فروش)", Fa.toman(u.theoreticalValue))
                             KeyValue("ضایعات ثبت‌شده", Fa.toman(u.wasteValue))
+                            if (u.compsValue != 0L) KeyValue("پذیرایی، غذای پرسنل و اهدایی", Fa.toman(u.compsValue))
                             KeyValue("اختلاف توضیح‌داده‌نشده", Fa.toman(u.unexplainedValue), if (u.unexplainedValue > 0) Sabou.colors.danger else Sabou.colors.ink)
                             Text("اختلاف توضیح‌داده‌نشده همان کسری انبارگردانی است؛ بدون انبارگردانی در بازه، صفر می‌ماند.", style = SabouType.caption, color = Sabou.colors.muted)
                         }
@@ -359,7 +360,7 @@ object ReportsScreens {
                                     Text("کارایی ${r.efficiencyBp?.let { Fa.percent(it) } ?: "—"}", style = SabouType.bodyStrong,
                                         color = if ((r.efficiencyBp ?: 10_000) < 9_500) Sabou.colors.danger else Sabou.colors.primary)
                                 }
-                                Text("واقعی ${q(r.actual.quantity)} · تئوریک ${q(r.theoretical.quantity)} · ضایعات ${q(r.waste.quantity)} · بی‌توضیح ${q(r.unexplained.quantity)} $unit",
+                                Text("واقعی ${q(r.actual.quantity)} · تئوریک ${q(r.theoretical.quantity)} · ضایعات ${q(r.waste.quantity)}${if (r.comps.quantity != 0L) " · اهدایی ${q(r.comps.quantity)}" else ""} · بی‌توضیح ${q(r.unexplained.quantity)} $unit",
                                     style = SabouType.caption, color = Sabou.colors.muted)
                                 Text("اول ${q(r.opening.quantity)} · خرید ${q(r.purchases.quantity)} · انتقال ${q(r.transfers.quantity)} · تولید ${q(r.production.quantity)} · پایان ${q(r.closing.quantity)}",
                                     style = SabouType.caption, color = Sabou.colors.muted)

@@ -15,6 +15,7 @@ import ir.sabou.payroll.StatutoryPolicyRegistry
 import ir.sabou.persistence.DatabaseMeta
 import ir.sabou.persistence.Schema
 import ir.sabou.persistence.SqlAccountStore
+import ir.sabou.persistence.SqlAttachmentStore
 import ir.sabou.persistence.SqlAuditStore
 import ir.sabou.persistence.SqlBranchStore
 import ir.sabou.persistence.SqlCustomerStore
@@ -45,6 +46,7 @@ import ir.sabou.platform.IntegrityGuard
 import ir.sabou.platform.ModuleId
 import ir.sabou.platform.Session
 import ir.sabou.platform.StartupVerdict
+import ir.sabou.purchasing.OrderOperations
 import ir.sabou.purchasing.PurchasingOperations
 import ir.sabou.sales.SalesOperations
 import ir.sabou.treasury.TreasuryGateway
@@ -84,6 +86,7 @@ class SabouCore private constructor(
     internal val recipes = SqlRecipeStore(db)
     internal val suppliers = SqlSupplierStore(db)
     internal val purchases = SqlPurchaseStore(db)
+    internal val attachments = SqlAttachmentStore(db)
     internal val customers = SqlCustomerStore(db)
     internal val sales = SqlSalesStore(db)
     internal val personnel = SqlPersonnelStore(db)
@@ -111,7 +114,8 @@ class SabouCore private constructor(
     internal val inventoryGateway = InventoryGateway(ledger, registry.issue(ModuleId.INVENTORY), items, locations, stock)
     val inventory = InventoryOperations(bus, inventoryGateway, items, locations, recipes)
     internal val recipeBook = RecipeBook(recipes)
-    val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases)
+    val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases, attachments)
+    val orders = OrderOperations(bus, inventoryGateway, suppliers, purchases)
     val salesOps = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventoryGateway, recipeBook, treasuryGateway, customers, sales)
     /** Stored policies (entered by the owner) plus any supplied by the caller (tests). */
     val payrollPolicies = PolicyAdministration(bus, SqlPolicyStore(db))
@@ -120,6 +124,7 @@ class SabouCore private constructor(
 
     val overview = Overview(this)
     val reports = Reports(this)
+    val buying = Buying(this)
 
     /**
      * Startup check: the database must continue the anchored history, and the audit chain must verify

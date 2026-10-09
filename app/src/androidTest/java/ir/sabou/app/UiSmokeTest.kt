@@ -32,6 +32,7 @@ class UiSmokeTest {
         Route.Branches, Route.Users, Route.Items, Route.Locations, Route.Menu, Route.Accounts, Route.Customers, Route.Policies, Route.Backup,
         Route.Reports, Route.ProfitLoss, Route.DayFlash, Route.ProductMix, Route.Usage, Route.AttendanceReport,
         Route.PrepRecipes, Route.Production,
+        Route.Orders, Route.NewOrder(), Route.ReviewQueue, Route.PriceChanges, Route.Suggestions,
     )
 
     @Test fun everyPageOpensAndItsDraftCanBeSaved() {
@@ -46,7 +47,21 @@ class UiSmokeTest {
         core.inventory.createItem(CreateItem(itemId, "پیاز", StockUnit.KILOGRAM, Quantity.ZERO))
         core.inventory.createItem(CreateItem(GlobalId.new(), "سس مخصوص", StockUnit.KILOGRAM, Quantity.ZERO, prepared = true))
         val today = java.time.LocalDate.now().toEpochDay()
-        val allPages = pages + listOf(Route.ItemEdit(itemId), Route.LedgerDetail("4101", today - 30, today, null))
+        // Purchasing documents so the detail pages have something to show.
+        val scope = ir.sabou.kernel.Scope.Branch(branch)
+        val location = core.overview.locations(scope).first().id
+        val supplier = core.purchasing.registerSupplier(ir.sabou.purchasing.RegisterSupplier(GlobalId.new(), "لبنیات", "021")).resultId
+        val order = core.orders.create(ir.sabou.purchasing.CreatePurchaseOrder(GlobalId.new(), scope, supplier, location, ir.sabou.kernel.BusinessDate(today),
+            ir.sabou.kernel.BusinessDate(today + 1), listOf(ir.sabou.purchasing.OrderLine(itemId, Quantity.units(2), ir.sabou.kernel.Money.of(100_000))))).resultId
+        val invoice = core.purchasing.postInvoice(ir.sabou.purchasing.PostPurchaseInvoice(GlobalId.new(), scope, supplier, "1", location, ir.sabou.kernel.BusinessDate(today),
+            ir.sabou.kernel.BusinessDate(today), listOf(ir.sabou.purchasing.InvoiceLine(itemId, Quantity.units(1), ir.sabou.kernel.Money.of(50_000))),
+            reviewLines = listOf(ir.sabou.purchasing.ReviewLine("دستکش", "۲ بسته", ir.sabou.kernel.Money.of(20_000))),
+            attachments = listOf(ir.sabou.platform.AttachmentInput("f.jpg", "image/jpeg", ByteArray(500) { 1 })))).resultId
+        val allPages = pages + listOf(
+            Route.ItemEdit(itemId), Route.LedgerDetail("4101", today - 30, today, null),
+            Route.PurchaseDetail(invoice), Route.OrderDetail(order), Route.PurchaseFromOrder(order), Route.SupplierEdit(supplier),
+            Route.NewOrder(supplier, location, listOf(ir.sabou.app.ui.OrderDraftLine(itemId, 2_000_000, 100_000))),
+        )
 
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             for (page in allPages) {

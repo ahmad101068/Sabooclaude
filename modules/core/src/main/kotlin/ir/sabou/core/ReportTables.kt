@@ -127,9 +127,44 @@ object ReportTables {
     )
 
     fun suppliers(rows: List<SupplierBalance>) = ReportTable(
-        "بدهی به تأمین‌کنندگان", "", listOf("تأمین‌کننده", "تلفن", "بدهی"),
-        rows.map { listOf(Cell.of(it.supplier.name), Cell.of(it.supplier.phone), Cell.Amount(it.owed.rial)) },
-        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.Amount(rows.sumOf { it.owed.rial })), notes = listOf(TOMAN),
+        "بدهی به تأمین‌کنندگان", "", listOf("تأمین‌کننده", "تلفن", "بدهی", "اعتبار مرجوعی"),
+        rows.map { listOf(Cell.of(it.supplier.name), Cell.of(it.supplier.phone), Cell.Amount(it.owed.rial), Cell.Amount(it.credit.rial)) },
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.Amount(rows.sumOf { it.owed.rial }), Cell.Amount(rows.sumOf { it.credit.rial })),
+        notes = listOf(TOMAN, "اعتبار مرجوعی: مبلغ کالای برگشتی که هنوز با فاکتوری تسویه نشده است."),
+    )
+
+    /** A purchase order as sent to the supplier. */
+    fun order(o: OrderRow, items: Map<ir.sabou.kernel.GlobalId, ir.sabou.inventory.Item>, branch: String) = ReportTable(
+        "سفارش خرید شماره ${Fa.number(o.order.number)}",
+        "${o.supplier} · $branch · تاریخ سفارش ${Fa.date(o.order.date)} · تحویل ${Fa.date(o.order.expectedDate)}",
+        listOf("ردیف", "کالا", "واحد", "مقدار", "قیمت واحد", "مبلغ"),
+        o.order.lines.mapIndexed { i, l ->
+            val item = items[l.itemId]
+            listOf(Cell.Count(i + 1L), Cell.of(item?.name ?: ""), Cell.of(item?.let { unitName(it.unit) } ?: ""), Cell.Qty(l.quantity.micros), Cell.Amount(l.unitPrice.rial), Cell.Amount(l.value.rial))
+        },
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(o.order.total.rial)),
+        notes = listOfNotNull(TOMAN, "محل تحویل: ${o.location}", o.order.note.takeIf { it.isNotBlank() }?.let { "توضیح: $it" }),
+    )
+
+    fun priceChanges(rows: List<PriceChange>, from: BusinessDate, to: BusinessDate) = ReportTable(
+        "تغییر قیمت تأمین‌کنندگان", period(from, to), listOf("تاریخ", "تأمین‌کننده", "کالا", "واحد", "قیمت قبلی", "تاریخ قبلی", "قیمت جدید", "تغییر"),
+        rows.map {
+            listOf(Cell.of(Fa.date(it.date)), Cell.of(it.supplier), Cell.of(it.item.name), Cell.of(unitName(it.item.unit)), Cell.Amount(it.previousPrice),
+                Cell.of(Fa.date(it.previousDate)), Cell.Amount(it.price), Cell.Percent(it.changeBp))
+        },
+        notes = listOf(TOMAN, "قیمت‌ها برای یک واحد هر کالاست و با فاکتور قبلی همان تأمین‌کننده مقایسه شده‌اند."),
+    )
+
+    fun suggestions(groups: List<SuggestionGroup>, place: String, date: BusinessDate) = ReportTable(
+        "پیشنهاد خرید", "$place · ${Fa.date(date)}", listOf("تأمین‌کننده", "کالا", "واحد", "موجودی", "در راه", "سطح مطلوب", "برنامه", "پیشنهاد", "مبلغ تقریبی"),
+        groups.flatMap { g ->
+            g.lines.map {
+                listOf(Cell.of(g.supplier?.name ?: "بدون تأمین‌کننده"), Cell.of(it.item.name), Cell.of(unitName(it.item.unit)), Cell.Qty(it.onHand.micros),
+                    Cell.Qty(it.onOrder.micros), Cell.Qty(it.par.micros), Cell.Qty(it.planned.micros), Cell.Qty(it.suggested.micros), amount(it.value?.rial))
+            }
+        },
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(groups.sumOf { it.total.rial })),
+        notes = listOf(TOMAN, "پیشنهاد = سطح مطلوب + مصرف برنامه‌ریزی‌شده − موجودی − سفارش‌های باز."),
     )
 
     fun receivables(rows: List<OpenReceivable>) = ReportTable(
@@ -194,16 +229,16 @@ object ReportTables {
 
     fun usage(u: UsageReport): ReportTable = ReportTable(
         "مصرف واقعی در برابر تئوریک", "${u.place} · ${period(u.from, u.to)}",
-        listOf("کالا", "واحد", "موجودی اول", "خرید", "انتقال", "تولید", "موجودی پایان", "مصرف واقعی", "مصرف تئوریک (فروش)", "ضایعات", "اختلاف توضیح‌داده‌نشده", "ارزش اختلاف", "کارایی"),
+        listOf("کالا", "واحد", "موجودی اول", "خرید", "انتقال", "تولید", "موجودی پایان", "مصرف واقعی", "مصرف تئوریک (فروش)", "ضایعات", "پذیرایی و اهدایی", "اختلاف توضیح‌داده‌نشده", "ارزش اختلاف", "کارایی"),
         u.rows.map {
             listOf(
                 Cell.of(it.item.name), Cell.of(unitName(it.item.unit)), Cell.Qty(it.opening.quantity), Cell.Qty(it.purchases.quantity), Cell.Qty(it.transfers.quantity),
                 Cell.Qty(it.production.quantity), Cell.Qty(it.closing.quantity), Cell.Qty(it.actual.quantity), Cell.Qty(it.theoretical.quantity),
-                Cell.Qty(it.waste.quantity), Cell.Qty(it.unexplained.quantity), Cell.Amount(it.unexplained.value), pct(it.efficiencyBp),
+                Cell.Qty(it.waste.quantity), Cell.Qty(it.comps.quantity), Cell.Qty(it.unexplained.quantity), Cell.Amount(it.unexplained.value), pct(it.efficiencyBp),
             )
         },
         footer = listOf(Cell.of("جمع ارزش"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(u.actualValue),
-            Cell.Amount(u.theoreticalValue), Cell.Amount(u.wasteValue), Cell.EMPTY, Cell.Amount(u.unexplainedValue), Cell.EMPTY),
+            Cell.Amount(u.theoreticalValue), Cell.Amount(u.wasteValue), Cell.Amount(u.compsValue), Cell.EMPTY, Cell.Amount(u.unexplainedValue), Cell.EMPTY),
         notes = listOf(
             "مصرف واقعی = موجودی اول + خرید + انتقال + تولید − موجودی پایان. اختلاف توضیح‌داده‌نشده همان کسری (منهای اضافه‌ی) انبارگردانی است.",
             "مقادیر به واحد هر کالا؛ ارزش‌ها به تومان.",

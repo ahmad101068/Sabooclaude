@@ -55,6 +55,7 @@ import ir.sabou.app.ui.screens.HomeScreen
 import ir.sabou.app.ui.screens.KitchenScreens
 import ir.sabou.app.ui.screens.MeScreens
 import ir.sabou.app.ui.screens.OperationsScreens
+import ir.sabou.app.ui.screens.PurchaseScreens
 import ir.sabou.app.ui.screens.ReportsScreens
 import ir.sabou.app.ui.screens.SalesScreen
 import ir.sabou.app.ui.theme.Sabou
@@ -425,10 +426,18 @@ private fun Pages(route: Route, nav: Nav) {
         Route.Recipes -> OperationsScreens.Recipes(nav)
         Route.PrepRecipes -> KitchenScreens.PrepRecipes(nav)
         Route.Production -> KitchenScreens.Production(nav)
-        Route.Purchases -> OperationsScreens.Purchases(nav)
-        Route.NewPurchase -> OperationsScreens.NewPurchase(nav)
-        is Route.PurchaseDetail -> OperationsScreens.PurchaseDetail(nav, route.invoiceId)
-        Route.Suppliers -> OperationsScreens.Suppliers(nav)
+        Route.Purchases -> PurchaseScreens.Purchases(nav)
+        Route.NewPurchase -> PurchaseScreens.NewPurchase(nav, null)
+        is Route.PurchaseFromOrder -> PurchaseScreens.NewPurchase(nav, route.orderId)
+        is Route.PurchaseDetail -> PurchaseScreens.PurchaseDetail(nav, route.invoiceId)
+        Route.Suppliers -> PurchaseScreens.Suppliers(nav)
+        is Route.SupplierEdit -> PurchaseScreens.SupplierEdit(nav, route.supplierId)
+        Route.Orders -> PurchaseScreens.Orders(nav)
+        is Route.NewOrder -> PurchaseScreens.NewOrder(nav, route)
+        is Route.OrderDetail -> PurchaseScreens.OrderDetail(nav, route.orderId)
+        Route.ReviewQueue -> PurchaseScreens.ReviewQueue(nav)
+        Route.PriceChanges -> PurchaseScreens.PriceChanges(nav)
+        Route.Suggestions -> PurchaseScreens.Suggestions(nav)
         Route.Personnel -> OperationsScreens.Personnel(nav)
         Route.Attendance -> OperationsScreens.Attendance(nav)
         Route.Payroll -> OperationsScreens.Payroll(nav)

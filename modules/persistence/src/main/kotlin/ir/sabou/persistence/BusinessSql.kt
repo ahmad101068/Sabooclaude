@@ -16,7 +16,17 @@ import ir.sabou.payroll.PersonnelStore
 import ir.sabou.payroll.Remittance
 import ir.sabou.payroll.RunStatus
 import ir.sabou.payroll.SalaryPayment
+import ir.sabou.ledger.AccountCode
+import ir.sabou.platform.Attachment
+import ir.sabou.platform.AttachmentStore
+import ir.sabou.purchasing.AccountLine
+import ir.sabou.purchasing.CreditAllocation
 import ir.sabou.purchasing.InvoiceLine
+import ir.sabou.purchasing.OrderLine
+import ir.sabou.purchasing.OrderStatus
+import ir.sabou.purchasing.PurchaseOrder
+import ir.sabou.purchasing.ReviewLine
+import ir.sabou.purchasing.ReviewResolution
 import ir.sabou.purchasing.InvoiceStatus
 import ir.sabou.purchasing.PurchaseInvoice
 import ir.sabou.purchasing.PurchaseReturn
@@ -39,22 +49,49 @@ import ir.sabou.sales.Settlement
 // ---------------------------------------------------------------- Purchasing
 
 class SqlSupplierStore(db: SqlDatabase) : SqlTable(db), SupplierStore {
-    private fun read(d: Doc) = Supplier(Codec.id(d.str("id")), d.str("name"), d.str("phone"), d.bool("active"))
+    private fun read(d: Doc) = Supplier(
+        Codec.id(d.str("id")), d.str("name"), d.str("phone"), d.bool("active"),
+        deliveryDays = d.strsOr("deliveryDays").map { it.toInt() }.toSet(), cutoffMinutes = d.longOrNull("cutoff")?.toInt(),
+        leadDays = d.intOr("leadDays", 1), note = d.strOr("note", ""),
+    )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM suppliers WHERE id = ?", id.value)?.let(::read)
     override fun all() = docs("SELECT doc FROM suppliers ORDER BY rowid").map(::read)
     override fun save(supplier: Supplier) = upsert(
         "suppliers", "id",
-        mapOf("id" to supplier.id.value, "doc" to Json.encode(mapOf("id" to supplier.id.value, "name" to supplier.name, "phone" to supplier.phone, "active" to supplier.isActive))),
+        mapOf("id" to supplier.id.value, "doc" to Json.encode(mapOf(
+            "id" to supplier.id.value, "name" to supplier.name, "phone" to supplier.phone, "active" to supplier.isActive,
+            "deliveryDays" to supplier.deliveryDays.sorted().map { it.toString() }, "cutoff" to supplier.cutoffMinutes?.toLong(),
+            "leadDays" to supplier.leadDays.toLong(), "note" to supplier.note,
+        ))),
+    )
+    override fun aliases(supplierId: GlobalId): Map<String, GlobalId> =
+        db.query("SELECT name, item_id FROM supplier_item_aliases WHERE supplier_id = ?", supplierId.value).associate { it.str("name") to Codec.id(it.str("item_id")) }
+    override fun saveAlias(supplierId: GlobalId, name: String, itemId: GlobalId) = upsert(
+        "supplier_item_aliases", listOf("supplier_id", "name"), mapOf("supplier_id" to supplierId.value, "name" to name, "item_id" to itemId.value),
     )
 }
 
 class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
-    private fun lines(l: List<InvoiceLine>) = l.map { mapOf("item" to it.itemId.value, "qty" to it.quantity.micros, "value" to it.value.rial) }
-    private fun linesOf(d: List<Doc>) = d.map { InvoiceLine(Codec.id(it.str("item")), Codec.qty(it.long("qty")), Codec.money(it.long("value"))) }
+    private fun lines(l: List<InvoiceLine>) = l.map { mapOf("item" to it.itemId.value, "qty" to it.quantity.micros, "value" to it.value.rial, "supplierName" to it.supplierItemName.ifEmpty { null }) }
+    private fun linesOf(d: List<Doc>) = d.map { InvoiceLine(Codec.id(it.str("item")), Codec.qty(it.long("qty")), Codec.money(it.long("value")), it.strOr("supplierName", "")) }
+
+    private fun resolutionOf(d: Doc?) = d?.let {
+        ReviewResolution(
+            Codec.idOrNull(it.strOrNull("item")), it.longOrNull("qty")?.let(Codec::qty), Codec.idOrNull(it.strOrNull("location")),
+            it.strOrNull("account")?.let(AccountCode::of), Codec.id(it.str("journal")), Codec.id(it.str("document")), Codec.date(it.long("date")),
+        )
+    }
 
     private fun invoiceOf(d: Doc) = PurchaseInvoice(
-        Codec.id(d.str("id")), Codec.id(d.str("supplier")), d.str("number"), Codec.branchOf(d.str("scope")), Codec.id(d.str("location")),
+        Codec.id(d.str("id")), Codec.id(d.str("supplier")), d.str("number"), Codec.branchOf(d.str("scope")), Codec.idOrNull(d.strOrNull("location")),
         Codec.date(d.long("date")), Codec.date(d.long("due")), linesOf(d.docs("lines")), Codec.money(d.long("total")), InvoiceStatus.valueOf(d.str("status")),
+        accountLines = d.docsOr("accountLines").map {
+            AccountLine(AccountCode.of(it.str("account")), Codec.money(it.long("amount")), it.strOrNull("branch")?.let(Codec::branchOf), it.strOr("memo", ""))
+        },
+        reviewLines = d.docsOr("reviewLines").map {
+            ReviewLine(it.str("name"), it.strOr("qtyNote", ""), Codec.money(it.long("amount")), resolutionOf(it.docOrNull("resolution")))
+        },
+        note = d.strOr("note", ""), orderId = Codec.idOrNull(d.strOrNull("order")), journalIds = d.strsOr("journals").map(Codec::id),
     )
 
     override fun invoice(id: GlobalId) = doc("SELECT doc FROM purchase_invoices WHERE id = ?", id.value)?.let(::invoiceOf)
@@ -70,8 +107,18 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
             "doc" to Json.encode(
                 mapOf(
                     "id" to invoice.id.value, "supplier" to invoice.supplierId.value, "number" to invoice.supplierInvoiceNo,
-                    "scope" to Codec.scope(invoice.scope), "location" to invoice.locationId.value, "date" to invoice.date.epochDay,
+                    "scope" to Codec.scope(invoice.scope), "location" to invoice.locationId?.value, "date" to invoice.date.epochDay,
                     "due" to invoice.dueDate.epochDay, "lines" to lines(invoice.lines), "total" to invoice.total.rial, "status" to invoice.status.name,
+                    "accountLines" to invoice.accountLines.map {
+                        mapOf("account" to it.account.value, "amount" to it.amount.rial, "branch" to it.branch?.let(Codec::scope), "memo" to it.memo)
+                    },
+                    "reviewLines" to invoice.reviewLines.map { l ->
+                        mapOf("name" to l.supplierItemName, "qtyNote" to l.quantityNote, "amount" to l.amount.rial, "resolution" to l.resolution?.let {
+                            mapOf("item" to it.itemId?.value, "qty" to it.quantity?.micros, "location" to it.locationId?.value, "account" to it.account?.value,
+                                "journal" to it.journalId.value, "document" to it.documentId.value, "date" to it.date.epochDay)
+                        })
+                    },
+                    "note" to invoice.note, "order" to invoice.orderId?.value, "journals" to invoice.journalIds.map { it.value },
                 ),
             ),
         ),
@@ -109,6 +156,65 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
             ),
         ),
     )
+
+    private fun allocationOf(d: Doc) = CreditAllocation(
+        Codec.id(d.str("id")), Codec.id(d.str("supplier")), Codec.branchOf(d.str("scope")), Codec.id(d.str("invoice")), Codec.money(d.long("amount")),
+        Codec.date(d.long("date")), Codec.idOrNull(d.strOrNull("return")), d.bool("released"),
+    )
+    override fun allocation(id: GlobalId) = doc("SELECT doc FROM credit_allocations WHERE id = ?", id.value)?.let(::allocationOf)
+    override fun allocationsTo(invoiceId: GlobalId) = docs("SELECT doc FROM credit_allocations WHERE invoice_id = ? ORDER BY rowid", invoiceId.value).map(::allocationOf)
+    override fun allocationsOf(supplierId: GlobalId, scope: Scope.Branch) =
+        docs("SELECT doc FROM credit_allocations WHERE supplier_id = ? AND scope = ? ORDER BY rowid", supplierId.value, Codec.scope(scope)).map(::allocationOf)
+    override fun saveAllocation(allocation: CreditAllocation) = upsert(
+        "credit_allocations", "id",
+        mapOf(
+            "id" to allocation.id.value, "supplier_id" to allocation.supplierId.value, "scope" to Codec.scope(allocation.scope), "invoice_id" to allocation.invoiceId.value,
+            "doc" to Json.encode(mapOf(
+                "id" to allocation.id.value, "supplier" to allocation.supplierId.value, "scope" to Codec.scope(allocation.scope), "invoice" to allocation.invoiceId.value,
+                "amount" to allocation.amount.rial, "date" to allocation.date.epochDay, "return" to allocation.returnId?.value, "released" to allocation.released,
+            )),
+        ),
+    )
+
+    private fun orderOf(d: Doc) = PurchaseOrder(
+        Codec.id(d.str("id")), d.long("number"), Codec.id(d.str("supplier")), Codec.branchOf(d.str("scope")), Codec.id(d.str("location")),
+        Codec.date(d.long("date")), Codec.date(d.long("expected")),
+        d.docs("lines").map { OrderLine(Codec.id(it.str("item")), Codec.qty(it.long("qty")), Codec.money(it.long("price"))) },
+        d.strOr("note", ""), OrderStatus.valueOf(d.str("status")), Codec.idOrNull(d.strOrNull("invoice")), d.strOrNull("cancelReason"),
+    )
+    override fun order(id: GlobalId) = doc("SELECT doc FROM purchase_orders WHERE id = ?", id.value)?.let(::orderOf)
+    override fun orders() = docs("SELECT doc FROM purchase_orders ORDER BY number DESC").map(::orderOf)
+    override fun saveOrder(order: PurchaseOrder) = upsert(
+        "purchase_orders", "id",
+        mapOf(
+            "id" to order.id.value, "number" to order.number,
+            "doc" to Json.encode(mapOf(
+                "id" to order.id.value, "number" to order.number, "supplier" to order.supplierId.value, "scope" to Codec.scope(order.scope),
+                "location" to order.locationId.value, "date" to order.date.epochDay, "expected" to order.expectedDate.epochDay,
+                "lines" to order.lines.map { mapOf("item" to it.itemId.value, "qty" to it.quantity.micros, "price" to it.unitPrice.rial) },
+                "note" to order.note, "status" to order.status.name, "invoice" to order.invoiceId?.value, "cancelReason" to order.cancelReason,
+            )),
+        ),
+    )
+    override fun nextOrderNumber(): Long = db.query("SELECT COALESCE(MAX(number), 0) + 1 AS n FROM purchase_orders").single().long("n")
+}
+
+/** Attachment bytes live in the encrypted database, so backups carry them. Rows are immutable. */
+class SqlAttachmentStore(db: SqlDatabase) : SqlTable(db), AttachmentStore {
+    private fun metaOf(r: SqlRow) = Attachment(
+        Codec.id(r.str("id")), r.str("owner_type"), Codec.id(r.str("owner_id")), r.str("file_name"), r.str("mime"), r.str("sha256"),
+        r.long("size").toInt(), r.long("recorded_at"),
+    )
+    private val columns = "id, owner_type, owner_id, file_name, mime, sha256, size, recorded_at"
+    override fun save(attachment: Attachment, bytes: ByteArray) = db.execute(
+        "INSERT INTO attachments ($columns, bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        attachment.id.value, attachment.ownerType, attachment.ownerId.value, attachment.fileName, attachment.mime, attachment.sha256,
+        attachment.size.toLong(), attachment.recordedAtEpochMillis, bytes,
+    )
+    override fun of(ownerType: String, ownerId: GlobalId) =
+        db.query("SELECT $columns FROM attachments WHERE owner_type = ? AND owner_id = ? ORDER BY rowid", ownerType, ownerId.value).map(::metaOf)
+    override fun meta(id: GlobalId) = db.query("SELECT $columns FROM attachments WHERE id = ?", id.value).firstOrNull()?.let(::metaOf)
+    override fun content(id: GlobalId) = db.query("SELECT bytes FROM attachments WHERE id = ?", id.value).firstOrNull()?.bytes("bytes")
 }
 
 // ---------------------------------------------------------------- Sales

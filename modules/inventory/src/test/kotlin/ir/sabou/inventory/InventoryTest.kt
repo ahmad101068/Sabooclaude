@@ -144,6 +144,12 @@ class InventoryTest {
         assertEquals(kg(8), gateway.balance(rice, store).quantity)
         assertEquals(stockValue(branchA), ledger.balance(StandardAccounts.INVENTORY, branchA).rial)
         assertEquals("INVALID_INPUT:note", code { ops.waste(RecordWaste(GlobalId.new(), branchA, store, rice, kg(1), WasteReason.OTHER, "", day)) })
+        // Food given away is booked apart from waste.
+        ops.waste(RecordWaste(GlobalId.new(), branchA, store, rice, kg(2), WasteReason.STAFF_MEAL, "", day))
+        assertEquals(100_000, ledger.balance(StandardAccounts.WASTE, branchA).rial)
+        assertEquals(200_000, ledger.balance(StandardAccounts.COMPS, branchA).rial)
+        assertEquals(listOf(InventoryOperations.WASTE, InventoryOperations.COMP),
+            stock.movementsAt(store, day, day).filter { it.kind == MovementKind.WASTE }.map { it.source.type })
     }
 
     @Test fun recipeVersionInForceOnTheSaleDateIsUsed() {

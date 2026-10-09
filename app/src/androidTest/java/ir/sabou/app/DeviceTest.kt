@@ -61,6 +61,21 @@ class DeviceTest {
         assertEquals('P'.code.toByte(), xlsx[0]); assertEquals('K'.code.toByte(), xlsx[1])
     }
 
+    @Test fun attachmentsAreStoredInTheEncryptedDatabaseAndReadBack() {
+        val (container, core) = fresh()
+        val branch = ir.sabou.kernel.Scope.Branch(core.overview.branches().first().id)
+        val supplier = core.purchasing.registerSupplier(ir.sabou.purchasing.RegisterSupplier(GlobalId.new(), "لبنیات", "")).resultId
+        val photo = ir.sabou.platform.AttachmentInput("invoice.jpg", "image/jpeg", ByteArray(1_200_000) { (it % 251).toByte() })
+        val invoice = core.purchasing.postInvoice(ir.sabou.purchasing.PostPurchaseInvoice(GlobalId.new(), branch, supplier, "1", null, BusinessDate(20_000), BusinessDate(20_000),
+            emptyList(), reviewLines = listOf(ir.sabou.purchasing.ReviewLine("دستکش", "", Money.of(10_000))), attachments = listOf(photo))).resultId
+        container.open()
+        val reopened = ready(container)
+        reopened.identity.login("owner", "123456".toCharArray())
+        val meta = reopened.overview.invoice(invoice).attachments.single()
+        val (_, bytes) = reopened.buying.attachment(meta.id)
+        assertTrue(photo.bytes.contentEquals(bytes))
+    }
+
     @Test fun encryptedDatabaseAndKeystoreKeySurviveAReopen() {
         val (container, _) = fresh()
         container.open()                                   // close + open: the wrapped key is unwrapped again
