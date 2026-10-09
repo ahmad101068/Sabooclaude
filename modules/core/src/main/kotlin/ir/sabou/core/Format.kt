@@ -112,7 +112,10 @@ object Fa {
     fun jalali(date: BusinessDate): JalaliDate = Jalali.fromJdn(date.epochDay + EPOCH_JDN)
     fun fromJalali(year: Int, month: Int, day: Int): BusinessDate = BusinessDate(Jalali.toJdn(year, month, day) - EPOCH_JDN)
 
-    fun weekday(date: BusinessDate): String = weekdayNames[Math.floorMod(date.epochDay + 5, 7L).toInt()]
+    /** 0 = Saturday … 6 = Friday (the Persian week). */
+    fun weekdayIndex(date: BusinessDate): Int = Math.floorMod(date.epochDay + 5, 7L).toInt()
+
+    fun weekday(date: BusinessDate): String = weekdayNames[weekdayIndex(date)]
 
     /** «پنجشنبه ۱۶ مهر» */
     fun dayTitle(date: BusinessDate): String = jalali(date).let { "${weekday(date)} ${digits(it.day.toString())} ${monthNames[it.month - 1]}" }
