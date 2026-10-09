@@ -331,8 +331,11 @@ fun QuantityInput(
     modifier: Modifier = Modifier,
     /** What an empty field means: by default "not entered" (null), never zero (e.g. a stock count). */
     blankAs: ir.sabou.kernel.Quantity? = null,
+    /** The form's current value, shown when the field is (re)created, e.g. a restored row of a list. */
+    value: ir.sabou.kernel.Quantity? = null,
 ) {
-    var text by remember { mutableStateOf("") }
+    // Kept with the form across process death; the parent's value is restored from the same draft.
+    var text by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(value?.let(Fa::quantity) ?: "") }
     TextInput("$label ($unit)", text, { text = it; onChange(if (it.isBlank()) blankAs else Fa.parseQuantity(it)) }, modifier, keyboard = KeyboardType.Decimal,
         error = if (text.isNotBlank() && Fa.parseQuantity(text) == null) "مقدار معتبر نیست" else null)
 }

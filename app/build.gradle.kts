@@ -95,6 +95,11 @@ dependencies {
     implementation("net.zetetic:sqlcipher-android:4.17.0")
     implementation("androidx.sqlite:sqlite:2.6.2")
 
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("junit:junit:4.13.2")
+
     testImplementation("junit:junit:4.13.2")
     testImplementation(kotlin("test"))
 }

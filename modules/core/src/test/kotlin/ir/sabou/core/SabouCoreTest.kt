@@ -211,6 +211,14 @@ class SabouCoreTest {
         val full = core.verifyAuditFull()
         assertIs<StartupVerdict.RollbackDetected>(full)
         assertTrue(full.detail.contains("AUDIT_EVENT_TAMPERED"))
+        // The daily background check finds it a day later, without slowing startup.
+        assertTrue(!boot().backgroundVerificationDue())
+        now += SabouCore.BACKGROUND_VERIFY_HOURS * 3_600_000L
+        val daily = boot()
+        assertTrue(daily.backgroundVerificationDue())
+        assertIs<StartupVerdict.RollbackDetected>(daily.verifyAuditInBackground())
+        assertTrue(daily.backgroundVerificationDue())   // a failed check is not recorded as done
+        now -= SabouCore.BACKGROUND_VERIFY_HOURS * 3_600_000L
         // The periodic full verification at startup finds it too, at the latest a week later.
         now += SabouCore.FULL_VERIFY_DAYS * 86_400_000L
         assertIs<StartupVerdict.RollbackDetected>(boot().verifyStartup())

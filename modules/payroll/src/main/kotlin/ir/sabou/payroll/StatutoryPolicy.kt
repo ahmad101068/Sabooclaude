@@ -28,8 +28,11 @@ data class StatutoryPolicy(
     val insuranceTaxExemptNumerator: Int,
     val insuranceTaxExemptDenominator: Int,
     val taxBrackets: List<TaxBracket>,
+    /** A partial month pays salary × days ÷ this (Iranian practice: 30), never more than the monthly salary. */
+    val prorationDays: Int = 30,
 ) {
     init {
+        require(prorationDays in 28..31) { "proration_days_out_of_range" }
         require(standardMonthlyMinutes > 0 && overtimeMultiplierPercent >= 100)
         require(listOf(employeeInsuranceBp, employerInsuranceBp, unemploymentInsuranceBp).all { it in 0..10_000 })
         require(insuranceTaxExemptDenominator > 0 && insuranceTaxExemptNumerator in 0..insuranceTaxExemptDenominator)
@@ -55,9 +58,17 @@ data class StatutoryPolicy(
         return Money.of(tax)
     }
 
-    fun calculate(employeeId: ir.sabou.kernel.GlobalId, salary: Money, absentMinutes: Long, overtimeMinutes: Long): Payslip {
-        val absence = Money.of(minOf(salary.rial, Ratio.mulDiv(salary.rial, absentMinutes, standardMonthlyMinutes.toLong())))
-        val overtime = Money.of(Ratio.mulDiv(salary.rial, Math.multiplyExact(overtimeMinutes, overtimeMultiplierPercent.toLong()), standardMonthlyMinutes * 100L))
+    /**
+     * [salary] is the monthly salary; it also sets the minute rate for absence and overtime. With [payableDays]
+     * (a partial month) the base is prorated and absence can never take more than that base.
+     */
+    fun calculate(employeeId: ir.sabou.kernel.GlobalId, monthlySalary: Money, absentMinutes: Long, overtimeMinutes: Long, payableDays: Int? = null): Payslip {
+        require(payableDays == null || payableDays >= 1)
+        val monthly = monthlySalary
+        val salary = if (payableDays == null) monthly
+            else Money.of(minOf(monthly.rial, Ratio.mulDiv(monthly.rial, payableDays.toLong(), prorationDays.toLong())))
+        val absence = Money.of(minOf(salary.rial, Ratio.mulDiv(monthly.rial, absentMinutes, standardMonthlyMinutes.toLong())))
+        val overtime = Money.of(Ratio.mulDiv(monthly.rial, Math.multiplyExact(overtimeMinutes, overtimeMultiplierPercent.toLong()), standardMonthlyMinutes * 100L))
         val gross = salary - absence + overtime
         val insurable = minOf(gross, maxInsurableMonthly)
         val employeeIns = percent(insurable, employeeInsuranceBp)
@@ -68,7 +79,7 @@ data class StatutoryPolicy(
             employeeId = employeeId, baseSalary = salary, absenceDeduction = absence, overtimePay = overtime, gross = gross,
             insurableBase = insurable, employeeInsurance = employeeIns, employerInsurance = percent(insurable, employerInsuranceBp),
             unemploymentInsurance = percent(insurable, unemploymentInsuranceBp), taxableIncome = taxable, incomeTax = tax,
-            net = gross - employeeIns - tax,
+            net = gross - employeeIns - tax, payableDays = payableDays,
         )
     }
 }

@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -92,7 +93,7 @@ private class SalesData(
 @Composable
 fun SalesScreen(nav: Nav) {
     val session = LocalSession.current
-    var date by remember { mutableStateOf(session.today) }
+    var date by rememberSaveable { mutableStateOf(session.today) }
     Column(Modifier.fillMaxSize()) {
         WithBranch { branch ->
             val state by load(session, branch, date) {
@@ -174,13 +175,35 @@ private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
     fun settled() = settlements().sumOf { it.amount.rial }
 }
 
+/** The day's sale form, kept across process death (ADR-0010). */
+@Suppress("UNCHECKED_CAST")
+private fun saleFormSaver(data: SalesData, today: BusinessDate) = androidx.compose.runtime.saveable.listSaver<SaleForm, Any?>(
+    save = { f ->
+        listOf(
+            HashMap(f.portions), HashMap(f.gross), f.kitchen, f.discount, f.service, f.tax, HashMap(f.liquid),
+            ArrayList(f.credits.map { arrayListOf(it.customer, it.amount, it.due) }), f.step,
+        )
+    },
+    restore = { l ->
+        SaleForm(null, data, today).apply {
+            portions.putAll(l[0] as Map<GlobalId, Quantity?>)
+            gross.putAll(l[1] as Map<GlobalId, Money?>)
+            kitchen = l[2] as GlobalId? ?: kitchen
+            discount = l[3] as Money?; service = l[4] as Money?; tax = l[5] as Money?
+            liquid.putAll(l[6] as Map<GlobalId, Money?>)
+            (l[7] as List<List<Any?>>).forEach { c -> credits.add(CreditRow(c[0] as GlobalId?, c[1] as Money?, c[2] as BusinessDate)) }
+            step = l[8] as Int
+        }
+    },
+)
+
 @Composable
 private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
     val session = LocalSession.current
-    val form = remember { SaleForm(data.sale, data, session.today) }
+    val form = rememberSaveable(saver = saleFormSaver(data, session.today)) { SaleForm(data.sale, data, session.today) }
     val action = rememberAction()
-    val draftId = remember { mutableStateOf(GlobalId.new()) }
-    val postId = remember { mutableStateOf(GlobalId.new()) }
+    val draftId = rememberSaveable { mutableStateOf(GlobalId.new()) }
+    val postId = rememberSaveable { mutableStateOf(GlobalId.new()) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Steps(form.step) { form.step = it }
@@ -193,7 +216,7 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(m.name, style = SabouType.bodyStrong, color = Sabou.colors.ink)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                var text by remember { mutableStateOf(form.portions[m.id]?.let { Fa.quantity(it) } ?: "") }
+                                var text by rememberSaveable { mutableStateOf(form.portions[m.id]?.let { Fa.quantity(it) } ?: "") }
                                 TextInput("تعداد", text, { text = it; form.portions[m.id] = Fa.parseQuantity(it) }, Modifier.weight(0.4f),
                                     keyboard = androidx.compose.ui.text.input.KeyboardType.Decimal)
                                 MoneyInput("مبلغ", form.gross[m.id], { form.gross[m.id] = it }, Modifier.weight(0.6f))
@@ -320,10 +343,10 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
     val session = LocalSession.current
     val sale = data.sale!!
     val action = rememberAction()
-    var counted by remember { mutableStateOf<Money?>(null) }
-    var reason by remember { mutableStateOf("") }
-    var confirmReverse by remember { mutableStateOf(false) }
-    val commandId = remember(sale.id) { mutableStateOf(GlobalId.new()) }
+    var counted by rememberSaveable { mutableStateOf<Money?>(null) }
+    var reason by rememberSaveable { mutableStateOf("") }
+    var confirmReverse by rememberSaveable { mutableStateOf(false) }
+    val commandId = rememberSaveable(sale.id) { mutableStateOf(GlobalId.new()) }
     val closed = data.day?.closed == true
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

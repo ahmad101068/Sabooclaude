@@ -157,6 +157,20 @@ class SabouCore private constructor(
         events.prune(clock.nowEpochMillis() - (if (syncOn) SYNCED_EVENT_DAYS else LOCAL_EVENT_DAYS) * day, onlySynced = syncOn)
     }
 
+    /** True when the whole chain has not been verified for a day: run [verifyAuditInBackground]. */
+    fun backgroundVerificationDue(): Boolean =
+        clock.nowEpochMillis() - (meta.get(LAST_FULL_VERIFY)?.toLongOrNull() ?: 0L) >= BACKGROUND_VERIFY_HOURS * 3_600_000L
+
+    /**
+     * The daily full check, run off the startup path so opening the app stays fast. Startup still forces a
+     * full check when this has not succeeded for [FULL_VERIFY_DAYS] (e.g. the app is always closed quickly).
+     */
+    fun verifyAuditInBackground(): StartupVerdict {
+        val verdict = verifyAuditFull()
+        if (verdict == StartupVerdict.Healthy) unitOfWork.transaction { meta.put(LAST_FULL_VERIFY, clock.nowEpochMillis().toString()) }
+        return verdict
+    }
+
     /** Verifies the whole audit chain from its first event (before a backup, or on demand). */
     fun verifyAuditFull(): StartupVerdict = try {
         AuditTrail(auditStore).verify()
@@ -234,6 +248,7 @@ class SabouCore private constructor(
         const val SYNC_ENABLED = "sync_enabled"
         const val LAST_FULL_VERIFY = "audit_full_verified_at"
         const val FULL_VERIFY_DAYS = 7L
+        const val BACKGROUND_VERIFY_HOURS = 24L
         const val LOCAL_EVENT_DAYS = 90L
         const val SYNCED_EVENT_DAYS = 30L
     }

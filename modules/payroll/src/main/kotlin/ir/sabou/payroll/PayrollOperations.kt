@@ -27,9 +27,22 @@ data class RegisterEmployee(
     val name: String,
     val nationalId: String,
     val monthlySalary: Money,
+    /** Set when the person starts during a payroll month; their first month is then prorated. */
+    val startDate: BusinessDate? = null,
 ) : Command {
     override val requiredPermission = Permission.PERSONNEL_MANAGE
-    override fun fingerprint() = "$scope|$name|$nationalId|${monthlySalary.rial}"
+    override fun fingerprint() = "$scope|$name|$nationalId|${monthlySalary.rial}|${startDate?.epochDay}"
+}
+
+/** Ends an employment after [lastDay]; that month is paid only up to it, later months not at all. */
+data class EndEmployment(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val employeeId: GlobalId,
+    val lastDay: BusinessDate,
+) : Command {
+    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override fun fingerprint() = "$scope|$employeeId|${lastDay.epochDay}"
 }
 
 data class RecordAttendance(
@@ -133,14 +146,28 @@ class PayrollOperations(
         ensure(NationalId.isValid(cmd.nationalId)) { DomainError.InvalidInput("nationalId", "کد ملی معتبر نیست.") }
         val nationalId = NationalId.normalize(cmd.nationalId)
         ensure(personnel.employees(cmd.scope).none { NationalId.normalize(it.nationalId) == nationalId }) { DomainError.InvalidState("EMPLOYEE", "DUPLICATE_NATIONAL_ID") }
-        val employee = Employee(GlobalId.new(), name, nationalId, cmd.scope, cmd.monthlySalary)
+        val employee = Employee(GlobalId.new(), name, nationalId, cmd.scope, cmd.monthlySalary, startDate = cmd.startDate)
         personnel.saveEmployee(employee)
-        ctx.audit(AuditDraft("EMPLOYEE_REGISTER", "EMPLOYEE", employee.id.value, name))
+        ctx.audit(AuditDraft("EMPLOYEE_REGISTER", "EMPLOYEE", employee.id.value, name + (cmd.startDate?.let { ";start=${it.epochDay}" } ?: "")))
+        employee.id
+    }
+
+    fun endEmployment(c: EndEmployment): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val employee = requireEmployee(cmd.employeeId, cmd.scope)
+        ensure(employee.endDate == null && employee.isActive) { DomainError.InvalidState("EMPLOYEE", "ALREADY_ENDED") }
+        ensure(employee.startDate == null || cmd.lastDay >= employee.startDate) { DomainError.InvalidInput("lastDay", "آخرین روز کار نمی‌تواند پیش از شروع کار باشد.") }
+        // An approved month already paid this person in full: the end date cannot fall before its last day.
+        ensure(payroll.runs(cmd.scope).none { it.status == RunStatus.APPROVED && it.to > cmd.lastDay && it.payslips.any { s -> s.employeeId == employee.id } }) {
+            DomainError.InvalidState("EMPLOYEE", "PERIOD_APPROVED")
+        }
+        personnel.saveEmployee(employee.copy(isActive = false, endDate = cmd.lastDay))
+        ctx.audit(AuditDraft("EMPLOYEE_END", "EMPLOYEE", employee.id.value, "last=${cmd.lastDay.epochDay}"))
         employee.id
     }
 
     fun recordAttendance(c: RecordAttendance): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
         val employee = requireEmployee(cmd.employeeId, cmd.scope)
+        ensure(employee.employedDays(cmd.date, cmd.date) == 1) { DomainError.InvalidState("EMPLOYEE", "NOT_EMPLOYED_ON_DATE") }
         ensure(listOf(cmd.workedMinutes, cmd.overtimeMinutes, cmd.absentMinutes).all { it in 0..1_440 } &&
             cmd.workedMinutes + cmd.overtimeMinutes <= 1_440) { DomainError.InvalidInput("minutes", "زمان حضور معتبر نیست.") }
         ensure(payroll.runs(cmd.scope).none { it.status == RunStatus.APPROVED && cmd.date >= it.from && cmd.date <= it.to }) {
@@ -163,9 +190,14 @@ class PayrollOperations(
         val overlapping = payroll.runs(cmd.scope).filter { it.status != RunStatus.REVERSED && it.from <= cmd.to && it.to >= cmd.from }
         ensure(overlapping.all { it.status == RunStatus.DRAFT && it.from == cmd.from && it.to == cmd.to }) { DomainError.InvalidState("PAYROLL_RUN", "PERIOD_OVERLAP") }
         val policy = policies.forPeriod(cmd.from, cmd.to)
-        val payslips = personnel.employees(cmd.scope).filter { it.isActive }.map { e ->
+        val periodDays = days.toInt()
+        val payslips = personnel.employees(cmd.scope).mapNotNull { e ->
+            // Everyone employed on at least one day of the month; hired or left during it → prorated.
+            val employed = e.employedDays(cmd.from, cmd.to)
+            if (employed == 0) return@mapNotNull null
             val records = personnel.attendance(e.id, cmd.from, cmd.to)
-            policy.calculate(e.id, e.monthlySalary, records.sumOf { it.absentMinutes.toLong() }, records.sumOf { it.overtimeMinutes.toLong() })
+            policy.calculate(e.id, e.monthlySalary, records.sumOf { it.absentMinutes.toLong() }, records.sumOf { it.overtimeMinutes.toLong() },
+                payableDays = employed.takeIf { it < periodDays })
         }
         ensure(payslips.isNotEmpty()) { DomainError.InvalidState("PAYROLL_RUN", "NO_EMPLOYEES") }
         val run = PayrollRun(overlapping.firstOrNull()?.id ?: GlobalId.new(), cmd.scope, cmd.from, cmd.to, policy.version, payslips,

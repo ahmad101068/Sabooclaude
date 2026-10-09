@@ -7,7 +7,7 @@ import java.util.UUID
  * data from many devices without id collisions (ADR-0001).
  */
 @JvmInline
-value class GlobalId private constructor(val value: String) {
+value class GlobalId private constructor(val value: String) : java.io.Serializable {
     override fun toString(): String = value
 
     companion object {
@@ -23,7 +23,7 @@ value class GlobalId private constructor(val value: String) {
 
 /** A calendar business day (days since 1970-01-01). Time zone conversion happens at the UI edge. */
 @JvmInline
-value class BusinessDate(val epochDay: Long) : Comparable<BusinessDate> {
+value class BusinessDate(val epochDay: Long) : Comparable<BusinessDate>, java.io.Serializable {
     init {
         require(epochDay > 0) { "business_date_invalid" }
     }
@@ -33,10 +33,10 @@ value class BusinessDate(val epochDay: Long) : Comparable<BusinessDate> {
 
 /** Branch identity. The organization itself is not a branch; see [Scope]. */
 @JvmInline
-value class BranchId(val value: GlobalId)
+value class BranchId(val value: GlobalId) : java.io.Serializable
 
 /** Accounting / data ownership scope of a record. */
-sealed interface Scope {
+sealed interface Scope : java.io.Serializable {
     data object Organization : Scope
     data class Branch(val branchId: BranchId) : Scope
 }

@@ -7,7 +7,7 @@ import java.math.BigInteger
  * Rial; there is no floating point anywhere in the financial path.
  */
 @JvmInline
-value class Money private constructor(val rial: Long) : Comparable<Money> {
+value class Money private constructor(val rial: Long) : Comparable<Money>, java.io.Serializable {
     operator fun plus(other: Money): Money = of(Math.addExact(rial, other.rial))
 
     /** Fails instead of producing a negative amount. Use [SignedAmount] for balances. */
