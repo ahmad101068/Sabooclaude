@@ -78,7 +78,10 @@ class SqlUserStore(db: SqlDatabase) : SqlTable(db), UserStore {
     private fun read(d: Doc) = User(
         Codec.id(d.str("id")), d.str("username"), d.str("displayName"), Role.valueOf(d.str("role")),
         d.strs("grants").map { BranchId(Codec.id(it)) }.toSet(), d.str("pinHash"), d.int("failedAttempts"),
-        d.long("lockedUntil"), d.bool("active"),
+        d.long("lockedUntil").takeIf { it > 0 }?.let { until ->
+            ir.sabou.platform.PinLock(d.longOr("lockStart", 0), until, d.strOr("lockBoot", ""), d.longOr("lockUntilElapsed", 0))
+        },
+        d.bool("active"), d.boolOr("ownerLocked", false),
     )
 
     override fun byId(id: GlobalId) = doc("SELECT doc FROM users WHERE id = ?", id.value)?.let(::read)
@@ -92,7 +95,9 @@ class SqlUserStore(db: SqlDatabase) : SqlTable(db), UserStore {
                 mapOf(
                     "id" to user.id.value, "username" to user.username, "displayName" to user.displayName, "role" to user.role.name,
                     "grants" to user.branchGrants.map { it.value.value }.sorted(), "pinHash" to user.pinHash,
-                    "failedAttempts" to user.failedAttempts, "lockedUntil" to user.lockedUntilEpochMillis, "active" to user.isActive,
+                    "failedAttempts" to user.failedAttempts, "lockedUntil" to (user.lock?.untilWall ?: 0L),
+                    "lockStart" to (user.lock?.startWall ?: 0L), "lockBoot" to user.lock?.bootId.orEmpty(),
+                    "lockUntilElapsed" to (user.lock?.untilElapsed ?: 0L), "ownerLocked" to user.ownerLocked, "active" to user.isActive,
                 ),
             ),
         ),

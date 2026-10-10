@@ -23,10 +23,41 @@ data class User(
     val branchGrants: Set<BranchId>,
     val pinHash: String,
     val failedAttempts: Int,
-    val lockedUntilEpochMillis: Long,
+    /** The current temporary lock after wrong PINs, or null. */
+    val lock: PinLock?,
     val isActive: Boolean,
+    /** Locked until the owner resets the PIN (too many wrong PINs for a non-owner). */
+    val ownerLocked: Boolean = false,
 ) {
     fun toActor() = Actor(id, displayName, role, branchGrants)
+}
+
+/**
+ * A temporary login lock that changing the device clock cannot shorten. Within the same boot it is measured on
+ * the monotonic clock ([untilElapsed]); across a reboot on the wall clock ([untilWall]); and a wall clock set back
+ * before the lock began ([startWall]) keeps it locked.
+ */
+data class PinLock(val startWall: Long, val untilWall: Long, val bootId: String, val untilElapsed: Long) {
+    fun isActive(wall: Long, time: DeviceTime): Boolean = when {
+        wall < startWall -> true
+        bootId == time.bootId() -> time.elapsedMillis() < untilElapsed
+        else -> wall < untilWall
+    }
+}
+
+/** The device's monotonic time since boot, and an id of the current boot. */
+interface DeviceTime {
+    fun bootId(): String
+    fun elapsedMillis(): Long
+
+    companion object {
+        /** JVM fallback: the process stands in for a boot. Android supplies the real boot count and uptime. */
+        val PROCESS: DeviceTime = object : DeviceTime {
+            private val id = java.util.UUID.randomUUID().toString()
+            override fun bootId() = id
+            override fun elapsedMillis() = System.nanoTime() / 1_000_000
+        }
+    }
 }
 
 interface UserStore {
@@ -98,6 +129,7 @@ class IdentityService(
     private val unitOfWork: UnitOfWork,
     private val audit: AuditStore,
     private val clock: Clock,
+    private val deviceTime: DeviceTime = DeviceTime.PROCESS,
     private val epochProvider: () -> String,
 ) {
     private val trail = AuditTrail(audit)
@@ -158,7 +190,7 @@ class IdentityService(
 
     fun reactivateUser(id: GlobalId) = asOwner { actor ->
         val user = users.byId(id) ?: throw DomainException(DomainError.NotFound("USER"))
-        users.save(user.copy(isActive = true, failedAttempts = 0, lockedUntilEpochMillis = 0))
+        users.save(user.copy(isActive = true, failedAttempts = 0, lock = null, ownerLocked = false))
         trail.append(AuditDraft("USER_REACTIVATE", "USER", id.value, user.username), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, clock.nowEpochMillis(), epochProvider())
         id
     }
@@ -166,7 +198,7 @@ class IdentityService(
     /** The owner sets a new PIN for a user who forgot theirs; it also clears a login lock. */
     fun resetPin(id: GlobalId, pin: CharArray) = asOwner { actor ->
         val user = users.byId(id) ?: throw DomainException(DomainError.NotFound("USER"))
-        users.save(user.copy(pinHash = hashValidPin(pin), failedAttempts = 0, lockedUntilEpochMillis = 0))
+        users.save(user.copy(pinHash = hashValidPin(pin), failedAttempts = 0, lock = null, ownerLocked = false))
         trail.append(AuditDraft("USER_PIN_RESET", "USER", id.value, user.username), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, clock.nowEpochMillis(), epochProvider())
         id
     }
@@ -179,15 +211,14 @@ class IdentityService(
             val actor = session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
             val user = users.byId(actor.userId)!!
             val now = clock.nowEpochMillis()
-            if (now < user.lockedUntilEpochMillis) return@transaction null to DomainError.InvalidState("USER", "LOCKED")
+            lockError(user, now)?.let { return@transaction null to it }
             if (!PinHasher.verify(current, user.pinHash)) {
-                val attempts = user.failedAttempts + 1
-                val lock = if (attempts >= 5) now + minOf(15 * 60_000L, 30_000L shl minOf(attempts - 5, 5)) else 0L
-                users.save(user.copy(failedAttempts = attempts, lockedUntilEpochMillis = lock))
-                trail.append(AuditDraft("PIN_CHANGE_FAILURE", "USER", user.id.value, "attempts=$attempts"), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
-                return@transaction null to (if (lock > 0) DomainError.InvalidState("USER", "LOCKED") else DomainError.InvalidInput("pin", "رمز فعلی درست نیست."))
+                val failed = failedAttempt(user, now)
+                users.save(failed)
+                trail.append(AuditDraft("PIN_CHANGE_FAILURE", "USER", user.id.value, "attempts=${failed.failedAttempts}"), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
+                return@transaction null to (lockError(failed, now) ?: DomainError.InvalidInput("pin", "رمز فعلی درست نیست."))
             }
-            users.save(user.copy(pinHash = hashValidPin(next), failedAttempts = 0, lockedUntilEpochMillis = 0))
+            users.save(user.copy(pinHash = hashValidPin(next), failedAttempts = 0, lock = null))
             trail.append(AuditDraft("USER_PIN_CHANGE", "USER", user.id.value, user.username), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
             user.id to null
         }
@@ -196,6 +227,28 @@ class IdentityService(
             throw DomainException(error!!)
         }
         return id
+    }
+
+    /** The error for a locked account, or null. */
+    private fun lockError(user: User, wall: Long): DomainError? = when {
+        user.ownerLocked -> DomainError.InvalidState("USER", "LOCKED_UNTIL_RESET")
+        user.lock?.isActive(wall, deviceTime) == true -> DomainError.InvalidState("USER", "LOCKED")
+        else -> null
+    }
+
+    /**
+     * One more wrong PIN. From the 5th, a growing temporary lock (30 s doubling, at most 15 min); from the
+     * [OWNER_RESET_AFTER]th, a non-owner stays locked until the owner resets the PIN — so even a device clock
+     * changed across a reboot cannot buy unlimited guesses. The owner (whom nobody else can unlock) keeps the
+     * temporary lock only.
+     */
+    private fun failedAttempt(user: User, wall: Long): User {
+        val attempts = user.failedAttempts + 1
+        if (attempts >= OWNER_RESET_AFTER && user.role != Role.OWNER) return user.copy(failedAttempts = attempts, ownerLocked = true)
+        if (attempts < 5) return user.copy(failedAttempts = attempts)
+        val duration = minOf(15 * 60_000L, 30_000L shl minOf(attempts - 5, 5))
+        val lock = PinLock(startWall = wall, untilWall = wall + duration, bootId = deviceTime.bootId(), untilElapsed = deviceTime.elapsedMillis() + duration)
+        return user.copy(failedAttempts = attempts, lock = lock)
     }
 
     private fun isLastActiveOwner(user: User) = user.isActive && users.all().count { it.role == Role.OWNER && it.isActive } == 1
@@ -210,15 +263,14 @@ class IdentityService(
             val user = users.byUsername(username.trim().lowercase()) ?: return@transaction null to DomainError.AuthenticationRequired
             val now = clock.nowEpochMillis()
             if (!user.isActive) return@transaction null to DomainError.AuthenticationRequired
-            if (now < user.lockedUntilEpochMillis) return@transaction null to DomainError.InvalidState("USER", "LOCKED")
+            lockError(user, now)?.let { return@transaction null to it }
             if (!PinHasher.verify(pin, user.pinHash)) {
-                val attempts = user.failedAttempts + 1
-                val lock = if (attempts >= 5) now + minOf(15 * 60_000L, 30_000L shl minOf(attempts - 5, 5)) else 0L
-                users.save(user.copy(failedAttempts = attempts, lockedUntilEpochMillis = lock))
-                trail.append(AuditDraft("LOGIN_FAILURE", "USER", user.id.value, "attempts=$attempts"), user.toActor(), ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
+                val failed = failedAttempt(user, now)
+                users.save(failed)
+                trail.append(AuditDraft("LOGIN_FAILURE", "USER", user.id.value, "attempts=${failed.failedAttempts}"), user.toActor(), ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
                 return@transaction null to DomainError.AuthenticationRequired
             }
-            users.save(user.copy(failedAttempts = 0, lockedUntilEpochMillis = 0))
+            users.save(user.copy(failedAttempts = 0, lock = null))
             trail.append(AuditDraft("LOGIN_SUCCESS", "USER", user.id.value, user.username), user.toActor(), ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
             user to null
         }
@@ -238,12 +290,17 @@ class IdentityService(
         ensure(u.matches(Regex("[a-z0-9._-]{3,32}"))) { DomainError.InvalidInput("username", "نام کاربری ۳ تا ۳۲ حرف لاتین یا عدد باشد.") }
         ensure(users.byUsername(u) == null) { DomainError.InvalidState("USER", "DUPLICATE_USERNAME") }
         ensure(displayName.trim().length in 2..60) { DomainError.InvalidInput("displayName", "نام نمایشی الزامی است.") }
-        return User(GlobalId.new(), u, displayName.trim(), role, grants, hashValidPin(pin), 0, 0, true)
+        return User(GlobalId.new(), u, displayName.trim(), role, grants, hashValidPin(pin), 0, null, true)
     }
 
     private fun <T> asOwner(block: (Actor) -> T): T = unitOfWork.transaction {
         val actor = session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
         ensure(actor.role.allows(Permission.USER_MANAGE)) { DomainError.PermissionDenied(Permission.USER_MANAGE.name) }
         block(actor)
+    }
+
+    companion object {
+        /** Wrong PINs after which a non-owner account waits for the owner. */
+        const val OWNER_RESET_AFTER = 10
     }
 }

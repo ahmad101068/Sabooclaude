@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The debug app is a separate test app: its name says so, so it is never used for real data. -->
+    <string name="app_name">سابو آزمایشی</string>
+</resources>
