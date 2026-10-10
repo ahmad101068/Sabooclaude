@@ -31,7 +31,7 @@ import ir.sabou.sales.CollectReceivable
 import ir.sabou.sales.CustomerType
 import ir.sabou.sales.PostDailySale
 import ir.sabou.sales.RegisterCustomer
-import ir.sabou.sales.SaleLine
+import ir.sabou.sales.SaleLineInput
 import ir.sabou.sales.SaveSaleDraft
 import ir.sabou.sales.Settlement
 import ir.sabou.treasury.ChequeDetails
@@ -89,7 +89,7 @@ class BooksTest {
         val invoice = core.purchasing.postInvoice(PostPurchaseInvoice(id(), branch, supplier, "1", kitchen, day, day, listOf(InvoiceLine(cheese, Quantity.units(1), rial(3_000_000))))).resultId
         assertEquals(1, core.books.pendingApprovals().size)
         val customer = core.salesOps.registerCustomer(RegisterCustomer(id(), branch, "شرکت آلفا", CustomerType.COMPANY, "", rial(100_000_000))).resultId
-        val sale = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLine(pizza, Quantity.units(1), rial(8_000_000))),
+        val sale = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLineInput(pizza, Quantity.units(1), rial(8_000_000))),
             rial(0), rial(0), rial(0), listOf(Settlement.Credit(customer, rial(8_000_000), day.plusDays(10))))).resultId
         core.salesOps.post(PostDailySale(id(), branch, sale))
         val receivable = core.overview.openReceivables().single().receivable.id
@@ -180,10 +180,10 @@ class BooksTest {
         fun cheque(no: String) = ChequeDetails(no, "ملت", "", day.plusDays(7), "مهمان")
         val settlements = listOf(Settlement.Liquid(cash, rial(1_000_000)), Settlement.Liquid(box, rial(3_000_000), cheque("1")), Settlement.Liquid(box, rial(4_000_000), cheque("2")))
         assertEquals("INVALID_INPUT:cheque", runCatching {
-            core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLine(pizza, Quantity.units(1), rial(8_000_000))),
+            core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLineInput(pizza, Quantity.units(1), rial(8_000_000))),
                 rial(0), rial(0), rial(0), listOf(Settlement.Liquid(box, rial(8_000_000)))))
         }.exceptionOrNull()!!.let { (it as ir.sabou.kernel.DomainException).error.code })
-        val sale = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLine(pizza, Quantity.units(1), rial(8_000_000))),
+        val sale = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLineInput(pizza, Quantity.units(1), rial(8_000_000))),
             rial(0), rial(0), rial(0), settlements)).resultId
         assertEquals(settlements, core.overview.salesDay(branch, day).sale!!.settlements)     // read back with the cheques
         core.salesOps.post(PostDailySale(id(), branch, sale))

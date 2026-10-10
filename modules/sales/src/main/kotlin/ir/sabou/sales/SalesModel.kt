@@ -18,7 +18,38 @@ data class Customer(
     val isActive: Boolean = true,
 )
 
-data class SaleLine(val menuItemId: GlobalId, val portions: Quantity, val gross: Money)
+/**
+ * One menu item of the day, as recorded. [gross] = [unitPrice] × [portions] (half-up to the Rial), computed by the
+ * sales domain and kept as recorded. [listPrice] is the menu price in force when the line was recorded (null when the
+ * item had none and the price was typed at the sale); a [unitPrice] that differs from it is an override and carries
+ * its [overrideReason].
+ */
+data class SaleLine(
+    val menuItemId: GlobalId,
+    val portions: Quantity,
+    val unitPrice: Money,
+    val gross: Money,
+    val listPrice: Money? = null,
+    val overrideReason: String? = null,
+) {
+    val overridden: Boolean get() = listPrice != null && unitPrice != listPrice
+
+    companion object {
+        fun priced(menuItemId: GlobalId, portions: Quantity, unitPrice: Money, listPrice: Money?, overrideReason: String?): SaleLine =
+            SaleLine(menuItemId, portions, unitPrice, unitPrice.times(portions), listPrice, overrideReason)
+    }
+}
+
+/**
+ * What is entered for a line: the item, how many and — only when the menu has no price for it, or the price is
+ * overridden — the unit price. The total is never entered; the domain computes it.
+ */
+data class SaleLineInput(
+    val menuItemId: GlobalId,
+    val portions: Quantity,
+    val unitPrice: Money? = null,
+    val overrideReason: String? = null,
+)
 
 sealed interface Settlement {
     val amount: Money

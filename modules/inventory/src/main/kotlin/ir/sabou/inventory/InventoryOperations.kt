@@ -367,6 +367,8 @@ class InventoryOperations(
 
 /** Turns menu sales into ingredient requirements using the recipe version in force on the sale date. */
 class RecipeBook(private val recipes: RecipeStore) {
+    fun menuItem(id: GlobalId): MenuItem? = recipes.menuItem(id)
+
     fun versionOn(menuItemId: GlobalId, date: BusinessDate): RecipeVersion =
         recipes.versions(menuItemId).filter { it.effectiveFrom <= date }.maxByOrNull { it.effectiveFrom }
             ?: throw DomainException(DomainError.InvalidState("RECIPE", "NO_VERSION_ON_DATE"))
