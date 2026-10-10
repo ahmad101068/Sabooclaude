@@ -153,6 +153,24 @@ data class DefineMenuItem(override val commandId: GlobalId, val name: String) : 
     override fun fingerprint() = name
 }
 
+/** Renames a menu item or takes it off / back on the menu (inactive items are not sold or priced). */
+@NoDocument
+data class UpdateMenuItem(override val commandId: GlobalId, val menuItemId: GlobalId, val name: String, val isActive: Boolean) : Command {
+    override val requiredPermission = Permission.RECIPE_MANAGE
+    override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
+    override fun fingerprint() = "$menuItemId|$name|$isActive"
+}
+
+/** Deletes a menu item that was never used (no recipe, price or sale); a used one can only be deactivated. */
+@NoDocument
+data class DeleteMenuItem(override val commandId: GlobalId, val menuItemId: GlobalId) : Command {
+    override val requiredPermission = Permission.RECIPE_MANAGE
+    override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
+    override fun fingerprint() = menuItemId.toString()
+}
+
 @NoDocument
 data class PublishRecipe(
     override val commandId: GlobalId,
@@ -172,6 +190,8 @@ class InventoryOperations(
     private val items: ItemStore,
     private val locations: LocationStore,
     private val recipes: RecipeStore,
+    /** Whether another module refers to a menu item (prices, sales); such an item is never deleted. */
+    private val menuItemInUse: (GlobalId) -> Boolean = { false },
 ) {
     private val cap get() = gateway.ownCapability
 
@@ -336,10 +356,29 @@ class InventoryOperations(
     fun defineMenuItem(c: DefineMenuItem): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
         val name = cmd.name.trim()
         ensure(name.length in 2..80) { DomainError.InvalidInput("name", "نام آیتم منو الزامی است.") }
+        ensure(recipes.menuItems().none { it.name == name }) { DomainError.InvalidInput("name", "آیتمی با این نام در منو هست.") }
         val menuItem = MenuItem(GlobalId.new(), name)
         recipes.saveMenuItem(menuItem)
         ctx.audit(AuditDraft("MENU_ITEM_CREATE", "MENU_ITEM", menuItem.id.value, name))
         menuItem.id
+    }
+
+    fun updateMenuItem(c: UpdateMenuItem): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val item = recipes.menuItem(cmd.menuItemId) ?: throw DomainException(DomainError.NotFound("MENU_ITEM"))
+        val name = cmd.name.trim()
+        ensure(name.length in 2..80) { DomainError.InvalidInput("name", "نام آیتم منو الزامی است.") }
+        ensure(recipes.menuItems().none { it.id != item.id && it.name == name }) { DomainError.InvalidInput("name", "آیتمی با این نام در منو هست.") }
+        recipes.saveMenuItem(item.copy(name = name, isActive = cmd.isActive))
+        ctx.audit(AuditDraft("MENU_ITEM_UPDATE", "MENU_ITEM", item.id.value, "name=$name;active=${cmd.isActive}"))
+        item.id
+    }
+
+    fun deleteMenuItem(c: DeleteMenuItem): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val item = recipes.menuItem(cmd.menuItemId) ?: throw DomainException(DomainError.NotFound("MENU_ITEM"))
+        ensure(recipes.versions(item.id).isEmpty() && !menuItemInUse(item.id)) { DomainError.InvalidState("MENU_ITEM", "IN_USE") }
+        recipes.deleteMenuItem(item.id)
+        ctx.audit(AuditDraft("MENU_ITEM_DELETE", "MENU_ITEM", item.id.value, item.name))
+        item.id
     }
 
     /** Recipes are versioned: a new version applies from its date and never alters past sales. */

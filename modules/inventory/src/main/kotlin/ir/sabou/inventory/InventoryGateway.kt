@@ -48,6 +48,8 @@ class InventoryGateway(
         return location
     }
 
+    private fun nameOf(id: GlobalId): String = items.byId(id)?.name.orEmpty()
+
     fun item(id: GlobalId): Item {
         val item = items.byId(id) ?: throw DomainException(DomainError.NotFound("ITEM"))
         ensure(item.isActive) { DomainError.InvalidState("ITEM", "INACTIVE") }
@@ -59,7 +61,7 @@ class InventoryGateway(
     /** Weighted-average value of taking [quantity] out of the balance; the last unit takes the remainder. */
     fun valueOf(balance: StockBalance, quantity: Quantity): Money {
         ensure(quantity <= balance.quantity) {
-            DomainError.InsufficientStock(balance.itemId.value, balance.quantity.micros, quantity.micros)
+            DomainError.InsufficientStock(balance.itemId.value, balance.quantity.micros, quantity.micros, nameOf(balance.itemId))
         }
         if (quantity == balance.quantity) return balance.value
         return Money.of(Ratio.mulDiv(balance.value.rial, quantity.micros, balance.quantity.micros, Rounding.HALF_UP))
@@ -188,7 +190,7 @@ class InventoryGateway(
     ) {
         ledger.requireOpenPeriod(date)
         val before = stock.balance(itemId, location.id)
-        ensure(quantity <= before.quantity) { DomainError.InsufficientStock(itemId.value, before.quantity.micros, quantity.micros) }
+        ensure(quantity <= before.quantity) { DomainError.InsufficientStock(itemId.value, before.quantity.micros, quantity.micros, nameOf(itemId)) }
         ensure(value <= before.value) { DomainError.InsufficientStock(itemId.value, before.value.rial, value.rial) }
         val nextQuantity = before.quantity - quantity
         // A balance that reaches zero quantity must also reach zero value (no orphan value).

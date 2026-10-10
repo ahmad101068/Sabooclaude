@@ -79,4 +79,27 @@ class MenuPricesTest {
         assertEquals(Money.of(333_333), line.unitPrice)             // per portion, for information
         assertEquals(null, line.listPrice)
     }
+
+    @Test fun aMenuItemIsRenamedDeactivatedOrDeletedOnlyWhileUnused() {
+        val core = boot()
+        core.bootstrap("شعبه یک", "مالک", "owner", "123456".toCharArray())
+        val typo = core.inventory.defineMenuItem(DefineMenuItem(GlobalId.new(), "پیتزای اشتباه")).resultId
+        assertEquals("INVALID_INPUT:name", assertFailsWith<ir.sabou.kernel.DomainException> {
+            core.inventory.defineMenuItem(DefineMenuItem(GlobalId.new(), "پیتزای اشتباه"))
+        }.error.code)
+        core.inventory.updateMenuItem(ir.sabou.inventory.UpdateMenuItem(GlobalId.new(), typo, "پیتزا مخصوص", true))
+        assertEquals("پیتزا مخصوص", core.overview.menu().single().item.name)
+        core.inventory.deleteMenuItem(ir.sabou.inventory.DeleteMenuItem(GlobalId.new(), typo))   // never used
+        assertTrue(core.overview.menu().isEmpty())
+
+        val priced = core.inventory.defineMenuItem(DefineMenuItem(GlobalId.new(), "سالاد")).resultId
+        core.salesOps.setMenuPrice(SetMenuPrice(GlobalId.new(), Scope.Organization, priced, day, Money.of(1_000_000)))
+        assertEquals("INVALID_STATE:MENU_ITEM:IN_USE", assertFailsWith<ir.sabou.kernel.DomainException> {
+            core.inventory.deleteMenuItem(ir.sabou.inventory.DeleteMenuItem(GlobalId.new(), priced))
+        }.error.code)
+        core.inventory.updateMenuItem(ir.sabou.inventory.UpdateMenuItem(GlobalId.new(), priced, "سالاد", false))
+        val branch = Scope.Branch(core.overview.branches().single().id)
+        assertTrue(core.overview.menuPrices(branch, day).isEmpty())            // off the menu: not priced or sold
+    }
 }
+

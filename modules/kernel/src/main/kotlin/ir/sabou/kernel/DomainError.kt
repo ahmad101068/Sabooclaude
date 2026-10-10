@@ -18,7 +18,8 @@ sealed class DomainError(val code: String, val userMessage: String) {
     class OwnedByAnotherModule(val owner: String) : DomainError("OWNED_BY:$owner", "این سند متعلق به ماژول دیگری است و فقط از همان ماژول قابل اصلاح است.")
     class InsufficientFunds(val account: String, val available: Long, val requested: Long) :
         DomainError("INSUFFICIENT_FUNDS:$account", "موجودی حساب برای این عملیات کافی نیست.")
-    class InsufficientStock(val item: String, val available: Long, val requested: Long) :
+    /** [itemName] is for the person; [item] (the id) stays in the code. Quantities in micro-units of the item's unit. */
+    class InsufficientStock(val item: String, val available: Long, val requested: Long, val itemName: String = "") :
         DomainError("INSUFFICIENT_STOCK:$item", "موجودی کالا کافی نیست.")
     class ConcurrentModification(val entity: String) : DomainError("CONCURRENT_MODIFICATION:$entity", "اطلاعات هم‌زمان تغییر کرده است؛ دوباره تلاش کنید.")
     class IntegrityViolation(val detail: String) : DomainError("INTEGRITY:$detail", "یکپارچگی داده تأیید نشد.")
