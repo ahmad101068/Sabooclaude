@@ -89,6 +89,12 @@ class Books internal constructor(private val core: SabouCore) {
         return core.approvalRules.all()
     }
 
+    /** Whether, and up to which total, the owner may approve invoices they recorded. */
+    fun selfApprovalPolicy(): ir.sabou.purchasing.SelfApprovalPolicy {
+        actor(Permission.APPROVAL_RULES, Permission.PURCHASE_APPROVE)
+        return core.approvalRules.selfApproval()
+    }
+
     /** Invoices waiting for approval in the visible branches. */
     fun pendingApprovals(): List<ApprovalItem> {
         val a = actor(Permission.PURCHASE_APPROVE, Permission.PURCHASE_VIEW)

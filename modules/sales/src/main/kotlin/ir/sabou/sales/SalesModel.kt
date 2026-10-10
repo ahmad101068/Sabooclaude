@@ -112,7 +112,19 @@ data class Collection(
     val reversed: Boolean,
 )
 
-data class SalesDay(val scope: Scope.Branch, val date: BusinessDate, val closed: Boolean, val countedCash: Money?)
+/**
+ * A branch's business day. Closing it counts the cash box ([cashAccountId]): [countedCash] is what was in it,
+ * [difference] = counted − book (− short, + over), booked under the cash count [countId].
+ */
+data class SalesDay(
+    val scope: Scope.Branch,
+    val date: BusinessDate,
+    val closed: Boolean,
+    val countedCash: Money?,
+    val cashAccountId: GlobalId? = null,
+    val difference: Long = 0,
+    val countId: GlobalId? = null,
+)
 
 interface CustomerStore {
     fun byId(id: GlobalId): Customer?

@@ -92,6 +92,8 @@ private class SalesData(
     val number: String? = null,
     /** Menu price in force per menu item on the day (no entry: the item has no menu price). */
     val prices: Map<GlobalId, Money> = emptyMap(),
+    val cashBoxes: List<ir.sabou.core.AccountBalance> = emptyList(),
+    val countNumber: String? = null,
 )
 
 @Composable
@@ -111,6 +113,8 @@ fun SalesScreen(nav: Nav) {
                     day = view.day,
                     number = view.number,
                     prices = overview.menuPrices(branch, date).mapNotNull { v -> v.price?.let { v.item.id to it } }.toMap(),
+                    cashBoxes = view.cashBoxes,
+                    countNumber = view.countNumber,
                 )
             }
             val d = state.orNull()
@@ -473,6 +477,7 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
     val sale = data.sale!!
     val action = rememberAction()
     var counted by rememberSaveable { mutableStateOf<Money?>(null) }
+    var cashBox by rememberSaveable { mutableStateOf<GlobalId?>(null) }
     var reason by rememberSaveable { mutableStateOf("") }
     var confirmReverse by remember { mutableStateOf(false) }
     val commandId = rememberSaveable(sale.id) { mutableStateOf(GlobalId.new()) }
@@ -491,8 +496,7 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
             if (sale.transactions > 0) KeyValue("فاکتور · میانگین هر فاکتور", "${Fa.number(sale.transactions.toLong())} · ${Fa.rial(sale.payable.rial / sale.transactions)}")
             KeyValue("بهای تمام‌شده مواد", Fa.rial(sale.cost))
             if (!sale.netFood.isZero) {
-                val pct = sale.cost.rial * 1000 / sale.netFood.rial
-                KeyValue("درصد بهای غذا (Food cost)", Fa.digits("${pct / 10}.${pct % 10}").replace('.', '٫') + "٪")
+                KeyValue("درصد بهای غذا (Food cost)", Fa.percent(ir.sabou.kernel.Ratio.mulDiv(sale.cost.rial, 10_000, sale.netFood.rial)))
             }
         }
         SCard {
@@ -513,14 +517,34 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
                 }
             }
         }
+        data.day?.takeIf { it.closed }?.let { day ->
+            SCard {
+                Text("شمارش صندوق", style = SabouType.section, color = Sabou.colors.ink)
+                data.countNumber?.let { KeyValue("شماره سند", Fa.digits(it)) }
+                day.countedCash?.let { KeyValue("نقد شمارش‌شده", Fa.rial(it) + " ریال") }
+                if (day.difference != 0L) KeyValue(if (day.difference < 0) "کسری صندوق" else "اضافه صندوق", Fa.rial(kotlin.math.abs(day.difference)) + " ریال",
+                    if (day.difference < 0) Sabou.colors.danger else Sabou.colors.moneyIn)
+                else if (day.countId != null) Text("صندوق با دفاتر برابر بود.", style = SabouType.caption, color = Sabou.colors.muted)
+            }
+        }
         action.error?.let { Banner(it) }
         if (!closed && session.can(Permission.SALES_DAY_CLOSE)) {
             FormCard("بستن روز") {
-                MoneyInput("نقد شمارش‌شده صندوق", counted, { counted = it }, hint = "پس از بستن، فروش این روز قابل تغییر نیست مگر با بازگشایی مالک.")
-                PrimaryButton("بستن روز فروش", {
-                    val c = counted ?: return@PrimaryButton
-                    action.run({ salesOps.closeDay(CloseSalesDay(commandId.value, branch, date, c)) }) { commandId.value = GlobalId.new() }
-                }, enabled = counted != null, busy = action.busy)
+                if (data.cashBoxes.isEmpty()) Banner("برای این شعبه صندوق نقدی تعریف نشده است.", ChipKind.ACCENT)
+                else {
+                    val box = data.cashBoxes.firstOrNull { it.account.id == cashBox } ?: data.cashBoxes.first()
+                    if (data.cashBoxes.size > 1) Picker("صندوق", data.cashBoxes.map { Choice(it.account.id, it.account.name) }, box.account.id, { cashBox = it })
+                    KeyValue("مانده دفتری صندوق", Fa.rial(box.balance) + " ریال")
+                    MoneyInput("نقد شمارش‌شده صندوق", counted, { counted = it }, hint = "پس از بستن، فروش این روز قابل تغییر نیست مگر با بازگشایی مالک.")
+                    counted?.let { c ->
+                        val diff = c.rial - box.balance
+                        if (diff != 0L) Banner((if (diff < 0) "کسری صندوق: " else "اضافه صندوق: ") + Fa.rial(kotlin.math.abs(diff)) + " ریال — با بستن روز در حساب «کسر و اضافه صندوق» ثبت می‌شود.", ChipKind.ACCENT)
+                    }
+                    PrimaryButton("شمارش و بستن روز", {
+                        val c = counted ?: return@PrimaryButton
+                        action.run({ salesOps.closeDay(CloseSalesDay(commandId.value, branch, date, box.account.id, c)) }) { commandId.value = GlobalId.new() }
+                    }, enabled = counted != null, busy = action.busy)
+                }
             }
         }
         if (closed && session.can(Permission.SALES_DAY_REOPEN)) {

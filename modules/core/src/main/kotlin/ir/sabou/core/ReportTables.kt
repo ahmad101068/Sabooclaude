@@ -150,7 +150,7 @@ object ReportTables {
         "تغییر قیمت تأمین‌کنندگان", period(from, to), listOf("تاریخ", "تأمین‌کننده", "کالا", "واحد", "قیمت قبلی", "تاریخ قبلی", "قیمت جدید", "تغییر"),
         rows.map {
             listOf(Cell.of(Fa.date(it.date)), Cell.of(it.supplier), Cell.of(it.item.name), Cell.of(unitName(it.item.unit)), Cell.Amount(it.previousPrice),
-                Cell.of(Fa.date(it.previousDate)), Cell.Amount(it.price), Cell.Percent(it.changeBp))
+                Cell.of(Fa.date(it.previousDate)), Cell.Amount(it.price), it.changeBp?.let { bp -> Cell.Percent(bp) } ?: Cell.of("قیمت اول"))
         },
         notes = listOf(RIAL, "قیمت‌ها برای یک واحد هر کالاست و با فاکتور قبلی همان تأمین‌کننده مقایسه شده‌اند."),
     )

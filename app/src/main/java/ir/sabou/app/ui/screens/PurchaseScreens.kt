@@ -123,7 +123,7 @@ object PurchaseScreens {
         if (qty == null || value == null || qty.isZero) null else Ratio.mulDiv(value.rial, Quantity.SCALE, qty.micros)
 
     private fun changeText(previous: Long, now: Long): String {
-        val bp = if (previous == 0L) 0 else (now - previous) * 10_000 / previous
+        val bp = ir.sabou.kernel.Ratio.changeBp(previous, now) ?: return "قیمت اول"
         return (if (bp > 0) "+" else if (bp < 0) "−" else "") + Fa.percent(kotlin.math.abs(bp))
     }
 
@@ -294,7 +294,7 @@ object PurchaseScreens {
                         if (price != null && item != null) {
                             val text = "قیمت هر ${unitName(item.unit)}: ${Fa.rial(price)} ریال" +
                                 (last?.let { " · خرید قبلی ${Fa.rial(it)} (${changeText(it, price)})" } ?: "")
-                            val far = last != null && last > 0 && kotlin.math.abs(price - last) * 100 / last >= 5
+                            val far = last != null && (ir.sabou.kernel.Ratio.changeBp(last, price)?.let { kotlin.math.abs(it) >= 500 } ?: false)
                             Text(text, style = SabouType.caption, color = if (far) Sabou.colors.danger else Sabou.colors.muted)
                         }
                         if (item != null && supplier != null && item.approvedSupplierIds.isNotEmpty() && supplier !in item.approvedSupplierIds) {
@@ -666,7 +666,7 @@ object PurchaseScreens {
                         SCard(onClick = { nav.go(Route.PurchaseDetail(c.invoiceId)) }) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("${c.item.name} · ${c.supplier}", style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
-                                Chip(changeText(c.previousPrice, c.price), if (c.changeBp > 0) ChipKind.DANGER else ChipKind.PRIMARY)
+                                Chip(changeText(c.previousPrice, c.price), if ((c.changeBp ?: 1) > 0) ChipKind.DANGER else ChipKind.PRIMARY)
                             }
                             Text("هر ${unitName(c.item.unit)}: ${Fa.rial(c.previousPrice)} (${Fa.date(c.previousDate)}) ← ${Fa.rial(c.price)} (${Fa.date(c.date)})",
                                 style = SabouType.caption, color = Sabou.colors.muted)
@@ -690,9 +690,18 @@ object PurchaseScreens {
                 Text("تأیید برای پرداخت", style = SabouType.section, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
                 Chip("${Fa.number(inv.approvals.size.toLong())} از ${Fa.number(inv.requiredApprovals.toLong())}", if (inv.approved) ChipKind.PRIMARY else ChipKind.ACCENT)
             }
-            inv.approvals.forEach { a -> Text("تأیید: ${a.name}", style = SabouType.caption, color = Sabou.colors.muted) }
+            inv.approvals.forEach { a ->
+                Text("تأیید: ${a.name}" + if (a.self) " (ثبت‌کننده · ${a.reason.orEmpty()})" else "", style = SabouType.caption,
+                    color = if (a.self) Sabou.colors.onAccentSoft else Sabou.colors.muted)
+            }
             if (inv.status == InvoiceStatus.POSTED && !inv.approved && session.can(Permission.PURCHASE_APPROVE)) {
-                PrimaryButton("تأیید می‌کنم", { action.run({ approvals.approve(ir.sabou.purchasing.ApproveInvoice(GlobalId.new(), inv.scope, inv.id)) }) }, busy = action.busy)
+                // Approving an invoice you recorded yourself (owner only): with a reason, within the owner's policy.
+                val self = inv.recordedBy == session.actor.userId
+                var why by rememberSaveable(inv.id) { mutableStateOf("") }
+                if (self) TextInput("دلیل تأیید فاکتوری که خودتان ثبت کرده‌اید", why, { why = it })
+                PrimaryButton("تأیید می‌کنم", {
+                    action.run({ approvals.approve(ir.sabou.purchasing.ApproveInvoice(GlobalId.new(), inv.scope, inv.id, why.takeIf { self })) }) { why = "" }
+                }, enabled = !self || why.trim().length >= 3, busy = action.busy)
             }
             if (inv.status == InvoiceStatus.POSTED && inv.approvals.isNotEmpty() && session.can(Permission.PURCHASE_UNAPPROVE)) {
                 TextInput("دلیل لغو تأیید", reason, { reason = it })
@@ -729,6 +738,7 @@ object PurchaseScreens {
     fun ApprovalRules(nav: Nav) {
         val session = LocalSession.current
         val data by load(session) { Triple(books.approvalRules(), overview.branches(), overview.suppliers().map { it.supplier }) }
+        val policy by load(session) { books.selfApprovalPolicy() }
         var name by rememberSaveable { mutableStateOf("") }
         var branchId by rememberSaveable { mutableStateOf<BranchId?>(null) }
         var supplierId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
@@ -745,7 +755,7 @@ object PurchaseScreens {
             Header("قانون‌های تأیید فاکتور", onBack = nav.back)
             Page {
                 Text("فاکتوری که با یک قانون جور باشد، پیش از پرداخت به همان تعداد تأییدِ افراد مختلف نیاز دارد (سخت‌ترین قانون ملاک است). " +
-                    "قانون فقط بر فاکتورهای بعد از تعریفش اثر دارد. ثبت‌کننده‌ی فاکتور نمی‌تواند آن را تأیید کند.", style = SabouType.caption, color = Sabou.colors.muted)
+                    "قانون فقط بر فاکتورهای بعد از تعریفش اثر دارد. ثبت‌کننده‌ی فاکتور نمی‌تواند آن را تأیید کند؛ مالک فقط طبق تنظیم پایین و با ذکر دلیل.", style = SabouType.caption, color = Sabou.colors.muted)
                 Loaded(data) { (rules, branches, suppliers) ->
                     if (rules.isEmpty()) EmptyState("قانونی تعریف نشده است؛ همه‌ی فاکتورها بدون تأیید پرداخت می‌شوند.")
                     rules.forEach { r ->
@@ -764,6 +774,7 @@ object PurchaseScreens {
                             })
                         }
                     }
+                    policy.orNull()?.let { SelfApprovalCard(it, action) }
                     if (session.can(Permission.APPROVAL_RULES)) FormCard("قانون جدید") {
                         TextInput("نام", name, { name = it }, placeholder = "مثلاً خریدهای بالای ۱۰ میلیون")
                         Picker("شعبه", listOf(Choice<BranchId?>(null, "همه‌ی شعب")) + branches.map { Choice<BranchId?>(it.id, it.name) }, branchId, { branchId = it })
@@ -782,6 +793,31 @@ object PurchaseScreens {
                         }, enabled = name.trim().length >= 2, busy = action.busy)
                     }
                 }
+            }
+        }
+    }
+
+    /** The owner's own invoices: may they be approved by the owner, up to which total (always with a reason). */
+    @Composable
+    private fun SelfApprovalCard(policy: ir.sabou.purchasing.SelfApprovalPolicy, action: ir.sabou.app.ui.Action) {
+        val session = LocalSession.current
+        var allowed by rememberSaveable(policy) { mutableStateOf(policy.allowed) }
+        var cap by rememberSaveable(policy) { mutableStateOf(policy.maxAmount) }
+        SCard {
+            Text("تأیید فاکتورِ ثبت‌شده توسط خود مالک", style = SabouType.section, color = Sabou.colors.ink)
+            Text(
+                when {
+                    !policy.allowed -> "مجاز نیست؛ فاکتوری که مالک ثبت کند را باید شخص دیگری تأیید کند."
+                    policy.maxAmount == null -> "مجاز، با ذکر دلیل، بدون سقف مبلغ."
+                    else -> "مجاز، با ذکر دلیل، تا ${Fa.rial(policy.maxAmount!!)} ریال."
+                }, style = SabouType.caption, color = Sabou.colors.muted,
+            )
+            if (session.can(Permission.APPROVAL_RULES)) {
+                Segmented(listOf("مجاز", "مجاز نیست"), if (allowed) 0 else 1, { allowed = it == 0 })
+                if (allowed) MoneyInput("سقف مبلغ فاکتور", cap, { cap = it }, hint = "خالی = بدون سقف")
+                SecondaryButton("ذخیره", {
+                    action.run({ approvals.setSelfApproval(ir.sabou.purchasing.SetSelfApprovalPolicy(GlobalId.new(), allowed, cap.takeIf { allowed })) })
+                }, enabled = !action.busy && (allowed != policy.allowed || cap != policy.maxAmount))
             }
         }
     }
@@ -1169,7 +1205,12 @@ object PurchaseScreens {
                         if (loc == null) EmptyState("انباری برای این شعبه تعریف نشده است.")
                         else {
                             val result by load(session, loc, lines) { buying.suggestions(loc, lines, session.today, minutesNow()) }
-                            Loaded(result) { groups ->
+                            Loaded(result) { suggested ->
+                                val groups = suggested.groups
+                                // What could not be broken down is said, never silently left out of the order.
+                                suggested.problems.forEach { pr ->
+                                    Banner("«${pr.name}»: ${pr.detail}", if (pr.kind == ir.sabou.core.RecipeProblem.Kind.CYCLE) ChipKind.DANGER else ChipKind.ACCENT)
+                                }
                                 if (groups.isEmpty()) EmptyState("فعلاً خریدی لازم نیست. برای کالاها «سطح مطلوب» تعریف کنید یا غذاهای برنامه را وارد کنید.")
                                 groups.forEach { g ->
                                     SCard {
@@ -1192,7 +1233,7 @@ object PurchaseScreens {
                                     }
                                 }
                                 if (groups.isNotEmpty()) ExportButtons("پیشنهاد-خرید") {
-                                    listOf(ReportTables.suggestions(buying.suggestions(loc, lines, session.today, minutesNow()), locations.firstOrNull { it.id == loc }?.name ?: "", session.today))
+                                    listOf(ReportTables.suggestions(buying.suggestions(loc, lines, session.today, minutesNow()).groups, locations.firstOrNull { it.id == loc }?.name ?: "", session.today))
                                 }
                             }
                         }

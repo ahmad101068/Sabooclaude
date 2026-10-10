@@ -39,11 +39,7 @@ data class Dashboard(
     val bank: Long,
 ) {
     /** Revenue change against the previous period in basis points; null without a previous figure. */
-    val revenueChangeBp: Long? get() {
-        if (previousRevenue <= 0 || revenue < 0) return null
-        val change = Ratio.mulDiv(kotlin.math.abs(revenue - previousRevenue), 10_000, previousRevenue)
-        return if (revenue < previousRevenue) -change else change
-    }
+    val revenueChangeBp: Long? get() = if (revenue < 0) null else Ratio.changeBp(previousRevenue, revenue)
 }
 
 class Dashboards internal constructor(private val core: SabouCore) {

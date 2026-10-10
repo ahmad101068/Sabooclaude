@@ -45,7 +45,17 @@ data class MenuEntry(val item: MenuItem, val latest: RecipeVersion?)
  * the branch's [own] price, the [organization] price, and every version recorded for the item (newest first).
  */
 data class MenuPriceView(val item: MenuItem, val price: Money?, val own: Boolean, val organization: Money?, val history: List<ir.sabou.sales.MenuPrice>)
-data class SalesDayView(val sale: DailySale?, val day: SalesDay?, val customers: List<Customer>, val accounts: List<TreasuryAccount>, val number: String? = null)
+data class SalesDayView(
+    val sale: DailySale?,
+    val day: SalesDay?,
+    val customers: List<Customer>,
+    val accounts: List<TreasuryAccount>,
+    val number: String? = null,
+    /** Cash boxes of the branch with their book balance, for whoever closes the day (empty for others). */
+    val cashBoxes: List<AccountBalance> = emptyList(),
+    /** The day's cash count number once closed. */
+    val countNumber: String? = null,
+)
 data class CustomerBalance(val customer: Customer, val owed: Money)
 data class OpenReceivable(val receivable: Receivable, val customer: String, val outstanding: Money)
 data class InvoiceRow(val invoice: PurchaseInvoice, val supplier: String, val outstanding: Money, val number: String? = null)
@@ -276,6 +286,12 @@ class Overview internal constructor(private val core: SabouCore) {
             // A cheque box takes customers' cheques (with their details); a cheque book never receives.
             accounts = core.treasuryAccounts.all().filter { it.isActive && it.scope == branch && it.kind != ir.sabou.treasury.TreasuryKind.ISSUED_CHEQUES },
             number = sale?.let { core.numbers.of(ir.sabou.platform.DocumentSeries.DAILY_SALE, it.id)?.text },
+            cashBoxes = if (a.role.allows(Permission.SALES_DAY_CLOSE) || a.role.allows(Permission.TREASURY_VIEW)) {
+                core.treasuryAccounts.all().filter {
+                    it.isActive && it.scope == branch && (it.kind == ir.sabou.treasury.TreasuryKind.CASH || it.kind == ir.sabou.treasury.TreasuryKind.PETTY_CASH)
+                }.map { AccountBalance(it, core.treasuryGateway.balance(it.id)) }
+            } else emptyList(),
+            countNumber = core.sales.day(branch, date)?.countId?.let { core.numbers.of(ir.sabou.platform.DocumentSeries.CASH_COUNT, it)?.text },
         )
     }
 
