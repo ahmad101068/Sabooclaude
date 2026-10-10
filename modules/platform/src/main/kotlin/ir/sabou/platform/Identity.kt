@@ -43,6 +43,12 @@ data class PinLock(val startWall: Long, val untilWall: Long, val bootId: String,
         bootId == time.bootId() -> time.elapsedMillis() < untilElapsed
         else -> wall < untilWall
     }
+
+    /** How long until the lock ends, as the same clocks as [isActive] see it. */
+    fun remainingSeconds(wall: Long, time: DeviceTime): Long {
+        val millis = if (bootId == time.bootId()) untilElapsed - time.elapsedMillis() else untilWall - maxOf(wall, startWall)
+        return (millis.coerceAtLeast(0) + 999) / 1000
+    }
 }
 
 /** The device's monotonic time since boot, and an id of the current boot. */
@@ -232,7 +238,7 @@ class IdentityService(
     /** The error for a locked account, or null. */
     private fun lockError(user: User, wall: Long): DomainError? = when {
         user.ownerLocked -> DomainError.InvalidState("USER", "LOCKED_UNTIL_RESET")
-        user.lock?.isActive(wall, deviceTime) == true -> DomainError.InvalidState("USER", "LOCKED")
+        user.lock?.isActive(wall, deviceTime) == true -> DomainError.InvalidState("USER", "LOCKED:${user.lock.remainingSeconds(wall, deviceTime)}")
         else -> null
     }
 

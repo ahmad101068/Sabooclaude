@@ -126,6 +126,8 @@ interface RecipeStore {
     fun menuItem(id: GlobalId): MenuItem?
     fun menuItems(): List<MenuItem>
     fun saveMenuItem(item: MenuItem)
+    /** Only for an item nothing refers to (see DeleteMenuItem). */
+    fun deleteMenuItem(id: GlobalId)
     fun versions(menuItemId: GlobalId): List<RecipeVersion>
     fun saveVersion(version: RecipeVersion)
     fun prepVersions(itemId: GlobalId): List<PrepRecipe>

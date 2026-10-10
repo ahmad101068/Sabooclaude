@@ -49,6 +49,8 @@ data class PriceChange(
     val previousDate: BusinessDate,
     val previousPrice: Long,
     val price: Long,
+    /** Who the previous price was paid to (may be another supplier). */
+    val previousSupplier: String = "",
 ) {
     /** null when there was no earlier price to compare with. */
     val changeBp: Long? get() = Ratio.changeBp(previousPrice, price)
@@ -72,6 +74,9 @@ data class Suggestion(
 ) {
     val value: Money? get() = unitPrice?.let { Money.of(Ratio.mulDiv(it, suggested.micros, Quantity.SCALE)) }
 }
+
+/** The last price paid for an item: per unit, to whom, when. */
+data class LastPaid(val price: Long, val supplier: String, val date: BusinessDate)
 
 data class SuggestionGroup(val supplier: Supplier?, val delivery: Delivery?, val lines: List<Suggestion>) {
     val total: Money get() = Money.sum(lines.mapNotNull { it.value })
@@ -147,29 +152,44 @@ class Buying internal constructor(private val core: SabouCore) {
     // ------------------------------------------------------------ Prices
 
     /** Unit price changes on invoices dated in [from]..[to] against the same supplier's previous invoice for the item. */
+    /**
+     * Unit prices that moved by at least [thresholdBp] against the last price paid for the same item — from any
+     * supplier, into any warehouse or branch the person can see — so a dearer supplier or another warehouse's
+     * purchase is not missed.
+     */
     fun priceChanges(from: BusinessDate, to: BusinessDate, thresholdBp: Long = 500): List<PriceChange> {
         val a = actor(Permission.PURCHASE_VIEW)
         val items = core.items.all().associateBy { it.id }
         val names = supplierNames()
-        val invoices = core.purchases.invoices().filter { it.status == InvoiceStatus.POSTED && a.canAccess(it.scope) }
-            .withIndex().sortedWith(compareBy({ it.value.date }, { it.index })).map { it.value }
-        val last = HashMap<Pair<GlobalId, GlobalId>, Pair<BusinessDate, Long>>()
+        val last = HashMap<GlobalId, LastPaid>()
         val changes = ArrayList<PriceChange>()
-        invoices.forEach { inv ->
+        postedInOrder(a).forEach { inv ->
             inv.lines.filter { !it.quantity.isZero }.groupBy { it.itemId }.forEach { (itemId, lines) ->
                 val price = Ratio.mulDiv(lines.sumOf { it.value.rial }, Quantity.SCALE, lines.sumOf { it.quantity.micros })
-                val key = inv.supplierId to itemId
-                val previous = last[key]
+                val previous = last[itemId]
                 if (previous != null && inv.date >= from && inv.date <= to) {
-                    val change = PriceChange(items[itemId] ?: return@forEach, names[inv.supplierId].orEmpty(), inv.id, inv.date, previous.first, previous.second, price)
+                    val change = PriceChange(items[itemId] ?: return@forEach, names[inv.supplierId].orEmpty(), inv.id, inv.date, previous.date, previous.price, price, previous.supplier)
                     val bp = change.changeBp
                     if (bp == null || kotlin.math.abs(bp) >= thresholdBp) changes += change
                 }
-                last[key] = inv.date to price
+                last[itemId] = LastPaid(price, names[inv.supplierId].orEmpty(), inv.date)
             }
         }
         return changes.sortedByDescending { it.date }
     }
+
+    /** The last unit price paid for each item, from any supplier, in what the person can see (form hints). */
+    fun lastPaid(branch: Scope.Branch): Map<GlobalId, LastPaid> {
+        val a = actor(Permission.PURCHASE_VIEW, Permission.PURCHASE_RECORD, Permission.PURCHASE_ORDER)
+        a.require(branch)
+        val names = supplierNames()
+        val result = HashMap<GlobalId, LastPaid>()
+        postedInOrder(a).forEach { inv -> inv.lines.filter { !it.quantity.isZero }.forEach { result[it.itemId] = LastPaid(it.unitPrice, names[inv.supplierId].orEmpty(), inv.date) } }
+        return result
+    }
+
+    private fun postedInOrder(a: Actor) = core.purchases.invoices().filter { it.status == InvoiceStatus.POSTED && a.canAccess(it.scope) }
+        .withIndex().sortedWith(compareBy({ it.value.date }, { it.index })).map { it.value }
 
     /** The last unit price paid to [supplierId] for each item (form hints and price warnings). */
     fun lastPrices(supplierId: GlobalId, branch: Scope.Branch): Map<GlobalId, Long> {

@@ -81,6 +81,7 @@ object Messages {
         "ITEM:SUPPLIER_NOT_APPROVED" to "این تأمین‌کننده برای یکی از کالاهای سفارش در فهرست تأمین‌کنندگان مجاز نیست. فهرست مجاز را در تعریف کالا ببینید.",
         "RECEIVABLE:AMOUNT_EXCEEDS_OUTSTANDING" to "مبلغ از مانده طلب بیشتر است.",
         "RECIPE:NOT_AFTER_LATEST_VERSION" to "تاریخ شروع رسپی جدید باید بعد از آخرین نسخه باشد.",
+        "MENU_ITEM:IN_USE" to "این آیتم رسپی، قیمت یا فروش دارد و حذف نمی‌شود؛ می‌توانید آن را از منو خارج کنید.",
         "RECIPE:NO_VERSION_ON_DATE" to "برای یکی از اقلام منو در این تاریخ رسپی تعریف نشده است.",
         "SALARY_PAYMENT:ALREADY_REVERSED" to "این پرداخت قبلاً برگشت خورده است.",
         "SALES_DAY:CLOSED" to "این روز فروش بسته شده است.",
@@ -114,11 +115,22 @@ object Messages {
     }
 
     fun of(error: DomainError): String = when (error) {
-        is DomainError.InvalidState -> states["${error.entity}:${error.state.substringBefore(':')}"] ?: error.userMessage
         // Usually a form restored after the app was closed, whose first submission had already gone through.
         is DomainError.IdempotencyConflict -> "این فرم قبلاً ثبت شده است (احتمالاً پیش از بسته شدن برنامه). فهرست را بررسی کنید؛ برای ثبت مورد تازه، صفحه را از نو باز کنید."
         is DomainError.InsufficientFunds -> "موجودی حساب کافی نیست (موجود: ${Fa.rial(error.available)} ریال)."
-        is DomainError.InsufficientStock -> "موجودی انبار کافی نیست (موجود: ${Fa.quantity(ir.sabou.kernel.Quantity.of(error.available))})."
+        is DomainError.InsufficientStock -> "موجودی انبار ${error.itemName.takeIf { it.isNotBlank() }?.let { "«$it» " } ?: ""}کافی نیست: " +
+            "لازم ${Fa.quantity(ir.sabou.kernel.Quantity.of(error.requested))}، موجود ${Fa.quantity(ir.sabou.kernel.Quantity.of(error.available))}."
+        is DomainError.InvalidState -> if (error.entity == "USER" && error.state.startsWith("LOCKED:")) {
+            val seconds = error.state.substringAfter(':').toLongOrNull() ?: 0
+            "به دلیل رمزهای اشتباه، ورود ${waitText(seconds)} قفل است."
+        } else states["${error.entity}:${error.state.substringBefore(':')}"] ?: error.userMessage
         else -> error.userMessage
+    }
+
+    /** «حدود ۳ دقیقه دیگر» / «۴۵ ثانیه دیگر». */
+    private fun waitText(seconds: Long): String = when {
+        seconds <= 0 -> "چند لحظه"
+        seconds < 60 -> "${Fa.number(seconds)} ثانیهٔ دیگر"
+        else -> "حدود ${Fa.number((seconds + 59) / 60)} دقیقهٔ دیگر"
     }
 }

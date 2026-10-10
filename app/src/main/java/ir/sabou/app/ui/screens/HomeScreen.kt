@@ -47,7 +47,10 @@ import ir.sabou.sales.Settlement
 import ir.sabou.treasury.TreasuryKind
 
 private data class Today(
+    /** Posted sales only: a draft is not a sale until it is posted (stock and books follow then). */
     val net: Long?,
+    /** A draft's amount, shown apart and never as sales. */
+    val draft: Long?,
     val status: String,
     val statusKind: ChipKind,
     val cash: Long,
@@ -73,14 +76,16 @@ fun HomeScreen(nav: Nav) {
         val accounts = (safe { overview.paymentAccounts() } ?: emptyList()).associateBy { it.id }
         val today = branch?.let { b ->
             safe { overview.today(date).firstOrNull { Scope.Branch(it.branch.id) == b } }?.let { day ->
-                val sale = day.sale
+                val all = day.sale
+                val sale = all?.takeIf { it.status == SaleStatus.POSTED }
                 val liquid = sale?.settlements?.filterIsInstance<Settlement.Liquid>().orEmpty()
                 Today(
                     net = sale?.netFood?.rial,
+                    draft = all?.takeIf { it.status == SaleStatus.DRAFT }?.netFood?.rial,
                     status = when {
                         day.closed -> "روز بسته"
-                        sale == null -> "ثبت نشده"
-                        sale.status == SaleStatus.POSTED -> "ثبت نهایی"
+                        all == null -> "ثبت نشده"
+                        all.status == SaleStatus.POSTED -> "ثبت نهایی"
                         else -> "پیش‌نویس"
                     },
                     statusKind = if (day.closed) ChipKind.NEUTRAL else ChipKind.ACCENT,
@@ -92,6 +97,9 @@ fun HomeScreen(nav: Nav) {
         }
 
         val todos = buildList {
+            today?.draft?.let {
+                add(Todo(R.drawable.ic_sales, "فروش امروز هنوز ثبت نهایی نشده", "پیش‌نویس ${Fa.rial(it)} ریال؛ تا ثبت نهایی، موجودی و دفاتر تغییر نمی‌کنند", Route.Sales, true))
+            }
             if (branch != null) {
                 val yesterday = date.plusDays(-1)
                 safe { overview.today(yesterday).firstOrNull { Scope.Branch(it.branch.id) == branch } }?.let { d ->
@@ -196,6 +204,9 @@ private fun Hero(today: Today?, onClick: () -> Unit) {
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(today?.net?.let { Fa.rial(it) } ?: "—", style = SabouType.display, color = c.onPrimary)
             Text("ریال", style = SabouType.body, color = c.onPrimaryMuted, modifier = Modifier.padding(bottom = 8.dp))
+        }
+        today?.draft?.let { d ->
+            Text("پیش‌نویس ${Fa.rial(d)} ریال هنوز ثبت نهایی نشده و در فروش حساب نمی‌شود.", style = SabouType.caption, color = c.onPrimaryMuted)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("نقد" to today?.cash, "کارت" to today?.card, "نسیه" to today?.credit).forEach { (label, v) ->
