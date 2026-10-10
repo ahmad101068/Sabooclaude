@@ -1,0 +1,238 @@
+10-10 14:19:16.391  5939  5961 I TestRunner: started: anOldUnencryptedPayloadIsRefusedWithoutWritingItToDisk(ir.sabou.app.DeviceTest)
+10-10 14:19:16.406  5939  5961 I SQLiteConnection: Database keying operation returned:0
+10-10 14:19:16.873  5939  6000 D ProfileInstaller: Installing profile for ir.sabou.erp.debug
+10-10 14:19:16.931  5803  5906 D PhFileGroupPop: Added file groups smarts_expressive_content_scoped_v1
+10-10 14:19:16.952  5803  5906 D PhFileGroupPop: Added file groups scripted_reply
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for java.lang.Throwable: Explicit termination method 'close' not called
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.CloseGuard.open(CloseGuard.java:190)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.openInner(SQLiteDatabase.java:1033)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.open(SQLiteDatabase.java:1017)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.openDatabase(SQLiteDatabase.java:844)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteOpenHelper.getDatabaseLocked(SQLiteOpenHelper.java:359)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteOpenHelper.getWritableDatabase(SQLiteOpenHelper.java:278)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SupportHelper.getWritableDatabase(SupportHelper.java:60)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.data.AppContainer.open(AppContainer.kt:86)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.data.AppContainer.open$default(AppContainer.kt:78)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.DeviceTest.encryptedDatabaseAndKeystoreKeySurviveAReopen(DeviceTest.kt:94)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at java.lang.reflect.Method.invoke(Native Method)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.ext.junit.runners.AndroidJUnit4.run(AndroidJUnit4.java:162)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.Suite.runChild(Suite.java:128)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.Suite.runChild(Suite.java:27)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:68)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:59)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.runner.AndroidJUnitRunner.onStart(AndroidJUnitRunner.java:463)
+10-10 14:19:17.157  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2205)
+10-10 14:19:17.208  5803  5906 D PhFileGroupPop: Added file groups multitask_experiment
+10-10 14:19:17.214  5803  5906 D PhFileGroupPop: Added file groups spam_verdict_enforcement_policy_config
+10-10 14:19:17.225  5803  5906 D PhFileGroupPop: Added file groups calendar_appointment_grammar
+10-10 14:19:17.250  5803  5906 D PhFileGroupPop: Added file groups birthday_grammars
+10-10 14:19:17.284  5803  5906 D PhFileGroupPop: Added file groups smarts_expressive_content_scoped_v1
+10-10 14:19:17.366  1787  2135 W OpaSSRequestSender: Failed to get ZeroStateResponse from AssistantClientSyncWorker with error java.util.concurrent.TimeoutException
+10-10 14:19:17.844  1787  2129 W OpaSSRequestSender: Failed to get ZeroStateResponse from AssistantClientSyncWorker with error java.util.concurrent.TimeoutException
+10-10 14:19:17.968  5803  5906 D PhFileGroupPop: Added file groups scripted_reply
+10-10 14:19:18.970  5803  5906 D SharedPreferencesImpl: Time required to fsync /data/user/0/com.google.android.apps.messaging/shared_prefs/gms_icing_mdd_shared_files.xml: [<1: 241, <2: 648, <4: 69, <8: 55, <16: 11, <32: 0, <64: 0, <128: 0, <256: 0, <512: 0, <1024: 0, <2048: 0, <4096: 0, <8192: 0, <16384: 0, >=16384: 0]
+10-10 14:19:19.065  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_reply_014_confidence.pb
+10-10 14:19:19.065  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_reply_014_confidence.pb)
+10-10 14:19:19.085  5803  6002 W DynamiteModule: Local module descriptor class for providerinstaller not found.
+10-10 14:19:19.086  1184  1232 W ProviderHelper: Unknown dynamite feature providerinstaller
+10-10 14:19:19.088  5803  6002 I DynamiteModule: Considering local module providerinstaller:0 and remote module providerinstaller:0
+10-10 14:19:19.088  5803  6002 W ProviderInstaller: Failed to load providerinstaller module: No acceptable module found. Local version is 0 and remote version is 0.
+10-10 14:19:19.089  5803  6002 I .apps.messagin: The ClassLoaderContext is a special shared library.
+10-10 14:19:19.094  5803  6002 I .apps.messagin: The ClassLoaderContext is a special shared library.
+10-10 14:19:19.094  5803  6002 D nativeloader: classloader namespace configured for unbundled product apk. library_path=/product/priv-app/PrebuiltGmsCore/lib/x86:/product/priv-app/PrebuiltGmsCore/PrebuiltGmsCore.apk!/lib/x86:/product/lib:/system/product/lib
+10-10 14:19:19.101  5803  6002 V NativeCrypto: Registering com/google/android/gms/org/conscrypt/NativeCrypto's 286 native methods...
+10-10 14:19:19.108  5803  6002 I ProviderInstaller: Installed default security provider GmsCore_OpenSSL
+10-10 14:19:19.110  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_12012019_1579310142.pb
+10-10 14:19:19.110  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_12012019_1579310142.pb)
+10-10 14:19:19.128  5803  6004 W DynamiteModule: Local module descriptor class for providerinstaller not found.
+10-10 14:19:19.136  5803  6004 I DynamiteModule: Considering local module providerinstaller:0 and remote module providerinstaller:0
+10-10 14:19:19.136  5803  6004 W ProviderInstaller: Failed to load providerinstaller module: No acceptable module found. Local version is 0 and remote version is 0.
+10-10 14:19:19.191  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955001
+10-10 14:19:19.204  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_reply_combined_012_confidence.pb
+10-10 14:19:19.204  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_reply_combined_012_confidence.pb)
+10-10 14:19:19.208  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955000
+10-10 14:19:19.214  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_reply_combined_014_confidence.pb
+10-10 14:19:19.214  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_reply_combined_014_confidence.pb)
+10-10 14:19:19.243  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955002
+10-10 14:19:19.246  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_reply_individual_012_confidence.pb
+10-10 14:19:19.246  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_reply_individual_012_confidence.pb)
+10-10 14:19:19.253  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955003
+10-10 14:19:19.255  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_reply_individual_014_confidence.pb
+10-10 14:19:19.255  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_reply_individual_014_confidence.pb)
+10-10 14:19:19.287  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955004
+10-10 14:19:19.291  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/emotion_reply_model_replicate_extended.tflite
+10-10 14:19:19.291  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/emotion_reply_model_replicate_extended.tflite)
+10-10 14:19:19.296  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955005
+10-10 14:19:19.302  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/emotion_templates.pb_1693340267672
+10-10 14:19:19.302  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/emotion_templates.pb_1693340267672)
+10-10 14:19:19.342  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955006
+10-10 14:19:19.411  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955007
+10-10 14:19:19.414  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_templates_reply_grammar.pb
+10-10 14:19:19.414  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_templates_reply_grammar.pb)
+10-10 14:19:19.428  5803  5906 D PhFileGroupPop: Added file groups multitask_experiment
+10-10 14:19:19.428  5803  5906 D PhFileGroupPop: Added file groups spam_verdict_enforcement_policy_config
+10-10 14:19:19.430  5803  5906 D PhFileGroupPop: Added file groups calendar_appointment_grammar
+10-10 14:19:19.430  5803  5906 D PhFileGroupPop: Added file groups birthday_grammars
+10-10 14:19:19.456  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955008
+10-10 14:19:19.457  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_templates_cont_grammar.pb
+10-10 14:19:19.457  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_templates_cont_grammar.pb)
+10-10 14:19:19.499  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_complete_03312020.pb
+10-10 14:19:19.499  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_complete_03312020.pb)
+10-10 14:19:19.503  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955009
+10-10 14:19:19.505  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_007_confidence.pb
+10-10 14:19:19.505  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_007_confidence.pb)
+10-10 14:19:19.541  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955010
+10-10 14:19:19.542  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_009_confidence.pb
+10-10 14:19:19.542  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_009_confidence.pb)
+10-10 14:19:19.546  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955011
+10-10 14:19:19.547  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_011_confidence.pb
+10-10 14:19:19.547  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_011_confidence.pb)
+10-10 14:19:19.582  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955012
+10-10 14:19:19.585  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955013
+10-10 14:19:19.586  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_012_confidence.pb
+10-10 14:19:19.587  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_012_confidence.pb)
+10-10 14:19:19.588  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_complete_013_confidence.pb
+10-10 14:19:19.588  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotions_complete_013_confidence.pb)
+10-10 14:19:19.626  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955014
+10-10 14:19:19.627  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_combined_011_confidence.pb
+10-10 14:19:19.627  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_combined_011_confidence.pb)
+10-10 14:19:19.637  1749  3321 I Dialer  : OmtpVvmCarrierCfgHlpr - OmtpEvent:CONFIG_STATUS_SMS_TIME_OUT
+10-10 14:19:19.637  1749  1749 I Dialer  : RetryPolicy - discarding deferred status: configuration_state=4
+10-10 14:19:19.639  1749  1749 I Dialer  : VvmTaskExecutor - no more tasks, stopping service if no task are added in 5000 millis
+10-10 14:19:19.639  1749  1749 I Dialer  : VvmTaskReceiver - task received
+10-10 14:19:19.639  1749  1749 I Dialer  : VvmTaskReceiver - TaskExecutor already running
+10-10 14:19:19.639  1749  1749 I Dialer  : Task.createTask - create task:com.android.voicemail.impl.ActivationTask
+10-10 14:19:19.639  1749  1749 I Dialer  : RetryPolicy - retry #2 for com.android.voicemail.impl.ActivationTask@3413382 queued, executing in 5000
+10-10 14:19:19.639  1749  1749 I Dialer  : VvmTaskExecutor - com.android.voicemail.impl.ActivationTask@3413382 added
+10-10 14:19:19.639  1749  1749 I Dialer  : VvmTaskExecutor - minimal wait time:5000
+10-10 14:19:19.639  1749  1749 I Dialer  : VvmTaskExecutor - sleep for 5000 millis
+10-10 14:19:19.663  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955015
+10-10 14:19:19.664  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_combined_013_confidence.pb
+10-10 14:19:19.664  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_combined_013_confidence.pb)
+10-10 14:19:19.700  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955016
+10-10 14:19:19.705  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_individual_011_confidence.pb
+10-10 14:19:19.705  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_individual_011_confidence.pb)
+10-10 14:19:19.737  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955017
+10-10 14:19:19.738  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_individual_013_confidence.pb
+10-10 14:19:19.738  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models/emotion_complete_individual_013_confidence.pb)
+10-10 14:19:19.775  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955018
+10-10 14:19:19.778  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/emotion_complete_model_replicate.tflite_1589263783992
+10-10 14:19:19.778  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/emotion_complete_model_replicate.tflite_1589263783992)
+10-10 14:19:19.813  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955019
+10-10 14:19:19.814  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/Sticker_android.far_1693340267672
+10-10 14:19:19.814  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/Sticker_android.far_1693340267672)
+10-10 14:19:19.852  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955020
+10-10 14:19:19.888  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955021
+10-10 14:19:19.894  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/pumpkin_model_config_sticker.pb
+10-10 14:19:19.894  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/pumpkin_model_config_sticker.pb)
+10-10 14:19:19.912  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/model_based_providers_configs_pumpkin_sticker.pb
+10-10 14:19:19.912  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/model_based_providers_configs_pumpkin_sticker.pb)
+10-10 14:19:19.933  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955022
+10-10 14:19:19.934  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/emotion_complete_model_replicate_extended.tflite
+10-10 14:19:19.934  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/emotion_complete_model_replicate_extended.tflite)
+10-10 14:19:19.970  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955023
+10-10 14:19:19.973  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/emotion_complete_model_replicate_winter.tflite
+10-10 14:19:19.973  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/emotion_complete_model_replicate_winter.tflite)
+10-10 14:19:20.008  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955024
+10-10 14:19:20.061  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955025
+10-10 14:19:20.096  5803  5996 D CompatibilityChangeReporter: Compat change id reported: 150939131; UID 10146; state: DISABLED
+10-10 14:19:20.124  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_ml_models//emotions_tflite_model_1579310142.tflite
+10-10 14:19:20.124  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_ml_models//emotions_tflite_model_1579310142.tflite)
+10-10 14:19:20.129  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/halloween_templates.pb
+10-10 14:19:20.129  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/halloween_templates.pb)
+10-10 14:19:20.164  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955026
+10-10 14:19:20.227  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955027
+10-10 14:19:20.230  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/Halloween_android.far
+10-10 14:19:20.230  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/Halloween_android.far)
+10-10 14:19:20.244  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/pumpkin_model_config_sticker_halloween.pb
+10-10 14:19:20.244  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/pumpkin_model_config_sticker_halloween.pb)
+10-10 14:19:20.269  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955028
+10-10 14:19:20.273  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/model_based_providers_configs_pumpkin_sticker_halloween.pb
+10-10 14:19:20.273  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/model_based_providers_configs_pumpkin_sticker_halloween.pb)
+10-10 14:19:20.285  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955029
+10-10 14:19:20.286  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/Thanksgiving_android.far
+10-10 14:19:20.286  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/Thanksgiving_android.far)
+10-10 14:19:20.324  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955030
+10-10 14:19:20.328  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/pumpkin_model_config_sticker_thanksgiving.pb
+10-10 14:19:20.328  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/pumpkin_model_config_sticker_thanksgiving.pb)
+10-10 14:19:20.330  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955031
+10-10 14:19:20.332  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/model_based_providers_config_pumpkin_sticker_thanksgiving.pb
+10-10 14:19:20.332  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/model_based_providers_config_pumpkin_sticker_thanksgiving.pb)
+10-10 14:19:20.370  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955032
+10-10 14:19:20.372  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955033
+10-10 14:19:20.376  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/thanksgiving_templates.pb
+10-10 14:19:20.376  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/thanksgiving_templates.pb)
+10-10 14:19:20.378  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/Hanukkah_android.far
+10-10 14:19:20.378  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/Hanukkah_android.far)
+10-10 14:19:20.418  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955034
+10-10 14:19:20.424  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/hanukkah_templates.pb
+10-10 14:19:20.424  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/hanukkah_templates.pb)
+10-10 14:19:20.458  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955035
+10-10 14:19:20.461  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/pumpkin_model_config_sticker_hanukkah.pb
+10-10 14:19:20.461  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/pumpkin_model_config_sticker_hanukkah.pb)
+10-10 14:19:20.494  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955036
+10-10 14:19:20.496  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/model_based_providers_config_pumpkin_sticker_hanukkah.pb
+10-10 14:19:20.496  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/model_based_providers_config_pumpkin_sticker_hanukkah.pb)
+10-10 14:19:20.531  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955037
+10-10 14:19:20.534  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/Winter_android.far
+10-10 14:19:20.534  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/Winter_android.far)
+10-10 14:19:20.571  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955038
+10-10 14:19:20.577  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/winter_templates.pb
+10-10 14:19:20.577  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/winter_templates.pb)
+10-10 14:19:20.608  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955039
+10-10 14:19:20.611  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/pumpkin_model_config_sticker_winter.pb
+10-10 14:19:20.611  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/pumpkin_model_config_sticker_winter.pb)
+10-10 14:19:20.645  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955040
+10-10 14:19:20.647  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/model_based_providers_config_pumpkin_sticker_winter.pb
+10-10 14:19:20.647  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/model_based_providers_config_pumpkin_sticker_winter.pb)
+10-10 14:19:20.681  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955041
+10-10 14:19:20.684  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/Valentines_android.far
+10-10 14:19:20.684  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/Valentines_android.far)
+10-10 14:19:20.718  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955042
+10-10 14:19:20.726  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/valentines_templates_1.pb
+10-10 14:19:20.726  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/valentines_templates_1.pb)
+10-10 14:19:20.756  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955043
+10-10 14:19:20.759  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/pumpkin_model_config_sticker_valentines.pb
+10-10 14:19:20.759  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/pumpkin_model_config_sticker_valentines.pb)
+10-10 14:19:20.794  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955044
+10-10 14:19:20.796  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_grammars/model_based_providers_config_valentines.pb
+10-10 14:19:20.796  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_grammars/model_based_providers_config_valentines.pb)
+10-10 14:19:20.830  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955045
+10-10 14:19:20.832  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/Back_To_School_android.far_1692662523829
+10-10 14:19:20.832  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/Back_To_School_android.far_1692662523829)
+10-10 14:19:20.869  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955046
+10-10 14:19:20.872  5803  5995 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/back_to_school_templates.pb_1692146826909
+10-10 14:19:20.872  5803  5995 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/back_to_school_templates.pb_1692146826909)
+10-10 14:19:20.907  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955047
+10-10 14:19:20.910  5803  6011 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/pumpkin_model_config_sticker_back_to_school.pb_1691774075224
+10-10 14:19:20.910  5803  6011 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/pumpkin_model_config_sticker_back_to_school.pb_1691774075224)
+10-10 14:19:20.946  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955048
+10-10 14:19:20.953  5803  5903 D abkp    : Starting download: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/model_based_provider_configs_pumpkin_sticker_back_to_school.pb_1691530161128
+10-10 14:19:20.953  5803  5903 V abkp    : Is http uri, downloading (uri: https://www.gstatic.com/messages/smarts/smart_actions_emotive_models/model_based_provider_configs_pumpkin_sticker_back_to_school.pb_1691530161128)
+10-10 14:19:20.981  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955049
+10-10 14:19:20.984  5939  5961 I TestRunner: finished: anOldUnencryptedPayloadIsRefusedWithoutWritingItToDisk(ir.sabou.app.DeviceTest)

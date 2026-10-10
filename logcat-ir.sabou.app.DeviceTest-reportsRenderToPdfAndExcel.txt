@@ -1,0 +1,303 @@
+10-10 14:19:20.985  5939  5961 I TestRunner: started: reportsRenderToPdfAndExcel(ir.sabou.app.DeviceTest)
+10-10 14:19:21.000  5939  5961 I SQLiteConnection: Database keying operation returned:0
+10-10 14:19:21.018  5803  5903 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955050
+10-10 14:19:21.021  5803  6011 D abkp    : Starting download: https://c.tenor.com/7DechusmE40AAAAk/tenor.gif
+10-10 14:19:21.021  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/7DechusmE40AAAAk/tenor.gif)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: ActionExecutorImpl: Action started execution, but we can't guarantee it will complete, the app may be killed. Action: class com.google.android.apps.messaging.shared.datamodel.action.GenericWorkerQueueAction-GenericWorkerQueueAction:168648007
+10-10 14:19:21.024  5803  5803 W BugleDataModel: java.lang.IllegalStateException: Not allowed to start service Intent { cmp=com.google.android.apps.messaging/.shared.datamodel.action.execution.ActionExecutorImpl$EmptyService }: app is in background uid UidRecord{be0c9a6 u0a146 TRNB idle change:uncached procs:1 seq(0,0,0)}
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at android.app.ContextImpl.startServiceCommon(ContextImpl.java:1715)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at android.app.ContextImpl.startService(ContextImpl.java:1670)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at android.content.ContextWrapper.startService(ContextWrapper.java:720)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at com.google.android.apps.messaging.shared.datamodel.action.execution.ActionExecutorImpl.a(PG:98)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at com.google.android.apps.messaging.shared.datamodel.action.execution.ActionExecutorImpl.a(PG:93)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at gjl.c(PG:119)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at gji.run(Unknown Source:1)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at afou.run(PG:3)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at android.os.Handler.handleCallback(Handler.java:938)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at android.os.Handler.dispatchMessage(Handler.java:99)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at android.os.Looper.loop(Looper.java:223)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at android.app.ActivityThread.main(ActivityThread.java:7656)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at java.lang.reflect.Method.invoke(Native Method)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:592)
+10-10 14:19:21.024  5803  5803 W BugleDataModel: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:947)
+10-10 14:19:21.038  5803  6015 I BugleJobs: GenericWorkerQueueAction: Bailing early, no work found, no failed work found
+10-10 14:19:21.063  5803  6002 W DynamiteModule: Local module descriptor class for providerinstaller not found.
+10-10 14:19:21.064  5803  6004 W DynamiteModule: Local module descriptor class for providerinstaller not found.
+10-10 14:19:21.066  5803  6004 I DynamiteModule: Considering local module providerinstaller:0 and remote module providerinstaller:0
+10-10 14:19:21.066  5803  6004 W ProviderInstaller: Failed to load providerinstaller module: No acceptable module found. Local version is 0 and remote version is 0.
+10-10 14:19:21.067  5803  6002 I DynamiteModule: Considering local module providerinstaller:0 and remote module providerinstaller:0
+10-10 14:19:21.067  5803  6002 W ProviderInstaller: Failed to load providerinstaller module: No acceptable module found. Local version is 0 and remote version is 0.
+10-10 14:19:21.604  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955052
+10-10 14:19:21.609  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955051
+10-10 14:19:21.611  5803  6015 D abkp    : Starting download: https://c.tenor.com/BznTK02srIsAAAAk/tenor.gif
+10-10 14:19:21.611  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/BznTK02srIsAAAAk/tenor.gif)
+10-10 14:19:21.616  5803  6011 D abkp    : Starting download: https://c.tenor.com/p1qEArGuSoEAAAAk/tenor.gif
+10-10 14:19:21.616  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/p1qEArGuSoEAAAAk/tenor.gif)
+10-10 14:19:21.637  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955053
+10-10 14:19:21.644  5803  5995 D abkp    : Starting download: https://c.tenor.com/QBIzxcCFhAQAAAAk/tenor.gif
+10-10 14:19:21.644  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/QBIzxcCFhAQAAAAk/tenor.gif)
+10-10 14:19:21.656  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955054
+10-10 14:19:21.659  5803  6015 D abkp    : Starting download: https://c.tenor.com/SNToRS841A4AAAAk/tenor.gif
+10-10 14:19:21.659  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/SNToRS841A4AAAAk/tenor.gif)
+10-10 14:19:21.660  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955055
+10-10 14:19:21.663  5803  6011 D abkp    : Starting download: https://c.tenor.com/QT8fTQhWDdEAAAAk/tenor.gif
+10-10 14:19:21.663  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/QT8fTQhWDdEAAAAk/tenor.gif)
+10-10 14:19:21.678  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955056
+10-10 14:19:21.686  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955057
+10-10 14:19:21.688  5803  5995 D abkp    : Starting download: https://c.tenor.com/qeiyevOg_1gAAAAk/tenor.gif
+10-10 14:19:21.688  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/qeiyevOg_1gAAAAk/tenor.gif)
+10-10 14:19:21.694  5803  6011 D abkp    : Starting download: https://c.tenor.com/JJO64sVq9MsAAAAk/tenor.gif
+10-10 14:19:21.694  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/JJO64sVq9MsAAAAk/tenor.gif)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for java.lang.Throwable: Explicit termination method 'close' not called
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.CloseGuard.open(CloseGuard.java:190)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.openInner(SQLiteDatabase.java:1033)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.open(SQLiteDatabase.java:1017)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.openDatabase(SQLiteDatabase.java:844)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteOpenHelper.getDatabaseLocked(SQLiteOpenHelper.java:359)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteOpenHelper.getWritableDatabase(SQLiteOpenHelper.java:278)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SupportHelper.getWritableDatabase(SupportHelper.java:60)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.data.AppContainer.open(AppContainer.kt:86)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.data.AppContainer.open$default(AppContainer.kt:78)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.TestData.startClean(TestData.kt:21)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.DeviceTest.fresh(DeviceTest.kt:40)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.DeviceTest.anOldUnencryptedPayloadIsRefusedWithoutWritingItToDisk(DeviceTest.kt:290)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at java.lang.reflect.Method.invoke(Native Method)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.ext.junit.runners.AndroidJUnit4.run(AndroidJUnit4.java:162)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.Suite.runChild(Suite.java:128)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.Suite.runChild(Suite.java:27)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:68)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:59)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.runner.AndroidJUnitRunner.onStart(AndroidJUnitRunner.java:463)
+10-10 14:19:21.772  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2205)
+10-10 14:19:21.772  5939  5953 W SQLiteConnectionPool: A SQLiteConnection object for database '/data/user/0/ir.sabou.erp.debug/databases/sabou.db' was leaked!  Please fix your application to end transactions in progress properly and to close the database when it is no longer needed.
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for java.lang.Throwable: Explicit termination method 'close' not called
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.CloseGuard.open(CloseGuard.java:190)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteConnection.<init>(SQLiteConnection.java:179)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteConnection.open(SQLiteConnection.java:199)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteConnectionPool.openConnectionLocked(SQLiteConnectionPool.java:474)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteConnectionPool.open(SQLiteConnectionPool.java:188)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteConnectionPool.open(SQLiteConnectionPool.java:180)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.openInner(SQLiteDatabase.java:1032)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.open(SQLiteDatabase.java:1017)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.openDatabase(SQLiteDatabase.java:844)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteOpenHelper.getDatabaseLocked(SQLiteOpenHelper.java:359)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteOpenHelper.getWritableDatabase(SQLiteOpenHelper.java:278)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SupportHelper.getWritableDatabase(SupportHelper.java:60)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.data.AppContainer.open(AppContainer.kt:86)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.data.AppContainer.open$default(AppContainer.kt:78)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.DeviceTest.encryptedDatabaseAndKeystoreKeySurviveAReopen(DeviceTest.kt:94)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at java.lang.reflect.Method.invoke(Native Method)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.ext.junit.runners.AndroidJUnit4.run(AndroidJUnit4.java:162)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.Suite.runChild(Suite.java:128)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.Suite.runChild(Suite.java:27)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:68)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:59)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.runner.AndroidJUnitRunner.onStart(AndroidJUnitRunner.java:463)
+10-10 14:19:21.774  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2205)
+10-10 14:19:21.775  5939  5953 W SQLiteLog: (28) file unlinked while open: /data/data/ir.sabou.erp.debug/databases/sabou.db
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for java.lang.Throwable: Explicit termination method 'close' not called
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.CloseGuard.open(CloseGuard.java:190)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteConnectionPool.open(SQLiteConnectionPool.java:193)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteConnectionPool.open(SQLiteConnectionPool.java:180)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.openInner(SQLiteDatabase.java:1032)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.open(SQLiteDatabase.java:1017)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.openDatabase(SQLiteDatabase.java:844)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteOpenHelper.getDatabaseLocked(SQLiteOpenHelper.java:359)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteOpenHelper.getWritableDatabase(SQLiteOpenHelper.java:278)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SupportHelper.getWritableDatabase(SupportHelper.java:60)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.data.AppContainer.open(AppContainer.kt:86)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.data.AppContainer.open$default(AppContainer.kt:78)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.DeviceTest.encryptedDatabaseAndKeystoreKeySurviveAReopen(DeviceTest.kt:94)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at java.lang.reflect.Method.invoke(Native Method)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.ext.junit.runners.AndroidJUnit4.run(AndroidJUnit4.java:162)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.Suite.runChild(Suite.java:128)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.Suite.runChild(Suite.java:27)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:68)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:59)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.runner.AndroidJUnitRunner.onStart(AndroidJUnitRunner.java:463)
+10-10 14:19:21.776  5939  5953 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2205)
+10-10 14:19:21.911  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955058
+10-10 14:19:21.913  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955059
+10-10 14:19:21.919  5803  6015 D abkp    : Starting download: https://c.tenor.com/xGYeqMr6cS8AAAAk/tenor.gif
+10-10 14:19:21.919  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/xGYeqMr6cS8AAAAk/tenor.gif)
+10-10 14:19:21.926  5803  5995 D abkp    : Starting download: https://c.tenor.com/FgmbVOiuvTwAAAAk/tenor.gif
+10-10 14:19:21.926  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/FgmbVOiuvTwAAAAk/tenor.gif)
+10-10 14:19:21.937  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955060
+10-10 14:19:21.948  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955061
+10-10 14:19:21.955  5803  6011 D abkp    : Starting download: https://c.tenor.com/WQQfCdGdB6UAAAAk/tenor.gif
+10-10 14:19:21.955  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/WQQfCdGdB6UAAAAk/tenor.gif)
+10-10 14:19:21.958  5803  6015 D abkp    : Starting download: https://c.tenor.com/xij-pBxXlXAAAAAk/tenor.gif
+10-10 14:19:21.958  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/xij-pBxXlXAAAAAk/tenor.gif)
+10-10 14:19:21.970  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955062
+10-10 14:19:21.977  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955063
+10-10 14:19:21.980  5803  5995 D abkp    : Starting download: https://c.tenor.com/CHyCK8Tx4GYAAAAk/tenor.gif
+10-10 14:19:21.980  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/CHyCK8Tx4GYAAAAk/tenor.gif)
+10-10 14:19:21.983  5803  6011 D abkp    : Starting download: https://c.tenor.com/FG7ZEoYk73IAAAAk/tenor.gif
+10-10 14:19:21.983  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/FG7ZEoYk73IAAAAk/tenor.gif)
+10-10 14:19:21.994  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955064
+10-10 14:19:22.002  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955065
+10-10 14:19:22.010  5803  6015 D abkp    : Starting download: https://c.tenor.com/GMf50kiNLC8AAAAk/tenor.gif
+10-10 14:19:22.010  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/GMf50kiNLC8AAAAk/tenor.gif)
+10-10 14:19:22.014  5803  6011 D abkp    : Starting download: https://c.tenor.com/zMoc55x_4u0AAAAk/tenor.gif
+10-10 14:19:22.014  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/zMoc55x_4u0AAAAk/tenor.gif)
+10-10 14:19:22.025  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955066
+10-10 14:19:22.029  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955067
+10-10 14:19:22.036  5803  5995 D abkp    : Starting download: https://c.tenor.com/_vp7nxsOURoAAAAk/tenor.gif
+10-10 14:19:22.036  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/_vp7nxsOURoAAAAk/tenor.gif)
+10-10 14:19:22.047  5803  6015 D abkp    : Starting download: https://c.tenor.com/tMK5vWgS8OsAAAAk/tenor.gif
+10-10 14:19:22.047  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/tMK5vWgS8OsAAAAk/tenor.gif)
+10-10 14:19:22.060  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955068
+10-10 14:19:22.066  5803  6011 D abkp    : Starting download: https://c.tenor.com/1tJHYEz-rOUAAAAk/tenor.gif
+10-10 14:19:22.066  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/1tJHYEz-rOUAAAAk/tenor.gif)
+10-10 14:19:22.068  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955069
+10-10 14:19:22.074  5803  5995 D abkp    : Starting download: https://c.tenor.com/mHn8qmF0jd8AAAAk/tenor.gif
+10-10 14:19:22.074  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/mHn8qmF0jd8AAAAk/tenor.gif)
+10-10 14:19:22.083  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955070
+10-10 14:19:22.084  5803  6015 D abkp    : Starting download: https://c.tenor.com/L-cr_zEMUKIAAAAk/tenor.gif
+10-10 14:19:22.084  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/L-cr_zEMUKIAAAAk/tenor.gif)
+10-10 14:19:22.096  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955071
+10-10 14:19:22.100  5803  6011 D abkp    : Starting download: https://c.tenor.com/d9jjVFcaM88AAAAk/tenor.gif
+10-10 14:19:22.100  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/d9jjVFcaM88AAAAk/tenor.gif)
+10-10 14:19:22.105  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955072
+10-10 14:19:22.107  5803  5995 D abkp    : Starting download: https://c.tenor.com/CAwnO7U1PuUAAAAk/tenor.gif
+10-10 14:19:22.107  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/CAwnO7U1PuUAAAAk/tenor.gif)
+10-10 14:19:22.117  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955073
+10-10 14:19:22.118  5803  6015 D abkp    : Starting download: https://c.tenor.com/MNVpjI3peqUAAAAk/tenor.gif
+10-10 14:19:22.118  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/MNVpjI3peqUAAAAk/tenor.gif)
+10-10 14:19:22.129  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955074
+10-10 14:19:22.132  5803  6011 D abkp    : Starting download: https://c.tenor.com/AUCaj-n1RScAAAAk/tenor.gif
+10-10 14:19:22.132  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/AUCaj-n1RScAAAAk/tenor.gif)
+10-10 14:19:22.141  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955075
+10-10 14:19:22.144  5803  5995 D abkp    : Starting download: https://c.tenor.com/MdGCDaD6Wa8AAAAk/tenor.gif
+10-10 14:19:22.144  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/MdGCDaD6Wa8AAAAk/tenor.gif)
+10-10 14:19:22.152  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955076
+10-10 14:19:22.153  5803  6015 D abkp    : Starting download: https://c.tenor.com/RQcrdyXkM2YAAAAk/tenor.gif
+10-10 14:19:22.153  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/RQcrdyXkM2YAAAAk/tenor.gif)
+10-10 14:19:22.158  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955077
+10-10 14:19:22.161  5803  6011 D abkp    : Starting download: https://c.tenor.com/GEfom6TUKQIAAAAk/tenor.gif
+10-10 14:19:22.161  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/GEfom6TUKQIAAAAk/tenor.gif)
+10-10 14:19:22.168  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955078
+10-10 14:19:22.169  5803  5995 D abkp    : Starting download: https://c.tenor.com/jPgPgvg4CjoAAAAk/tenor.gif
+10-10 14:19:22.169  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/jPgPgvg4CjoAAAAk/tenor.gif)
+10-10 14:19:22.174  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955079
+10-10 14:19:22.175  5803  6015 D abkp    : Starting download: https://c.tenor.com/CSkw57W8v1wAAAAk/tenor.gif
+10-10 14:19:22.175  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/CSkw57W8v1wAAAAk/tenor.gif)
+10-10 14:19:22.184  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955080
+10-10 14:19:22.185  5803  6011 D abkp    : Starting download: https://c.tenor.com/gOG397-puAsAAAAk/tenor.gif
+10-10 14:19:22.185  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/gOG397-puAsAAAAk/tenor.gif)
+10-10 14:19:22.188  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955081
+10-10 14:19:22.190  5803  5995 D abkp    : Starting download: https://c.tenor.com/fynlBjSoN7kAAAAk/tenor.gif
+10-10 14:19:22.190  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/fynlBjSoN7kAAAAk/tenor.gif)
+10-10 14:19:22.201  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955082
+10-10 14:19:22.204  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955083
+10-10 14:19:22.206  5803  6015 D abkp    : Starting download: https://c.tenor.com/wCB5JtcL9k4AAAAk/tenor.gif
+10-10 14:19:22.206  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/wCB5JtcL9k4AAAAk/tenor.gif)
+10-10 14:19:22.208  5803  5995 D abkp    : Starting download: https://c.tenor.com/1NpGDEgyc98AAAAk/tenor.gif
+10-10 14:19:22.208  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/1NpGDEgyc98AAAAk/tenor.gif)
+10-10 14:19:22.219  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955084
+10-10 14:19:22.223  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955085
+10-10 14:19:22.229  5803  6011 D abkp    : Starting download: https://c.tenor.com/Aq48a65922EAAAAk/tenor.gif
+10-10 14:19:22.229  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/Aq48a65922EAAAAk/tenor.gif)
+10-10 14:19:22.232  5803  6015 D abkp    : Starting download: https://c.tenor.com/ef41wTywedgAAAAk/tenor.gif
+10-10 14:19:22.232  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/ef41wTywedgAAAAk/tenor.gif)
+10-10 14:19:22.441  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955086
+10-10 14:19:22.445  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955087
+10-10 14:19:22.452  5803  5995 D abkp    : Starting download: https://c.tenor.com/Q-QaNnhrdpMAAAAk/tenor.gif
+10-10 14:19:22.453  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/Q-QaNnhrdpMAAAAk/tenor.gif)
+10-10 14:19:22.454  5803  6011 D abkp    : Starting download: https://c.tenor.com/XL-Oqt3d6NcAAAAk/tenor.gif
+10-10 14:19:22.454  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/XL-Oqt3d6NcAAAAk/tenor.gif)
+10-10 14:19:22.467  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955088
+10-10 14:19:22.474  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955089
+10-10 14:19:22.476  5803  6015 D abkp    : Starting download: https://c.tenor.com/IjU5mwLSBB8AAAAk/tenor.gif
+10-10 14:19:22.476  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/IjU5mwLSBB8AAAAk/tenor.gif)
+10-10 14:19:22.478  5803  5995 D abkp    : Starting download: https://c.tenor.com/z-FczidyrWEAAAAk/tenor.gif
+10-10 14:19:22.478  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/z-FczidyrWEAAAAk/tenor.gif)
+10-10 14:19:22.699  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955091
+10-10 14:19:22.707  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955090
+10-10 14:19:22.711  5803  6011 D abkp    : Starting download: https://c.tenor.com/sRGmaFiObpEAAAAk/tenor.gif
+10-10 14:19:22.711  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/sRGmaFiObpEAAAAk/tenor.gif)
+10-10 14:19:22.716  5803  5995 D abkp    : Starting download: https://c.tenor.com/99ocPzxp960AAAAk/tenor.gif
+10-10 14:19:22.716  5803  5995 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/99ocPzxp960AAAAk/tenor.gif)
+10-10 14:19:22.727  5803  6011 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955092
+10-10 14:19:22.729  5803  5995 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955093
+10-10 14:19:22.730  5803  6015 D abkp    : Starting download: https://c.tenor.com/CqsQZ7nURzQAAAAk/tenor.gif
+10-10 14:19:22.730  5803  6015 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/CqsQZ7nURzQAAAAk/tenor.gif)
+10-10 14:19:22.735  5803  6011 D abkp    : Starting download: https://c.tenor.com/vTq_MrD5b1kAAAAk/tenor.gif
+10-10 14:19:22.735  5803  6011 V abkp    : Is http uri, downloading (uri: https://c.tenor.com/vTq_MrD5b1kAAAAk/tenor.gif)
+10-10 14:19:22.744  5803  6015 E MDD     : DownloadProgressMonitor: Can't find file group for uri: android://com.google.android.apps.messaging/files/datadownload/shared/public/datadownloadfile_1791641955094
+10-10 14:19:22.746  5939  5961 I TestRunner: finished: reportsRenderToPdfAndExcel(ir.sabou.app.DeviceTest)

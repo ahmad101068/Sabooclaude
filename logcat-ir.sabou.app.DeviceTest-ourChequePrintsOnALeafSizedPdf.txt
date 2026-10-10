@@ -1,0 +1,11 @@
+10-10 14:19:11.290  5939  5961 I TestRunner: started: ourChequePrintsOnALeafSizedPdf(ir.sabou.app.DeviceTest)
+10-10 14:19:11.320   442   442 I keystore: del USRPKEY_sabou_db_wrap 10167
+10-10 14:19:11.320   442   442 I keystore: del USRSKEY_sabou_db_wrap 10167
+10-10 14:19:11.320   442   442 I keystore: del USRCERT_sabou_db_wrap 10167
+10-10 14:19:11.321   442   442 I keystore: del CACERT_sabou_db_wrap 10167
+10-10 14:19:11.382  5939  5961 I SQLiteConnection: Database keying operation returned:0
+10-10 14:19:12.000   442   442 I keystore: del USRPKEY_sabou_anchor_hmac 10167
+10-10 14:19:12.000   442   442 I keystore: del USRSKEY_sabou_anchor_hmac 10167
+10-10 14:19:12.000   442   442 I keystore: del USRCERT_sabou_anchor_hmac 10167
+10-10 14:19:12.001   442   442 I keystore: del CACERT_sabou_anchor_hmac 10167
+10-10 14:19:13.038  5939  5961 I TestRunner: finished: ourChequePrintsOnALeafSizedPdf(ir.sabou.app.DeviceTest)

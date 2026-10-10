@@ -1,0 +1,2 @@
+10-10 14:20:11.275  5939  5961 I TestRunner: started: formDraftsRoundTripEncryptedThroughAParcel(ir.sabou.app.DeviceTest)
+10-10 14:20:11.291  5939  5961 I TestRunner: finished: formDraftsRoundTripEncryptedThroughAParcel(ir.sabou.app.DeviceTest)

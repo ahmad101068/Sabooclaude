@@ -1,0 +1,2 @@
+10-10 14:19:45.338  5939  5961 I TestRunner: started: onlyAProvablyLostKeyOrUnreadableFileCountsAsPermanent(ir.sabou.app.DeviceTest)
+10-10 14:19:45.340  5939  5961 I TestRunner: finished: onlyAProvablyLostKeyOrUnreadableFileCountsAsPermanent(ir.sabou.app.DeviceTest)

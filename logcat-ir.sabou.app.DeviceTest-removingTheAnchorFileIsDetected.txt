@@ -1,0 +1,5 @@
+10-10 14:19:41.375  5939  5961 I TestRunner: started: removingTheAnchorFileIsDetected(ir.sabou.app.DeviceTest)
+10-10 14:19:41.392  5939  5961 I SQLiteConnection: Database keying operation returned:0
+10-10 14:19:42.822  5939  5961 I chatty  : uid=10167(ir.sabou.erp.debug) roidJUnitRunner identical 1 line
+10-10 14:19:43.366  5939  5961 I SQLiteConnection: Database keying operation returned:0
+10-10 14:19:43.890  5939  5961 I TestRunner: finished: removingTheAnchorFileIsDetected(ir.sabou.app.DeviceTest)

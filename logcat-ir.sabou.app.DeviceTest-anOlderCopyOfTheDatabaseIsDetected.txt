@@ -1,0 +1,11 @@
+10-10 14:19:53.973  5939  5961 I TestRunner: started: anOlderCopyOfTheDatabaseIsDetected(ir.sabou.app.DeviceTest)
+10-10 14:19:53.982  5939  5961 I SQLiteConnection: Database keying operation returned:0
+10-10 14:19:55.412  5939  5961 I SQLiteConnectionPool: The connection pool for /data/user/0/ir.sabou.erp.debug/databases/sabou.db has been closed but there are still 1 connections in use.  They will be closed as they are released back to the pool.
+10-10 14:19:55.420  5939  5961 I SQLiteConnection: Database keying operation returned:0
+10-10 14:19:58.847  5939  5961 I chatty  : uid=10167(ir.sabou.erp.debug) roidJUnitRunner identical 1 line
+10-10 14:19:59.393  5939  5961 I SQLiteConnection: Database keying operation returned:0
+10-10 14:20:00.002   723   723 D KeyguardClockSwitch: Updating clock: 220
+10-10 14:20:00.240  1465  6059 I Vision  : Requesting optional module download of ocr.
+10-10 14:20:00.240  1465  6059 I Vision  : Checking for download completion for 229365 -- ocr
+10-10 14:20:00.822  5939  5961 I SQLiteConnection: Database keying operation returned:0
+10-10 14:20:01.390  5939  5961 I TestRunner: finished: anOlderCopyOfTheDatabaseIsDetected(ir.sabou.app.DeviceTest)

@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuite name="ir.sabou.app.DeviceTest" tests="17" failures="0" errors="0" skipped="0" time="116.18" timestamp="2026-10-10T14:21:08" hostname="localhost">
+  <properties>
+    <property name="device" value="emulator-5554 - 11" />
+    <property name="flavor" value="" />
+    <property name="project" value=":app" />
+  </properties>
+  <testcase name="ourChequePrintsOnALeafSizedPdf" classname="ir.sabou.app.DeviceTest" time="1.691" />
+  <testcase name="encryptedDatabaseAndKeystoreKeySurviveAReopen" classname="ir.sabou.app.DeviceTest" time="3.331" />
+  <testcase name="anOldUnencryptedPayloadIsRefusedWithoutWritingItToDisk" classname="ir.sabou.app.DeviceTest" time="4.594" />
+  <testcase name="reportsRenderToPdfAndExcel" classname="ir.sabou.app.DeviceTest" time="1.759" />
+  <testcase name="aRestoreInterruptedBeforeTheSwapKeepsTheCurrentDataUsable" classname="ir.sabou.app.DeviceTest" time="18.623" />
+  <testcase name="removingTheAnchorFileIsDetected" classname="ir.sabou.app.DeviceTest" time="2.532" />
+  <testcase name="aSignedOutUserCannotReplaceTheDataOfAWorkingDatabase" classname="ir.sabou.app.DeviceTest" time="1.43" />
+  <testcase name="onlyAProvablyLostKeyOrUnreadableFileCountsAsPermanent" classname="ir.sabou.app.DeviceTest" time="0.001" />
+  <testcase name="aResetInterruptedAtAnyPointOpensEitherTheOldOrAnEmptyDatabase" classname="ir.sabou.app.DeviceTest" time="8.604" />
+  <testcase name="storedDraftsAreReadOnceAndATamperedFileIsDropped" classname="ir.sabou.app.DeviceTest" time="0.027" />
+  <testcase name="anOlderCopyOfTheDatabaseIsDetected" classname="ir.sabou.app.DeviceTest" time="7.426" />
+  <testcase name="backupAndRestoreRoundTripWithoutPlaintextOnDisk" classname="ir.sabou.app.DeviceTest" time="9.883" />
+  <testcase name="formDraftsRoundTripEncryptedThroughAParcel" classname="ir.sabou.app.DeviceTest" time="0.001" />
+  <testcase name="aRestoreInterruptedAfterTheSwapOpensTheRestoredData" classname="ir.sabou.app.DeviceTest" time="8.579" />
+  <testcase name="attachmentsAreStoredInTheEncryptedDatabaseAndReadBack" classname="ir.sabou.app.DeviceTest" time="2.961" />
+  <testcase name="documentsAreNumberedOnTheEncryptedDatabase" classname="ir.sabou.app.DeviceTest" time="2.007" />
+  <testcase name="everyPageOpensAndItsDraftCanBeSaved" classname="ir.sabou.app.UiSmokeTest" time="41.358" />
+</testsuite>
