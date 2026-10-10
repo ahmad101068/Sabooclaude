@@ -148,7 +148,7 @@ class ReportsTest {
         assertTrue(entries.getValue("xl/workbook.xml").contains("سود و زیان"))
         val pnl = entries.getValue("xl/worksheets/sheet1.xml")
         assertTrue(pnl.contains("""rightToLeft="1""""))
-        assertTrue(pnl.contains("<v>5000000</v>"))                   // 50,000,000 rial = 5,000,000 Toman, as a number
+        assertTrue(pnl.contains("<v>50000000</v>"))                  // 50,000,000 rial, exported as Rial, as a number
         assertTrue(entries.getValue("[Content_Types].xml").contains("sheet${tables.size}.xml"))
         // Every sheet is well-formed XML.
         val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance()

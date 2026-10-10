@@ -292,26 +292,26 @@ fun TextInput(
 }
 
 /**
- * Amount in Toman. Accepts Persian/Arabic/Latin digits, regroups with "٬" as the user types and
- * reports the parsed value in Rial (null when empty or invalid).
+ * Amount in Rial, the product's one money unit. Accepts Persian/Arabic/Latin digits, regroups with "٬" as the
+ * user types and reports the parsed value (null when empty or invalid).
  */
 @Composable
 fun MoneyInput(label: String, value: Money?, onChange: (Money?) -> Unit, modifier: Modifier = Modifier, hint: String? = null) {
-    fun shown(v: Money?) = v?.let { Fa.number(it.rial / 10) } ?: ""
+    fun shown(v: Money?) = v?.let { Fa.number(it.rial) } ?: ""
     var field by remember { mutableStateOf(TextFieldValue(shown(value))) }
     // The form may reset the amount (e.g. after saving): follow it instead of keeping stale text.
     androidx.compose.runtime.LaunchedEffect(value) {
-        if (value == null && field.text.isNotEmpty() && Fa.parseToman(field.text) != null) field = TextFieldValue("")
+        if (value == null && field.text.isNotEmpty() && Fa.parseRial(field.text) != null) field = TextFieldValue("")
     }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("$label (تومان)", style = SabouType.caption.copy(fontSize = SabouType.body.fontSize * 0.93f), color = Sabou.colors.muted)
+        Text("$label (ریال)", style = SabouType.caption.copy(fontSize = SabouType.body.fontSize * 0.93f), color = Sabou.colors.muted)
         OutlinedTextField(
             value = field,
             onValueChange = { next ->
                 val parsed = Fa.parseLong(next.text)
                 val text = if (next.text.isBlank()) "" else parsed?.let(Fa::number) ?: field.text
                 field = TextFieldValue(text, TextRange(text.length))
-                onChange(if (text.isEmpty()) null else Fa.parseToman(text))
+                onChange(if (text.isEmpty()) null else Fa.parseRial(text))
             },
             singleLine = true,
             textStyle = SabouType.amount.copy(color = Sabou.colors.ink),

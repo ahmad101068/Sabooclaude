@@ -118,7 +118,7 @@ object BooksScreens {
                         NavRow(R.drawable.ic_payment, "${c.details.counterparty} · ${Fa.digits(c.details.number)}",
                             "${if (c.direction == ChequeDirection.RECEIVED) "دریافتی" else "پرداختی"} · سررسید ${Fa.date(c.dueDate)}" +
                                 (if (overdue) " · گذشته" else "") + " · ${ReportTables.chequeStatusName(c.status)}",
-                            Fa.tomanShort(c.amount.rial), tint = if (overdue || c.status == ChequeStatus.BOUNCED) Sabou.colors.danger else Sabou.colors.bank,
+                            Fa.rialShort(c.amount.rial), tint = if (overdue || c.status == ChequeStatus.BOUNCED) Sabou.colors.danger else Sabou.colors.bank,
                             tile = Sabou.colors.bankSoft, onClick = { nav.go(Route.ChequeDetail(c.id)) })
                     }
                 }
@@ -169,7 +169,7 @@ object BooksScreens {
                             Text("${c.details.counterparty}", style = SabouType.section, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
                             Chip(ReportTables.chequeStatusName(c.status), statusKind(c.status))
                         }
-                        KeyValue("مبلغ (تومان)", Fa.toman(c.amount), strong = true)
+                        KeyValue("مبلغ (ریال)", Fa.rial(c.amount), strong = true)
                         KeyValue("شماره / بانک", "${Fa.digits(c.details.number)} · ${c.details.bank}")
                         if (c.details.sayadId.isNotBlank()) KeyValue("شناسه صیادی", Fa.digits(c.details.sayadId))
                         KeyValue("سررسید", Fa.dayTitle(c.dueDate) + " " + Fa.digits(Fa.jalali(c.dueDate).year.toString()))
@@ -283,7 +283,7 @@ object BooksScreens {
                 }
             }
             val total = (1..12).sumOf { m -> (if (amounts.containsKey(m)) amounts[m] else saved[monthRange(year, m).first])?.rial ?: 0L }
-            KeyValue("جمع سال (تومان)", Fa.toman(total), strong = true)
+            KeyValue("جمع سال (ریال)", Fa.rial(total), strong = true)
             action.error?.let { Banner(it) }
             PrimaryButton("ذخیره بودجه", {
                 val periods = (1..12).mapNotNull { m ->
@@ -325,8 +325,8 @@ object BooksScreens {
                                 Text(l.account.name, style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
                                 l.usedBp?.let { Chip(Fa.percent(it), if (bad) ChipKind.DANGER else ChipKind.PRIMARY) }
                             }
-                            KeyValue("بودجه", Fa.toman(l.budget))
-                            KeyValue("عملکرد", Fa.toman(l.actual), valueColor = if (bad) Sabou.colors.danger else Sabou.colors.ink)
+                            KeyValue("بودجه", Fa.rial(l.budget))
+                            KeyValue("عملکرد", Fa.rial(l.actual), valueColor = if (bad) Sabou.colors.danger else Sabou.colors.ink)
                         }
                     }
                 }
@@ -356,19 +356,19 @@ object BooksScreens {
                     Loaded(data) { (rows, runs) ->
                         val active = rows.filter { it.asset.status == AssetStatus.ACTIVE }
                         SCard {
-                            KeyValue("بهای دارایی‌های فعال", Fa.toman(Money.sum(active.map { it.asset.cost })))
-                            KeyValue("ارزش دفتری", Fa.toman(Money.sum(active.map { it.asset.bookValue })), strong = true)
+                            KeyValue("بهای دارایی‌های فعال", Fa.rial(Money.sum(active.map { it.asset.cost })))
+                            KeyValue("ارزش دفتری", Fa.rial(Money.sum(active.map { it.asset.bookValue })), strong = true)
                         }
                         if (rows.isEmpty()) EmptyState("دارایی ثابتی ثبت نشده است.")
                         rows.forEach { r ->
                             val a = r.asset
-                            NavRow(R.drawable.ic_settings, a.name, "${a.category.ifBlank { "دارایی" }} · ارزش دفتری ${Fa.toman(a.bookValue)}" +
-                                if (a.status == AssetStatus.DISPOSED) " · واگذارشده" else "", Fa.tomanShort(a.cost.rial), onClick = { nav.go(Route.AssetDetail(a.id)) })
+                            NavRow(R.drawable.ic_settings, a.name, "${a.category.ifBlank { "دارایی" }} · ارزش دفتری ${Fa.rial(a.bookValue)}" +
+                                if (a.status == AssetStatus.DISPOSED) " · واگذارشده" else "", Fa.rialShort(a.cost.rial), onClick = { nav.go(Route.AssetDetail(a.id)) })
                         }
                         if (session.can(Permission.ASSET_MANAGE) && active.isNotEmpty()) FormCard("ثبت استهلاک") {
                             DateInput("تا تاریخ", through, { through = it }, session.today)
                             val due = Money.sum(rows.map { it.nextDepreciation })
-                            KeyValue("استهلاک این دوره (تومان)", Fa.toman(due), strong = true)
+                            KeyValue("استهلاک این دوره (ریال)", Fa.rial(due), strong = true)
                             action.error?.let { Banner(it) }
                             PrimaryButton("ثبت استهلاک", { confirm = true }, enabled = !due.isZero, busy = action.busy)
                             if (confirm) Confirm("ثبت استهلاک؟", "سند استهلاک همه‌ی دارایی‌های این شعبه تا ${Fa.date(through)} ثبت می‌شود.", "ثبت",
@@ -377,7 +377,7 @@ object BooksScreens {
                         }
                         val latest = runs.firstOrNull { !it.reversed }
                         if (latest != null && session.can(Permission.ASSET_MANAGE)) SCard {
-                            Text("آخرین استهلاک: تا ${Fa.date(latest.through)} · ${Fa.toman(latest.total)} تومان", style = SabouType.body, color = Sabou.colors.ink)
+                            Text("آخرین استهلاک: تا ${Fa.date(latest.through)} · ${Fa.rial(latest.total)} ریال", style = SabouType.body, color = Sabou.colors.ink)
                             SecondaryButton("برگرداندن آخرین استهلاک", {
                                 action.run({ fixedAssets.reverseRun(ReverseDepreciationRun(GlobalId.new(), branch, latest.id, session.today, "ثبت اشتباه")) })
                             }, danger = true)
@@ -491,10 +491,10 @@ object BooksScreens {
                         row.number?.let { KeyValue("شماره سند", Fa.digits(it)) }
                         KeyValue("تاریخ خرید", Fa.date(a.acquiredOn))
                         KeyValue("روش", if (a.method == DepreciationMethod.STRAIGHT_LINE) "خط مستقیم · ${Fa.number(a.usefulLifeMonths?.toLong() ?: 0)} ماه" else "نزولی · ${Fa.percent(a.rateBp ?: 0)} در سال")
-                        KeyValue("بها", Fa.toman(a.cost))
-                        if (!a.salvage.isZero) KeyValue("ارزش اسقاط", Fa.toman(a.salvage))
-                        KeyValue("استهلاک انباشته", Fa.toman(a.accumulated))
-                        KeyValue("ارزش دفتری (تومان)", Fa.toman(a.bookValue), strong = true)
+                        KeyValue("بها", Fa.rial(a.cost))
+                        if (!a.salvage.isZero) KeyValue("ارزش اسقاط", Fa.rial(a.salvage))
+                        KeyValue("استهلاک انباشته", Fa.rial(a.accumulated))
+                        KeyValue("ارزش دفتری (ریال)", Fa.rial(a.bookValue), strong = true)
                         a.depreciatedThrough?.let { KeyValue("استهلاک ثبت‌شده تا", Fa.date(it)) }
                         if (a.status == AssetStatus.DISPOSED) Chip("واگذارشده ${a.disposedOn?.let(Fa::date) ?: ""}", ChipKind.NEUTRAL)
                     }

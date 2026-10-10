@@ -139,12 +139,12 @@ object ReportsScreens {
                 BranchChoice(branch, allowAll = true) { branch = it }
                 Loaded(data) { p ->
                     SCard {
-                        KeyValue("درآمد", Fa.toman(p.totals.revenue))
-                        KeyValue("بهای تمام‌شده", "− " + Fa.toman(p.totals.cogs))
-                        KeyValue("سود ناخالص", Fa.toman(p.totals.grossProfit))
-                        KeyValue("هزینه‌ها", "− " + Fa.toman(p.totals.expenses))
+                        KeyValue("درآمد", Fa.rial(p.totals.revenue))
+                        KeyValue("بهای تمام‌شده", "− " + Fa.rial(p.totals.cogs))
+                        KeyValue("سود ناخالص", Fa.rial(p.totals.grossProfit))
+                        KeyValue("هزینه‌ها", "− " + Fa.rial(p.totals.expenses))
                         Divider()
-                        KeyValue("سود (زیان) خالص · تومان", Fa.toman(p.totals.profit), if (p.totals.profit < 0) Sabou.colors.danger else Sabou.colors.ink, strong = true)
+                        KeyValue("سود (زیان) خالص · ریال", Fa.rial(p.totals.profit), if (p.totals.profit < 0) Sabou.colors.danger else Sabou.colors.ink, strong = true)
                     }
                     SCard {
                         Text("نسبت به فروش غذا", style = SabouType.bodyStrong, color = Sabou.colors.ink)
@@ -164,7 +164,7 @@ object ReportsScreens {
                                         nav.go(Route.LedgerDetail(l.account.code.value, from.epochDay, to.epochDay, branch?.branchId?.value?.value))
                                     }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Text("${Fa.digits(l.account.code.value)} · ${l.account.name}", style = SabouType.body, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
-                                        Text(Fa.toman(l.amount), style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                                        Text(Fa.rial(l.amount), style = SabouType.bodyStrong, color = Sabou.colors.ink)
                                     }
                                 }
                                 Text("برای دیدن سندها روی هر ردیف بزنید.", style = SabouType.caption, color = Sabou.colors.muted)
@@ -201,9 +201,9 @@ object ReportsScreens {
         Column(Modifier.padding(vertical = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(label, style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
-                Text(Fa.toman(t.profit), style = SabouType.bodyStrong, color = if (t.profit < 0) Sabou.colors.danger else Sabou.colors.ink)
+                Text(Fa.rial(t.profit), style = SabouType.bodyStrong, color = if (t.profit < 0) Sabou.colors.danger else Sabou.colors.ink)
             }
-            Text("درآمد ${Fa.tomanShort(t.revenue)} · بهای تمام‌شده ${Fa.tomanShort(t.cogs)} · هزینه ${Fa.tomanShort(t.expenses)}",
+            Text("درآمد ${Fa.rialShort(t.revenue)} · بهای تمام‌شده ${Fa.rialShort(t.cogs)} · هزینه ${Fa.rialShort(t.expenses)}",
                 style = SabouType.caption, color = Sabou.colors.muted)
         }
     }
@@ -226,7 +226,7 @@ object ReportsScreens {
                         SCard {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("سند ${Fa.digits(r.number)} · ${Fa.date(r.date)}", style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
-                                Text(if (r.debit > 0) "بدهکار ${Fa.toman(r.debit)}" else "بستانکار ${Fa.toman(r.credit)}", style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                                Text(if (r.debit > 0) "بدهکار ${Fa.rial(r.debit)}" else "بستانکار ${Fa.rial(r.credit)}", style = SabouType.bodyStrong, color = Sabou.colors.ink)
                             }
                             Text(r.description + if (r.memo.isBlank()) "" else " · ${r.memo}", style = SabouType.caption, color = Sabou.colors.muted)
                             Text(r.scope, style = SabouType.caption, color = Sabou.colors.muted)
@@ -253,30 +253,30 @@ object ReportsScreens {
                     Loaded(data) { f ->
                         if (!f.posted) Banner("فروش این روز هنوز ثبت نهایی نشده است.", ChipKind.ACCENT)
                         SCard {
-                            KeyValue("قابل تسویه (تومان)", Fa.toman(f.payable), strong = true)
-                            KeyValue("فروش ناخالص", Fa.toman(f.gross)); KeyValue("تخفیف", "− " + Fa.toman(f.discount))
-                            KeyValue("حق سرویس", Fa.toman(f.serviceCharge)); KeyValue("مالیات و عوارض", Fa.toman(f.tax))
+                            KeyValue("قابل تسویه (ریال)", Fa.rial(f.payable), strong = true)
+                            KeyValue("فروش ناخالص", Fa.rial(f.gross)); KeyValue("تخفیف", "− " + Fa.rial(f.discount))
+                            KeyValue("حق سرویس", Fa.rial(f.serviceCharge)); KeyValue("مالیات و عوارض", Fa.rial(f.tax))
                         }
                         SCard {
                             KeyValue("مهمان", Fa.number(f.guests.toLong())); KeyValue("تراکنش", Fa.number(f.transactions.toLong()))
-                            KeyValue("میانگین هر مهمان", f.perGuest?.let { Fa.toman(it) } ?: "—")
-                            KeyValue("میانگین هر تراکنش", f.perTransaction?.let { Fa.toman(it) } ?: "—")
+                            KeyValue("میانگین هر مهمان", f.perGuest?.let { Fa.rial(it) } ?: "—")
+                            KeyValue("میانگین هر تراکنش", f.perTransaction?.let { Fa.rial(it) } ?: "—")
                         }
                         SCard {
-                            f.settlements.forEach { (name, m) -> KeyValue(name, Fa.toman(m)) }
-                            if (!f.credit.isZero) KeyValue("نسیه", Fa.toman(f.credit))
+                            f.settlements.forEach { (name, m) -> KeyValue(name, Fa.rial(m)) }
+                            if (!f.credit.isZero) KeyValue("نسیه", Fa.rial(f.credit))
                             Divider()
-                            KeyValue("نقد فروش امروز", Fa.toman(f.cashSales))
-                            KeyValue("نقد شمارش‌شده در بستن روز", f.countedCash?.let { Fa.toman(it) } ?: "روز بسته نشده")
+                            KeyValue("نقد فروش امروز", Fa.rial(f.cashSales))
+                            KeyValue("نقد شمارش‌شده در بستن روز", f.countedCash?.let { Fa.rial(it) } ?: "روز بسته نشده")
                             Text("تنخواه اول روز و نسیه‌های وصول‌شده‌ی نقدی در «نقد فروش امروز» نیست؛ اختلاف را با آن‌ها بسنجید.", style = SabouType.caption, color = Sabou.colors.muted)
                             f.cashDifference?.let { d ->
-                                KeyValue(if (d < 0) "کسری صندوق" else "اضافه‌ی صندوق", Fa.toman(kotlin.math.abs(d)), if (d < 0) Sabou.colors.danger else Sabou.colors.ink, strong = true)
+                                KeyValue(if (d < 0) "کسری صندوق" else "اضافه‌ی صندوق", Fa.rial(kotlin.math.abs(d)), if (d < 0) Sabou.colors.danger else Sabou.colors.ink, strong = true)
                             }
                         }
                         SCard {
-                            KeyValue("بهای مواد مصرفی", Fa.toman(f.cost))
+                            KeyValue("بهای مواد مصرفی", Fa.rial(f.cost))
                             KeyValue("درصد بهای غذا", f.foodCostBp?.let { Fa.percent(it) } ?: "—")
-                            f.purchases?.let { KeyValue("خرید امروز", Fa.toman(it)) }; f.waste?.let { KeyValue("ضایعات امروز", Fa.toman(it)) }
+                            f.purchases?.let { KeyValue("خرید امروز", Fa.rial(it)) }; f.waste?.let { KeyValue("ضایعات امروز", Fa.rial(it)) }
                         }
                     }
                     ExportButtons("پایان-روز") { listOf(ReportTables.dayFlash(reports.dayFlash(branch, date))) }
@@ -297,7 +297,7 @@ object ReportsScreens {
                 Page {
                     PeriodPicker(from, to) { f, t -> from = f; to = t }
                     Loaded(data) { m ->
-                        SCard { KeyValue("فروش ناخالص (تومان)", Fa.toman(m.gross), strong = true); KeyValue("روزهای فروش", Fa.number(m.days.toLong())) }
+                        SCard { KeyValue("فروش ناخالص (ریال)", Fa.rial(m.gross), strong = true); KeyValue("روزهای فروش", Fa.number(m.days.toLong())) }
                         if (m.rows.isEmpty()) EmptyState("در این بازه فروش ثبت نهایی نشده است.")
                         m.rows.forEach { r ->
                             SCard {
@@ -308,10 +308,10 @@ object ReportsScreens {
                                 Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(SabouShapes.chip).background(Sabou.colors.track)) {
                                     Box(Modifier.fillMaxWidth(r.shareBp / 10_000f).padding(vertical = 3.dp).clip(SabouShapes.chip).background(Sabou.colors.primary))
                                 }
-                                Text("${Fa.quantity(r.portions)} پرس · ${Fa.toman(r.gross)} تومان", style = SabouType.caption, color = Sabou.colors.muted)
+                                Text("${Fa.quantity(r.portions)} پرس · ${Fa.rial(r.gross)} ریال", style = SabouType.caption, color = Sabou.colors.muted)
                                 Text(
                                     r.unitCost?.let { c ->
-                                        "بهای مواد هر پرس ${Fa.toman(c)} · حاشیه ${r.unitMargin?.let { Fa.toman(it) } ?: "—"} · بهای غذا ${r.costBp?.let { Fa.percent(it) } ?: "—"}"
+                                        "بهای مواد هر پرس ${Fa.rial(c)} · حاشیه ${r.unitMargin?.let { Fa.rial(it) } ?: "—"} · بهای غذا ${r.costBp?.let { Fa.percent(it) } ?: "—"}"
                                     } ?: "بهای مواد معلوم نیست (رسپی یا قیمت خرید ندارد)",
                                     style = SabouType.caption, color = if (r.unitCost == null) Sabou.colors.danger else Sabou.colors.muted,
                                 )
@@ -344,11 +344,11 @@ object ReportsScreens {
                     }
                     Loaded(data) { u ->
                         SCard {
-                            KeyValue("مصرف واقعی (تومان)", Fa.toman(u.actualValue), strong = true)
-                            KeyValue("مصرف تئوریک (فروش)", Fa.toman(u.theoreticalValue))
-                            KeyValue("ضایعات ثبت‌شده", Fa.toman(u.wasteValue))
-                            if (u.compsValue != 0L) KeyValue("پذیرایی، غذای پرسنل و اهدایی", Fa.toman(u.compsValue))
-                            KeyValue("اختلاف توضیح‌داده‌نشده", Fa.toman(u.unexplainedValue), if (u.unexplainedValue > 0) Sabou.colors.danger else Sabou.colors.ink)
+                            KeyValue("مصرف واقعی (ریال)", Fa.rial(u.actualValue), strong = true)
+                            KeyValue("مصرف تئوریک (فروش)", Fa.rial(u.theoreticalValue))
+                            KeyValue("ضایعات ثبت‌شده", Fa.rial(u.wasteValue))
+                            if (u.compsValue != 0L) KeyValue("پذیرایی، غذای پرسنل و اهدایی", Fa.rial(u.compsValue))
+                            KeyValue("اختلاف توضیح‌داده‌نشده", Fa.rial(u.unexplainedValue), if (u.unexplainedValue > 0) Sabou.colors.danger else Sabou.colors.ink)
                             Text("اختلاف توضیح‌داده‌نشده همان کسری انبارگردانی است؛ بدون انبارگردانی در بازه، صفر می‌ماند.", style = SabouType.caption, color = Sabou.colors.muted)
                         }
                         if (u.rows.isEmpty()) EmptyState("در این بازه گردشی نیست.")

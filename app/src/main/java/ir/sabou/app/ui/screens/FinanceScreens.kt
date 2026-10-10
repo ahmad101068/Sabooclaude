@@ -114,7 +114,7 @@ object FinanceScreens {
                     Text("$accountName · ${Fa.date(m.date)}", style = SabouType.caption, color = Sabou.colors.muted)
                 }
             }
-            Text((if (inflow) "+ " else "− ") + Fa.tomanShort(m.amount.rial), style = SabouType.bodyStrong,
+            Text((if (inflow) "+ " else "− ") + Fa.rialShort(m.amount.rial), style = SabouType.bodyStrong,
                 color = if (inflow) Sabou.colors.moneyIn else Sabou.colors.moneyOut)
         }
     }
@@ -155,7 +155,7 @@ object FinanceScreens {
                                             Text(b.account.name, style = SabouType.bodyStrong, color = Sabou.colors.ink)
                                             Text(kindName(b.account.kind) + if (b.account.scope == Scope.Organization) " · سازمان" else "", style = SabouType.caption, color = Sabou.colors.muted)
                                         }
-                                        Text(Fa.tomanShort(b.balance), style = SabouType.amount, color = Sabou.colors.ink)
+                                        Text(Fa.rialShort(b.balance), style = SabouType.amount, color = Sabou.colors.ink)
                                     }
                                 }
                             }
@@ -235,7 +235,7 @@ object FinanceScreens {
                         if (purposes != null) Picker("بابت", purposes, purpose, { purpose = it })
                         if (passOn) ir.sabou.app.ui.HeldChequePicker(account!!.scope, account.id, heldCheque) { row -> heldCheque = row.cheque.id; amount = row.cheque.amount }
                         else MoneyInput("مبلغ", amount, { amount = it })
-                        if (passOn) amount?.let { KeyValue("مبلغ چک", Fa.toman(it) + " تومان") }
+                        if (passOn) amount?.let { KeyValue("مبلغ چک", Fa.rial(it) + " ریال") }
                         DateInput("تاریخ", date, { date = it }, session.today)
                         TextInput("شرح", note, { note = it })
                         if (newCheque) ir.sabou.app.ui.ChequeInputs(chequeFields, session.today, "", payment, list.filter { it.scope == account!!.scope })
@@ -288,11 +288,11 @@ object FinanceScreens {
                     FormCard {
                         Picker("صندوق", accountChoices(list.map { it.account }), accountId, { accountId = it })
                         val book = list.firstOrNull { it.account.id == accountId }?.balance
-                        if (book != null) KeyValue("مانده دفتری", Fa.toman(book) + " تومان")
+                        if (book != null) KeyValue("مانده دفتری", Fa.rial(book) + " ریال")
                         MoneyInput("مبلغ شمارش‌شده", counted, { counted = it })
                         val c = counted
                         if (book != null && c != null && c.rial != book) {
-                            Banner((if (c.rial > book) "اضافه صندوق: " else "کسری صندوق: ") + Fa.toman(kotlin.math.abs(c.rial - book)) + " تومان", ChipKind.ACCENT)
+                            Banner((if (c.rial > book) "اضافه صندوق: " else "کسری صندوق: ") + Fa.rial(kotlin.math.abs(c.rial - book)) + " ریال", ChipKind.ACCENT)
                         }
                         TextInput("شرح", note, { note = it })
                         action.error?.let { Banner(it) }
@@ -357,7 +357,7 @@ object FinanceScreens {
             LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 item {
                     Loaded(data) { (b, _) ->
-                        SCard { KeyValue("مانده", Fa.toman(b.balance) + " تومان", strong = true) }
+                        SCard { KeyValue("مانده", Fa.rial(b.balance) + " ریال", strong = true) }
                     }
                 }
                 item { action.error?.let { Banner(it) } }
@@ -398,12 +398,12 @@ object FinanceScreens {
             Header("طلب از مشتریان", onBack = nav.back)
             Page {
                 Loaded(data) { list ->
-                    SCard { KeyValue("جمع طلب (تومان)", Fa.toman(Money.sum(list.map { it.outstanding })), strong = true) }
+                    SCard { KeyValue("جمع طلب (ریال)", Fa.rial(Money.sum(list.map { it.outstanding })), strong = true) }
                     if (list.isEmpty()) EmptyState("طلب بازی وجود ندارد.")
                     list.forEach { r ->
                         val due = r.receivable.dueDate
                         NavRow(R.drawable.ic_person, r.customer, "سررسید ${Fa.date(due)}" + if (due < session.today) " · گذشته" else "",
-                            Fa.tomanShort(r.outstanding.rial), onClick = { nav.go(Route.Collect(r.receivable.id)) })
+                            Fa.rialShort(r.outstanding.rial), onClick = { nav.go(Route.Collect(r.receivable.id)) })
                     }
                 }
                 ExportButtons("طلب-از-مشتریان") { listOf(ReportTables.receivables(overview.openReceivables())) }
@@ -433,7 +433,7 @@ object FinanceScreens {
                     val byCheque = usable.firstOrNull { it.id == accountId }?.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES
                     val party = customer.orNull().orEmpty()
                     FormCard {
-                        KeyValue("مانده طلب", Fa.toman(outstanding) + " تومان", strong = true)
+                        KeyValue("مانده طلب", Fa.rial(outstanding) + " ریال", strong = true)
                         Picker("واریز به", accountChoices(usable, cheques = true), accountId, { accountId = it })
                         MoneyInput(if (byCheque) "مبلغ چک" else "مبلغ دریافتی", amount, { amount = it })
                         DateInput("تاریخ", date, { date = it }, session.today)
@@ -461,11 +461,11 @@ object FinanceScreens {
                 Loaded(data) { rows ->
                     SCard {
                         rows.forEach { (a, v) ->
-                            KeyValue("${Fa.digits(a.code.value)} · ${a.name}", (if (v < 0) "بس " else "بد ") + Fa.toman(kotlin.math.abs(v)),
+                            KeyValue("${Fa.digits(a.code.value)} · ${a.name}", (if (v < 0) "بس " else "بد ") + Fa.rial(kotlin.math.abs(v)),
                                 if (a.type == AccountType.REVENUE || a.type == AccountType.EXPENSE) Sabou.colors.muted else Sabou.colors.ink)
                         }
                         Divider()
-                        KeyValue("جمع (باید صفر باشد)", Fa.toman(rows.sumOf { it.second }), strong = true)
+                        KeyValue("جمع (باید صفر باشد)", Fa.rial(rows.sumOf { it.second }), strong = true)
                     }
                 }
                 if (session.can(Permission.LEDGER_VIEW)) SecondaryButton("سود و زیان و گزارش‌های دیگر", { nav.go(Route.Reports) })
