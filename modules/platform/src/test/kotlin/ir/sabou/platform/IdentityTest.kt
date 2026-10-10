@@ -20,7 +20,14 @@ class IdentityTest {
     private val branches = InMemoryBranchStore()
     private val uow = InMemoryUnitOfWork().also { it.register(users, branches) }
     private val session = Session(users, clock)
-    private val identity = IdentityService(users, branches, session, uow, InMemoryAuditStore(), clock) { "e1" }
+    /** Device uptime: advances with [elapsed]; [boot] changes on a simulated reboot. */
+    private var elapsed = 1_000L
+    private var boot = "boot-1"
+    private val deviceTime = object : DeviceTime {
+        override fun bootId() = boot
+        override fun elapsedMillis() = elapsed
+    }
+    private val identity = IdentityService(users, branches, session, uow, InMemoryAuditStore(), clock, deviceTime) { "e1" }
     private fun code(block: () -> Unit) = assertFailsWith<DomainException> { block() }.error.code
 
     @Test fun firstUserIsOwnerAndOnlyOnce() {
@@ -45,7 +52,7 @@ class IdentityTest {
         identity.logout()
         repeat(5) { code { identity.login("owner", "000000".toCharArray()) } }
         assertEquals("INVALID_STATE:USER:LOCKED", code { identity.login("owner", "123456".toCharArray()) })
-        now += 31_000
+        now += 31_000; elapsed += 31_000
         identity.login("owner", "123456".toCharArray())
         now += 31 * 60_000
         assertNull(session.currentActor())
@@ -78,5 +85,48 @@ class IdentityTest {
         assertEquals("INVALID_STATE:USER:LOCKED", code { identity.changeOwnPin("000000".toCharArray(), "333333".toCharArray()) })
         assertNull(session.currentActor())                                   // signed out
         assertEquals("INVALID_STATE:USER:LOCKED", code { identity.login("owner", "123456".toCharArray()) })
+    }
+
+    @Test fun changingTheDeviceClockDoesNotShortenALock() {
+        identity.bootstrapOwner("owner", "مالک", "123456".toCharArray())
+        identity.logout()
+        repeat(5) { code { identity.login("owner", "000000".toCharArray()) } }
+        // Clock moved a day forward: same boot, uptime unchanged → still locked.
+        now += 86_400_000
+        assertEquals("INVALID_STATE:USER:LOCKED", code { identity.login("owner", "123456".toCharArray()) })
+        // Clock set back before the lock began → still locked, even after a reboot.
+        now -= 2 * 86_400_000; boot = "boot-2"; elapsed = 5_000
+        assertEquals("INVALID_STATE:USER:LOCKED", code { identity.login("owner", "123456".toCharArray()) })
+        // Real time passing on the monotonic clock ends it.
+        now += 86_400_000; boot = "boot-1"; elapsed = 1_000 + 31_000
+        identity.login("owner", "123456".toCharArray())
+    }
+
+    @Test fun manyWrongPinsLockAStaffAccountUntilTheOwnerResetsIt() {
+        identity.bootstrapOwner("owner", "مالک", "123456".toCharArray())
+        val branch = identity.createBranch("ونک")
+        val ali = identity.createUser("ali", "علی", Role.CASHIER, setOf(branch), "111111".toCharArray())
+        identity.logout()
+        repeat(IdentityService.OWNER_RESET_AFTER) {
+            code { identity.login("ali", "000000".toCharArray()) }
+            now += 16 * 60_000; elapsed += 16 * 60_000             // waiting out every temporary lock
+        }
+        assertEquals("INVALID_STATE:USER:LOCKED_UNTIL_RESET", code { identity.login("ali", "111111".toCharArray()) })
+        now += 30L * 86_400_000; elapsed += 30L * 86_400_000       // no amount of time unlocks it
+        assertEquals("INVALID_STATE:USER:LOCKED_UNTIL_RESET", code { identity.login("ali", "111111".toCharArray()) })
+        identity.login("owner", "123456".toCharArray())
+        identity.resetPin(ali, "222222".toCharArray())
+        identity.logout()
+        identity.login("ali", "222222".toCharArray())
+    }
+
+    @Test fun theOwnerIsNeverLockedForGood() {
+        identity.bootstrapOwner("owner", "مالک", "123456".toCharArray())
+        identity.logout()
+        repeat(IdentityService.OWNER_RESET_AFTER + 3) {
+            code { identity.login("owner", "000000".toCharArray()) }
+            now += 16 * 60_000; elapsed += 16 * 60_000
+        }
+        identity.login("owner", "123456".toCharArray())
     }
 }

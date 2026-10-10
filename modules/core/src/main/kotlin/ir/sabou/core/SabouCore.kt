@@ -66,6 +66,7 @@ class SabouCore private constructor(
     val clock: Clock,
     policies: List<StatutoryPolicy>,
     newDatabaseEpoch: String?,
+    deviceTime: ir.sabou.platform.DeviceTime,
 ) {
     private val meta = DatabaseMeta(db)
     internal val unitOfWork = SqlUnitOfWork(db)
@@ -104,7 +105,7 @@ class SabouCore private constructor(
 
     // Pipeline and identity
     val session = Session(users, clock)
-    val identity = IdentityService(users, branches, session, unitOfWork, auditStore, clock) { epoch }
+    val identity = IdentityService(users, branches, session, unitOfWork, auditStore, clock, deviceTime) { epoch }
     private val bus = CommandBus(session, unitOfWork, SqlIdempotencyStore(db), auditStore, events, clock) { epoch }
     private val integrity = IntegrityGuard(anchors, auditStore)
 
@@ -266,10 +267,11 @@ class SabouCore private constructor(
             clock: Clock = Clock.SYSTEM,
             policies: List<StatutoryPolicy> = emptyList(),
             newDatabaseEpoch: String? = null,
+            deviceTime: ir.sabou.platform.DeviceTime = ir.sabou.platform.DeviceTime.PROCESS,
         ): SabouCore {
             check(db.query("PRAGMA foreign_keys").single().long("foreign_keys") == 1L) { "FOREIGN_KEYS_DISABLED" }
             Schema.migrate(db)
-            return SabouCore(db, anchors, clock, policies, newDatabaseEpoch)
+            return SabouCore(db, anchors, clock, policies, newDatabaseEpoch, deviceTime)
         }
 
         fun newEpoch(): String = java.util.UUID.randomUUID().toString()

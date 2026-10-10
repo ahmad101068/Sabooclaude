@@ -1,8 +1,12 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     kotlin("android")
     kotlin("plugin.compose")
 }
+
+val appVersion = Properties().apply { rootProject.file("version.properties").inputStream().use { load(it) } }
 
 android {
     namespace = "ir.sabou.app"
@@ -13,9 +17,9 @@ android {
         // 26: PBKDF2WithHmacSHA256, java.util.Base64 and ThreadLocal.withInitial used by the core exist natively.
         minSdk = 26
         targetSdk = 36
-        // Every CI build gets a higher versionCode, so a newer APK installs over the previous one.
-        versionCode = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull() ?: 1
-        versionName = "0.1.0"
+        // One source of the version: version.properties (raised in the PR that prepares a release).
+        versionCode = appVersion.getProperty("VERSION_CODE").toInt()
+        versionName = appVersion.getProperty("VERSION_NAME")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -27,8 +31,9 @@ android {
         throw GradleException("Release signing is partially configured: set all SABOU_* signing variables or none.")
     }
     signingConfigs {
-        // A fixed, public debug key (committed on purpose, debug builds only): without it every CI runner
-        // signs with a fresh random key and Android refuses to update the installed app.
+        // A fixed, public debug key (committed on purpose) for the separate test app ir.sabou.erp.debug only:
+        // without it every CI runner signs with a fresh random key and Android refuses to update the test app.
+        // The real app (ir.sabou.erp) is signed only with the private key from the environment.
         getByName("debug") {
             storeFile = file("debug.keystore")
             storePassword = "android"
@@ -46,6 +51,12 @@ android {
     }
 
     buildTypes {
+        // The debug app is a different app (own id, own name): it can never install over, or be mistaken for,
+        // the real one, and the public debug key below can never sign an update of the real app.
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -75,6 +86,15 @@ android {
         abortOnError = true
         warningsAsErrors = false
         checkReleaseBuilds = true
+    }
+}
+
+// Debug builds from CI install over each other: their versionCode is the CI run number (always rising).
+// Release builds keep the versionCode of version.properties.
+androidComponents {
+    onVariants(selector().withBuildType("debug")) { variant ->
+        val run = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull()
+        if (run != null) variant.outputs.forEach { it.versionCode.set(run) }
     }
 }
 

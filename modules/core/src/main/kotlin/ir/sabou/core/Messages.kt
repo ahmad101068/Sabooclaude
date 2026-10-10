@@ -95,6 +95,7 @@ object Messages {
         "USER:DUPLICATE_USERNAME" to "این نام کاربری قبلاً استفاده شده است.",
         "USER:LAST_OWNER" to "آخرین مالک را نمی‌توان غیرفعال کرد.",
         "USER:LOCKED" to "به دلیل تلاش‌های ناموفق، ورود موقتاً قفل شده است. کمی بعد دوباره تلاش کنید.",
+        "USER:LOCKED_UNTIL_RESET" to "به دلیل تلاش‌های ناموفق زیاد، این حساب قفل شده است. مالک باید رمز را بازنشانی کند.",
         "USERS:ALREADY_BOOTSTRAPPED" to "مالک قبلاً تعریف شده است.",
         "PAYROLL_RUN:APPROVED" to "این لیست حقوق تأیید شده است.",
         "PAYROLL_RUN:REVERSED" to "این لیست حقوق برگشت خورده است.",

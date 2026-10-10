@@ -47,6 +47,7 @@ sealed interface AppState {
  */
 class AppContainer(private val context: Context) {
     private val keys = DeviceKeys(context)
+    private val deviceTime = AndroidDeviceTime(context)
     private val anchors = FileAnchorStore(File(context.noBackupFilesDir, "integrity.anchors"), keys)
     private val quarantine = File(context.noBackupFilesDir, QUARANTINE_DIR)
     private var helper: SupportSQLiteOpenHelper? = null
@@ -83,7 +84,7 @@ class AppContainer(private val context: Context) {
             // was moved away), so the interrupted reset completes instead of looking like a swap.
             val epoch = newEpoch ?: runCatching { IntegrityGuard(anchors, InMemoryAuditStore()).pendingEpoch() }.getOrNull()
             val db = openHelper(DB_NAME, keys.databasePassphrase()).also { helper = it }.writableDatabase
-            val core = SabouCore.open(AndroidSqlDatabase(db), anchors, Clock.SYSTEM, newDatabaseEpoch = epoch)
+            val core = SabouCore.open(AndroidSqlDatabase(db), anchors, Clock.SYSTEM, newDatabaseEpoch = epoch, deviceTime = deviceTime)
             when (val verdict = runCatching { core.verifyStartup() }.getOrElse { StartupVerdict.RollbackDetected(it.message ?: "ANCHOR") }) {
                 StartupVerdict.Healthy -> AppState.Ready(core).also { verifyInBackgroundIfDue(core) }
                 is StartupVerdict.RollbackDetected -> AppState.Recovery(verdict.detail, core)
