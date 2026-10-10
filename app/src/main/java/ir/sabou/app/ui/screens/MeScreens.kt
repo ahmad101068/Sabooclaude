@@ -343,8 +343,9 @@ object MeScreens {
                         SCard {
                             Text(m.name, style = SabouType.bodyStrong, color = Sabou.colors.ink)
                             d.prices[m.id]?.let { p ->
-                                if (p.price == null) Text("قیمت منو ندارد — هنگام فروش قیمت واحد وارد می‌شود.", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
-                                else KeyValue(if (p.own) "قیمت (ویژه این شعبه)" else "قیمت", Fa.rial(p.price) + " ریال", strong = true)
+                                val price = p.price
+                                if (price == null) Text("قیمت منو ندارد — هنگام فروش قیمت واحد وارد می‌شود.", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
+                                else KeyValue(if (p.own) "قیمت (ویژه این شعبه)" else "قیمت", Fa.rial(price) + " ریال", strong = true)
                             }
                             val v = latest[m.id]
                             if (v == null) Text("رسپی ندارد — فروش آن ثبت نهایی نمی‌شود.", style = SabouType.caption, color = Sabou.colors.danger)
