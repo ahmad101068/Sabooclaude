@@ -1,5 +1,11 @@
 package ir.sabou.payroll
 
+import ir.sabou.platform.NoDocument
+
+import ir.sabou.platform.DocumentSeries
+
+import ir.sabou.platform.IssuesDocument
+
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -21,6 +27,7 @@ import ir.sabou.platform.Permission
 import ir.sabou.treasury.Direction
 import ir.sabou.treasury.TreasuryGateway
 
+@NoDocument
 data class RegisterEmployee(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -35,6 +42,7 @@ data class RegisterEmployee(
 }
 
 /** Ends an employment after [lastDay]; that month is paid only up to it, later months not at all. */
+@NoDocument
 data class EndEmployment(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -45,6 +53,7 @@ data class EndEmployment(
     override fun fingerprint() = "$scope|$employeeId|${lastDay.epochDay}"
 }
 
+@NoDocument
 data class RecordAttendance(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -58,6 +67,7 @@ data class RecordAttendance(
     override fun fingerprint() = "$scope|$employeeId|${date.epochDay}|$workedMinutes|$overtimeMinutes|$absentMinutes"
 }
 
+@IssuesDocument(DocumentSeries.PAYROLL)
 data class CalculatePayroll(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -68,16 +78,19 @@ data class CalculatePayroll(
     override fun fingerprint() = "$scope|${from.epochDay}|${to.epochDay}"
 }
 
+@NoDocument
 data class ApprovePayroll(override val commandId: GlobalId, override val scope: Scope.Branch, val runId: GlobalId) : Command {
     override val requiredPermission = Permission.PAYROLL_APPROVE
     override fun fingerprint() = "$scope|$runId"
 }
 
+@IssuesDocument(DocumentSeries.REVERSAL)
 data class ReversePayroll(override val commandId: GlobalId, override val scope: Scope.Branch, val runId: GlobalId, val date: BusinessDate, val reason: String) : Command {
     override val requiredPermission = Permission.PAYROLL_APPROVE
     override fun fingerprint() = "$scope|$runId|${date.epochDay}|$reason"
 }
 
+@IssuesDocument(DocumentSeries.PAYMENT)
 data class PaySalary(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -91,12 +104,14 @@ data class PaySalary(
     override fun fingerprint() = "$scope|$runId|$employeeId|$treasuryAccountId|${amount.rial}|${date.epochDay}"
 }
 
+@IssuesDocument(DocumentSeries.REVERSAL)
 data class ReverseSalaryPayment(override val commandId: GlobalId, override val scope: Scope.Branch, val paymentId: GlobalId, val date: BusinessDate, val reason: String) : Command {
     override val requiredPermission = Permission.PAYROLL_PAY
     override fun fingerprint() = "$scope|$paymentId|${date.epochDay}|$reason"
 }
 
 /** Pays the insurance organisation or the tax office out of the accrued liability. */
+@IssuesDocument(DocumentSeries.PAYMENT)
 data class RemitLiability(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -200,6 +215,7 @@ class PayrollOperations(
             RunStatus.DRAFT, ctx.actor.userId, null, null)
         payroll.saveRun(run)
         ctx.audit(AuditDraft("PAYROLL_CALCULATE", "PAYROLL_RUN", run.id.value, "employees=${payslips.size};net=${Money.sum(payslips.map { it.net }).rial}"))
+        ctx.number(DocumentSeries.PAYROLL, cmd.to, run.id)
         run.id
     }
 
@@ -245,6 +261,7 @@ class PayrollOperations(
         run.accrualJournalId?.let { ledger.reverse(ctx, capability, emptySet(), it, cmd.date, cmd.reason) }
         payroll.saveRun(run.copy(status = RunStatus.REVERSED))
         ctx.audit(AuditDraft("PAYROLL_REVERSE", "PAYROLL_RUN", run.id.value, cmd.reason.trim()))
+        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.PAYROLL to run.id)
         run.id
     }
 
@@ -258,6 +275,7 @@ class PayrollOperations(
         treasury.settle(ctx, capability, cmd.treasuryAccountId, Direction.PAYMENT, cmd.amount, cmd.date, PAYMENT, paymentId, "پرداخت حقوق ${employee.name}",
             listOf(LineDraft(StandardAccounts.PAYROLL_PAYABLE, debit = cmd.amount, memo = employee.name, by = capability)))
         payroll.savePayment(SalaryPayment(paymentId, run.id, employee.id, cmd.treasuryAccountId, cmd.amount, cmd.date, reversed = false))
+        ctx.number(DocumentSeries.PAYMENT, cmd.date, paymentId)
         paymentId
     }
 
@@ -267,6 +285,7 @@ class PayrollOperations(
         ensure(!payment.reversed) { DomainError.InvalidState("SALARY_PAYMENT", "ALREADY_REVERSED") }
         treasury.reverseDocument(ctx, capability, PAYMENT, payment.id, cmd.date, cmd.reason)
         payroll.savePayment(payment.copy(reversed = true))
+        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.PAYMENT to payment.id)
         payment.id
     }
 
@@ -280,6 +299,7 @@ class PayrollOperations(
             listOf(LineDraft(account, debit = cmd.amount, by = capability)))
         payroll.saveRemittance(Remittance(id, cmd.scope, cmd.kind, cmd.amount, cmd.date))
         ctx.audit(AuditDraft("PAYROLL_REMIT", "PAYROLL_LIABILITY", id.value, "${cmd.kind}:${cmd.amount.rial}"))
+        ctx.number(DocumentSeries.PAYMENT, cmd.date, id)
         id
     }
 

@@ -88,6 +88,8 @@ private class SalesData(
     val customers: List<Customer>,
     val sale: DailySale?,
     val day: SalesDay?,
+    /** The sale's document number once posted. */
+    val number: String? = null,
 )
 
 @Composable
@@ -105,6 +107,7 @@ fun SalesScreen(nav: Nav) {
                     customers = view.customers,
                     sale = view.sale,
                     day = view.day,
+                    number = view.number,
                 )
             }
             val d = state.orNull()
@@ -428,6 +431,7 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SCard {
+            data.number?.let { KeyValue("شماره سند", Fa.digits(it), strong = true) }
             KeyValue("فروش ناخالص", Fa.toman(sale.gross))
             KeyValue("تخفیف", "− " + Fa.toman(sale.discount), Sabou.colors.danger)
             KeyValue("حق سرویس", Fa.toman(sale.serviceCharge))

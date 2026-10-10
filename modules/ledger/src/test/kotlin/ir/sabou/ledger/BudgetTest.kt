@@ -14,6 +14,7 @@ import ir.sabou.platform.CommandBus
 import ir.sabou.platform.Role
 import ir.sabou.platform.memory.InMemoryAuditStore
 import ir.sabou.platform.memory.InMemoryEventLog
+import ir.sabou.platform.memory.InMemoryDocumentNumberStore
 import ir.sabou.platform.memory.InMemoryIdempotencyStore
 import ir.sabou.platform.memory.InMemoryUnitOfWork
 import ir.sabou.platform.memory.MutableSession
@@ -26,8 +27,9 @@ class BudgetTest {
     private val session = MutableSession(Actor(GlobalId.new(), "owner", Role.OWNER, emptySet()))
     private val uow = InMemoryUnitOfWork()
     private val budgets = InMemoryBudgetStore()
+    private val numbers = InMemoryDocumentNumberStore().also { uow.register(it) }
     private val bus = CommandBus(session, uow, InMemoryIdempotencyStore().also { uow.register(it) },
-        InMemoryAuditStore().also { uow.register(it) }, InMemoryEventLog(), Clock { 1L }) { "e1" }
+        InMemoryAuditStore().also { uow.register(it) }, InMemoryEventLog(), Clock { 1L }, numbers) { "e1" }
     private val ops = BudgetOperations(bus, InMemoryAccountStore(StandardAccounts.chart()), budgets)
     private val d = BusinessDate(20_000)
 

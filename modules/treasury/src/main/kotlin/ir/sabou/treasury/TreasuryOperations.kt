@@ -1,5 +1,11 @@
 package ir.sabou.treasury
 
+import ir.sabou.platform.NoDocument
+
+import ir.sabou.platform.DocumentSeries
+
+import ir.sabou.platform.IssuesDocument
+
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.GlobalId
@@ -33,6 +39,7 @@ enum class PaymentPurpose(val counterAccount: AccountCode) {
     OWNER_WITHDRAWAL(StandardAccounts.CAPITAL),
 }
 
+@NoDocument
 data class OpenTreasuryAccount(
     override val commandId: GlobalId,
     override val scope: Scope,
@@ -44,6 +51,7 @@ data class OpenTreasuryAccount(
 }
 
 /** [cheque]: details when the money is a cheque received into a cheque box. */
+@IssuesDocument(DocumentSeries.RECEIPT)
 data class RecordReceipt(
     override val commandId: GlobalId,
     override val scope: Scope,
@@ -59,6 +67,7 @@ data class RecordReceipt(
 }
 
 /** [cheque]: our new cheque (from a cheque book); [chequeId]: a customer's cheque passed on (from a cheque box). */
+@IssuesDocument(DocumentSeries.PAYMENT)
 data class RecordPayment(
     override val commandId: GlobalId,
     override val scope: Scope,
@@ -83,6 +92,7 @@ fun paymentCheque(cheque: ChequeDetails?, chequeId: GlobalId?): ChequeInstructio
 }
 
 /** Moves money between two treasury accounts, including between branches (cash deposit to bank). */
+@IssuesDocument(DocumentSeries.TRANSFER)
 data class TransferFunds(
     override val commandId: GlobalId,
     override val scope: Scope,
@@ -97,6 +107,7 @@ data class TransferFunds(
 }
 
 /** Physical count of a cash box; the difference is booked to cash over/short. */
+@IssuesDocument(DocumentSeries.CASH_COUNT)
 data class ReconcileAccount(
     override val commandId: GlobalId,
     override val scope: Scope,
@@ -110,6 +121,7 @@ data class ReconcileAccount(
 }
 
 /** Reverses a treasury-owned document only. Documents of other modules are reversed there (AUD-002). */
+@IssuesDocument(DocumentSeries.REVERSAL)
 data class ReverseTreasuryDocument(
     override val commandId: GlobalId,
     override val scope: Scope,
@@ -154,6 +166,7 @@ class TreasuryOperations(
     fun receipt(c: RecordReceipt): CommandOutcome = bus.execute(ModuleId.TREASURY, c) { cmd, ctx ->
         requireAccountScope(cmd.accountId, cmd.scope)
         val docId = GlobalId.new()
+        ctx.number(DocumentSeries.RECEIPT, cmd.date, docId)
         gateway.settle(
             ctx, capability, cmd.accountId, Direction.RECEIPT, cmd.amount, cmd.date, RECEIPT, docId, cmd.description,
             listOf(LineDraft(cmd.purpose.counterAccount, credit = cmd.amount, memo = cmd.purpose.name, by = capability)),
@@ -165,6 +178,7 @@ class TreasuryOperations(
     fun payment(c: RecordPayment): CommandOutcome = bus.execute(ModuleId.TREASURY, c) { cmd, ctx ->
         requireAccountScope(cmd.accountId, cmd.scope)
         val docId = GlobalId.new()
+        ctx.number(DocumentSeries.PAYMENT, cmd.date, docId)
         gateway.settle(
             ctx, capability, cmd.accountId, Direction.PAYMENT, cmd.amount, cmd.date, PAYMENT, docId, cmd.description,
             listOf(LineDraft(cmd.purpose.counterAccount, debit = cmd.amount, memo = cmd.purpose.name, by = capability)),
@@ -181,6 +195,7 @@ class TreasuryOperations(
         ensure(from.scope == cmd.scope) { DomainError.InvalidInput("scope", "محدوده فرمان با حساب مبدأ یکسان نیست.") }
         ctx.requireScope(to.scope)
         val docId = GlobalId.new()
+        ctx.number(DocumentSeries.TRANSFER, cmd.date, docId)
         if (from.scope == to.scope) {
             gateway.recordTransferWithinScope(ctx, from, to, cmd.amount, cmd.date, docId, cmd.description)
         } else {
@@ -203,6 +218,7 @@ class TreasuryOperations(
         val book = gateway.balance(cmd.accountId)
         val difference = cmd.counted.rial - book
         val docId = GlobalId.new()
+        ctx.number(DocumentSeries.CASH_COUNT, cmd.date, docId)
         ctx.audit(AuditDraft("TREASURY_COUNT", "TREASURY_ACCOUNT", cmd.accountId.value, "book=$book;counted=${cmd.counted.rial}"))
         if (difference != 0L) {
             val amount = Money.of(kotlin.math.abs(difference))
@@ -217,7 +233,16 @@ class TreasuryOperations(
     fun reverse(c: ReverseTreasuryDocument): CommandOutcome = bus.execute(ModuleId.TREASURY, c) { cmd, ctx ->
         ensure(cmd.documentType in OWN_DOCUMENTS) { DomainError.OwnedByAnotherModule("NOT_TREASURY_DOCUMENT") }
         gateway.reverseDocument(ctx, capability, cmd.documentType, cmd.documentId, cmd.date, cmd.reason)
+        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = seriesOf(cmd.documentType) to cmd.documentId)
         cmd.documentId
+    }
+
+    private fun seriesOf(documentType: String): DocumentSeries = when (documentType) {
+        RECEIPT -> DocumentSeries.RECEIPT
+        PAYMENT -> DocumentSeries.PAYMENT
+        TRANSFER -> DocumentSeries.TRANSFER
+        RECONCILIATION -> DocumentSeries.CASH_COUNT
+        else -> DocumentSeries.CHEQUE
     }
 
     private fun requireAccountScope(accountId: GlobalId, scope: Scope) {

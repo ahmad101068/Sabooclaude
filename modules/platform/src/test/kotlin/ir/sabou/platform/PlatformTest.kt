@@ -9,6 +9,7 @@ import ir.sabou.kernel.Scope
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.platform.memory.InMemoryAuditStore
 import ir.sabou.platform.memory.InMemoryEventLog
+import ir.sabou.platform.memory.InMemoryDocumentNumberStore
 import ir.sabou.platform.memory.InMemoryIdempotencyStore
 import ir.sabou.platform.memory.InMemoryUnitOfWork
 import ir.sabou.platform.memory.MutableSession
@@ -18,6 +19,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+
+@IssuesDocument(DocumentSeries.RECEIPT)
+private data class Numbered(override val commandId: GlobalId, override val scope: Scope, val number: Boolean) : Command {
+    override val requiredPermission = Permission.SALES_RECORD
+    override fun fingerprint() = "$number"
+}
 
 private data class Ping(
     override val commandId: GlobalId,
@@ -50,7 +57,8 @@ class PlatformTest {
     private val audit = InMemoryAuditStore()
     private val events = InMemoryEventLog()
     private val data = Table<String, String>()
-    private val bus = CommandBus(session, uow, idem, audit, events, Clock { 1_000L }) { "epoch-1" }
+    private val numbers = InMemoryDocumentNumberStore().also { uow.register(it) }
+    private val bus = CommandBus(session, uow, idem, audit, events, Clock { 1_000L }, numbers) { "epoch-1" }
 
     init { uow.register(idem, audit, events, data) }
 
@@ -189,5 +197,33 @@ class PlatformTest {
         val verdict = guard.verify("e", anchoredBefore = true)
         assertIs<StartupVerdict.RollbackDetected>(verdict)
         assertEquals("ANCHOR_MISSING", verdict.detail)
+    }
+
+    @Test fun aDocumentCommandThatForgetsItsNumberIsRolledBack() {
+        session.actor = actor(Role.OWNER)
+        val day = ir.sabou.kernel.BusinessDate(20_533)                        // 1405/01/01 = 2026-03-21
+        fun numbered(withNumber: Boolean) = bus.execute(ModuleId.SALES, Numbered(GlobalId.new(), Scope.Branch(branchA), withNumber)) { cmd, ctx ->
+            val doc = GlobalId.new()
+            data.put(doc.value, "receipt")
+            if (cmd.number) ctx.number(DocumentSeries.RECEIPT, day, doc)
+            doc
+        }
+        val first = numbered(true).resultId
+        assertEquals("در-1405-00001", numbers.of(DocumentSeries.RECEIPT, first)!!.number.text)
+        val rows = data.values().size
+        assertEquals("INTEGRITY:DOCUMENT_NOT_NUMBERED:RECEIPT:ir.sabou.platform.Numbered", code { numbered(false) })
+        assertEquals(rows, data.values().size)                                  // the whole command was rolled back
+        val second = numbered(true).resultId
+        assertEquals(2, numbers.of(DocumentSeries.RECEIPT, second)!!.number.sequence)   // no number was lost
+    }
+
+    @Test fun everySuccessfulCommandLeavesAnAuditRecordEvenIfItsHandlerWroteNone() {
+        session.actor = actor(Role.OWNER)
+        val before = audit.events.size
+        val outcome = bus.execute(ModuleId.SALES, ping()) { cmd, _ -> data.put(cmd.commandId.value, "silent"); cmd.commandId }
+        val added = audit.events.drop(before)
+        assertEquals(1, added.size)
+        assertEquals("COMMAND", added.single().action)
+        assertEquals(outcome.resultId.value, added.single().entityId)
     }
 }

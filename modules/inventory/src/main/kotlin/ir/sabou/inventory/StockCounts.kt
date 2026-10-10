@@ -1,5 +1,11 @@
 package ir.sabou.inventory
 
+import ir.sabou.platform.NoDocument
+
+import ir.sabou.platform.DocumentSeries
+
+import ir.sabou.platform.IssuesDocument
+
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -91,6 +97,7 @@ interface StockCountStore {
 }
 
 /** What was counted. Nothing in the stock or the books changes yet. */
+@IssuesDocument(DocumentSeries.STOCK_COUNT)
 data class SubmitStockCount(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -104,6 +111,7 @@ data class SubmitStockCount(
 }
 
 /** Accepts a count: every difference needs a reason ([reasons] by item); the stock and the books are corrected. */
+@NoDocument
 data class ApproveStockCount(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -115,6 +123,7 @@ data class ApproveStockCount(
 }
 
 /** Sends a count back (e.g. to be counted again); nothing changes and the reason is kept. */
+@NoDocument
 data class RejectStockCount(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -149,6 +158,7 @@ class StockCountOperations(
             ctx.actor.userId, ctx.actor.displayName, ctx.nowEpochMillis)
         counts.save(count)
         ctx.audit(AuditDraft("STOCK_COUNT_SUBMIT", "STOCK_COUNT", count.id.value, "location=${location.id};lines=${lines.size};differences=${count.differences.size}"))
+        ctx.number(DocumentSeries.STOCK_COUNT, cmd.date, count.id)
         count.id
     }
 

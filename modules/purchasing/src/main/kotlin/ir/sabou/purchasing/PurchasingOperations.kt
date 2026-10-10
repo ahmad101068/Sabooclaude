@@ -1,5 +1,11 @@
 package ir.sabou.purchasing
 
+import ir.sabou.platform.NoDocument
+
+import ir.sabou.platform.DocumentSeries
+
+import ir.sabou.platform.IssuesDocument
+
 import ir.sabou.inventory.InventoryGateway
 import ir.sabou.inventory.IssueLine
 import ir.sabou.inventory.ReceiptLine
@@ -37,6 +43,7 @@ import ir.sabou.treasury.Direction
 import ir.sabou.treasury.paymentCheque
 import ir.sabou.treasury.TreasuryGateway
 
+@NoDocument
 data class RegisterSupplier(override val commandId: GlobalId, val name: String, val phone: String) : Command {
     override val requiredPermission = Permission.SUPPLIER_MANAGE
     override val scope: Scope = Scope.Organization
@@ -45,6 +52,7 @@ data class RegisterSupplier(override val commandId: GlobalId, val name: String, 
 }
 
 /** Name, phone, delivery days, order cutoff and lead time; deactivating keeps the history. */
+@NoDocument
 data class UpdateSupplier(
     override val commandId: GlobalId,
     val supplierId: GlobalId,
@@ -72,6 +80,7 @@ data class ImmediatePayment(val treasuryAccountId: GlobalId, val amount: Money, 
  * and lines whose item is not known yet (held for review). Optionally paid on the spot, optionally
  * closing a purchase order, with photos or PDFs of the paper invoice.
  */
+@IssuesDocument(DocumentSeries.PURCHASE_INVOICE)
 data class PostPurchaseInvoice(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -98,6 +107,7 @@ data class PostPurchaseInvoice(
 }
 
 /** Adds photos or PDFs to an invoice after it was recorded. */
+@NoDocument
 data class AttachToInvoice(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -112,6 +122,7 @@ data class AttachToInvoice(
  * Assigns a held line: to an item (received into [locationId] at the line's amount) or to an
  * expense account. Exactly one of the two.
  */
+@NoDocument
 data class ResolveReviewLine(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -127,6 +138,7 @@ data class ResolveReviewLine(
     override fun fingerprint() = "$scope|$invoiceId|$index|$itemId|${quantity?.micros}|$locationId|$account|${date.epochDay}"
 }
 
+@IssuesDocument(DocumentSeries.PAYMENT)
 data class PaySupplierInvoice(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -141,6 +153,7 @@ data class PaySupplierInvoice(
     override fun fingerprint() = "$scope|$invoiceId|$treasuryAccountId|${amount.rial}|${date.epochDay}|${cheque?.fingerprint()}|$chequeId"
 }
 
+@IssuesDocument(DocumentSeries.REVERSAL)
 data class ReverseSupplierPayment(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -153,6 +166,7 @@ data class ReverseSupplierPayment(
 }
 
 /** Full reversal of a wrongly entered invoice. Only possible before any payment, return, credit or review assignment. */
+@IssuesDocument(DocumentSeries.REVERSAL)
 data class ReversePurchaseInvoice(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -169,6 +183,7 @@ data class ReversePurchaseInvoice(
  * first, then the supplier's other open invoices in the branch (oldest due first); any rest is kept
  * as supplier credit.
  */
+@IssuesDocument(DocumentSeries.PURCHASE_RETURN)
 data class ReturnToSupplier(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -182,6 +197,7 @@ data class ReturnToSupplier(
 }
 
 /** Uses the supplier's unapplied credit (from returns) against one of its invoices. */
+@IssuesDocument(DocumentSeries.CREDIT_SETTLEMENT)
 data class ApplySupplierCredit(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -194,6 +210,7 @@ data class ApplySupplierCredit(
 }
 
 /** Takes back a credit allocation (the credit becomes unapplied again), e.g. before reversing that invoice. */
+@NoDocument
 data class ReleaseCreditAllocation(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -205,6 +222,7 @@ data class ReleaseCreditAllocation(
 }
 
 /** The supplier pays back unapplied return credit into [treasuryAccountId] (a cheque box needs [cheque]). */
+@IssuesDocument(DocumentSeries.RECEIPT)
 data class ReceiveSupplierRefund(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -219,6 +237,7 @@ data class ReceiveSupplierRefund(
     override fun fingerprint() = "$scope|$supplierId|$treasuryAccountId|${amount.rial}|${date.epochDay}|${cheque?.fingerprint()}"
 }
 
+@IssuesDocument(DocumentSeries.REVERSAL)
 data class ReverseSupplierRefund(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -333,6 +352,7 @@ class PurchasingOperations(
         val total = goods + accountsTotal + reviewTotal
         ensure(!total.isZero) { DomainError.InvalidInput("value", "جمع فاکتور باید بیشتر از صفر باشد.") }
         val invoiceId = GlobalId.new()
+        ctx.number(DocumentSeries.PURCHASE_INVOICE, cmd.date, invoiceId)
         val title = "خرید از ${supplier.name} · فاکتور $number"
         if (cmd.lines.isNotEmpty()) {
             inventory.receive(
@@ -410,6 +430,7 @@ class PurchasingOperations(
         requireInvoice(payment.invoiceId, cmd.scope)
         ensure(!payment.reversed) { DomainError.InvalidState("SUPPLIER_PAYMENT", "ALREADY_REVERSED") }
         treasury.reverseDocument(ctx, capability, PAYMENT, payment.id, cmd.date, cmd.reason)
+        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.PAYMENT to payment.id)
         payment.bridgeJournalId?.let { ledger.reverse(ctx, capability, emptySet(), it, cmd.date, cmd.reason) }
         purchases.savePayment(payment.copy(reversed = true))
         ctx.audit(AuditDraft("SUPPLIER_PAYMENT_REVERSE", "SUPPLIER_PAYMENT", payment.id.value, cmd.reason.trim()))
@@ -424,6 +445,7 @@ class PurchasingOperations(
         ensure(invoice.reviewLines.none { it.resolution != null }) { DomainError.InvalidState("PURCHASE_INVOICE", "HAS_RESOLVED_LINES") }
         if (invoice.lines.isNotEmpty()) inventory.reverseDocument(ctx, capability, INVOICE, invoice.id, cmd.date, cmd.reason)
         invoice.journalIds.forEach { ledger.reverse(ctx, capability, emptySet(), it, cmd.date, cmd.reason) }
+        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.PURCHASE_INVOICE to invoice.id)
         purchases.saveInvoice(invoice.copy(status = InvoiceStatus.REVERSED))
         // The order it closed is open again for the corrected invoice.
         invoice.orderId?.let { id -> purchases.order(id)?.takeIf { it.invoiceId == invoice.id }?.let { purchases.saveOrder(it.copy(status = OrderStatus.OPEN, invoiceId = null)) } }
@@ -458,6 +480,7 @@ class PurchasingOperations(
         }
         val credit = Money.sum(priced.map { it.value })
         val returnId = GlobalId.new()
+        ctx.number(DocumentSeries.PURCHASE_RETURN, cmd.date, returnId)
         inventory.issueWithCounter(
             ctx, capability, locationId, cmd.lines, cmd.date, RETURN, returnId, "مرجوعی به تأمین‌کننده: ${cmd.reason.trim()}",
             if (credit.isZero) emptyList() else listOf(LineDraft(StandardAccounts.PAYABLE, debit = credit, memo = "مرجوعی", by = capability)),
@@ -485,6 +508,7 @@ class PurchasingOperations(
         ensure(cmd.amount <= unappliedCredit(invoice.supplierId, invoice.scope)) { DomainError.InvalidState("SUPPLIER_CREDIT", "EXCEEDS_AVAILABLE") }
         ensure(cmd.amount <= outstanding(invoice.id)) { DomainError.InvalidState("PURCHASE_INVOICE", "PAYMENT_EXCEEDS_OUTSTANDING") }
         val allocation = CreditAllocation(GlobalId.new(), invoice.supplierId, invoice.scope, invoice.id, cmd.amount, cmd.date, null)
+        ctx.number(DocumentSeries.CREDIT_SETTLEMENT, cmd.date, allocation.id)
         purchases.saveAllocation(allocation)
         ctx.audit(AuditDraft("SUPPLIER_CREDIT_APPLY", "PURCHASE_INVOICE", invoice.id.value, "allocation=${allocation.id};amount=${cmd.amount.rial}"))
         allocation.id
@@ -506,6 +530,7 @@ class PurchasingOperations(
         ensure(cmd.amount <= unappliedCredit(supplier.id, cmd.scope)) { DomainError.InvalidState("SUPPLIER_CREDIT", "EXCEEDS_AVAILABLE") }
         val account = treasury.account(cmd.treasuryAccountId)
         val refundId = GlobalId.new()
+        ctx.number(DocumentSeries.RECEIPT, cmd.date, refundId)
         val title = "استرداد اعتبار مرجوعی از ${supplier.name}"
         val cheque = cmd.cheque?.let { ChequeInstruction.New(it) }
         var bridge: GlobalId? = null
@@ -531,6 +556,7 @@ class PurchasingOperations(
         ensure(refund.scope == cmd.scope) { DomainError.InvalidInput("scope", "متعلق به این شعبه نیست.") }
         ensure(!refund.reversed) { DomainError.InvalidState("SUPPLIER_REFUND", "ALREADY_REVERSED") }
         treasury.reverseDocument(ctx, capability, REFUND, refund.id, cmd.date, cmd.reason)
+        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.RECEIPT to refund.id)
         refund.bridgeJournalId?.let { ledger.reverse(ctx, capability, emptySet(), it, cmd.date, cmd.reason) }
         purchases.saveRefund(refund.copy(reversed = true))
         ctx.audit(AuditDraft("SUPPLIER_REFUND_REVERSE", "SUPPLIER", refund.supplierId.value, "refund=${refund.id};reason=${cmd.reason.trim()}"))
@@ -544,6 +570,7 @@ class PurchasingOperations(
         ensure(date >= invoice.date) { DomainError.InvalidInput("date", "تاریخ پرداخت قبل از تاریخ فاکتور است.") }
         val account = treasury.account(accountId)
         val paymentId = GlobalId.new()
+        ctx.number(DocumentSeries.PAYMENT, date, paymentId, scope = invoice.scope)
         val supplier = suppliers.byId(invoice.supplierId)!!
         var bridge: GlobalId? = null
         if (account.scope == invoice.scope) {

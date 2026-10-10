@@ -1,5 +1,11 @@
 package ir.sabou.treasury
 
+import ir.sabou.platform.NoDocument
+
+import ir.sabou.platform.DocumentSeries
+
+import ir.sabou.platform.IssuesDocument
+
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.GlobalId
@@ -15,36 +21,42 @@ import ir.sabou.platform.ModuleId
 import ir.sabou.platform.Permission
 
 /** A received cheque handed to the bank for collection (no money moves until it is collected). */
+@NoDocument
 data class DepositCheque(override val commandId: GlobalId, override val scope: Scope, val chequeId: GlobalId, val bankAccountId: GlobalId, val date: BusinessDate) : Command {
     override val requiredPermission = Permission.CHEQUE_MANAGE
     override fun fingerprint() = "$scope|$chequeId|$bankAccountId|${date.epochDay}"
 }
 
 /** A deposited cheque taken back from the bank. */
+@NoDocument
 data class RecallCheque(override val commandId: GlobalId, override val scope: Scope, val chequeId: GlobalId, val date: BusinessDate, val reason: String) : Command {
     override val requiredPermission = Permission.CHEQUE_MANAGE
     override fun fingerprint() = "$scope|$chequeId|${date.epochDay}|$reason"
 }
 
 /** A received cheque paid into our bank account. */
+@IssuesDocument(DocumentSeries.CHEQUE)
 data class CollectCheque(override val commandId: GlobalId, override val scope: Scope, val chequeId: GlobalId, val bankAccountId: GlobalId, val date: BusinessDate) : Command {
     override val requiredPermission = Permission.CHEQUE_MANAGE
     override fun fingerprint() = "$scope|$chequeId|$bankAccountId|${date.epochDay}"
 }
 
 /** Our cheque paid by our bank: the money leaves the bank account it was drawn on. */
+@IssuesDocument(DocumentSeries.CHEQUE)
 data class ClearIssuedCheque(override val commandId: GlobalId, override val scope: Scope, val chequeId: GlobalId, val date: BusinessDate) : Command {
     override val requiredPermission = Permission.CHEQUE_MANAGE
     override fun fingerprint() = "$scope|$chequeId|${date.epochDay}"
 }
 
 /** A cheque (received or ours) that bounced: the claim or debt moves to the bounced-cheques account. */
+@IssuesDocument(DocumentSeries.CHEQUE)
 data class BounceCheque(override val commandId: GlobalId, override val scope: Scope, val chequeId: GlobalId, val date: BusinessDate, val reason: String) : Command {
     override val requiredPermission = Permission.CHEQUE_MANAGE
     override fun fingerprint() = "$scope|$chequeId|${date.epochDay}|$reason"
 }
 
 /** A bounced cheque settled in money: received into [accountId] (theirs) or paid from it (ours). */
+@IssuesDocument(DocumentSeries.CHEQUE)
 data class SettleBouncedCheque(override val commandId: GlobalId, override val scope: Scope, val chequeId: GlobalId, val accountId: GlobalId, val date: BusinessDate) : Command {
     override val requiredPermission = Permission.CHEQUE_MANAGE
     override fun fingerprint() = "$scope|$chequeId|$accountId|${date.epochDay}"
@@ -91,6 +103,7 @@ class ChequeOperations(
         val cheque = cheque(cmd.chequeId, cmd.scope)
         ensure(cheque.direction == ChequeDirection.RECEIVED) { DomainError.InvalidState("CHEQUE", cheque.status.name) }
         val docId = GlobalId.new()
+        ctx.number(DocumentSeries.CHEQUE, cmd.date, docId)
         gateway.moveCheque(ctx, capability, cheque.id, gateway.account(cheque.accountId), bank(cmd.bankAccountId, cmd.scope), ChequeStatus.COLLECTED,
             cmd.date, TreasuryOperations.CHEQUE_COLLECT, docId, "وصول ${title(cheque)}")
         docId
@@ -100,6 +113,7 @@ class ChequeOperations(
         val cheque = cheque(cmd.chequeId, cmd.scope)
         ensure(cheque.direction == ChequeDirection.ISSUED) { DomainError.InvalidState("CHEQUE", cheque.status.name) }
         val docId = GlobalId.new()
+        ctx.number(DocumentSeries.CHEQUE, cmd.date, docId)
         gateway.moveCheque(ctx, capability, cheque.id, bank(cheque.bankAccountId!!, cmd.scope), gateway.account(cheque.accountId), ChequeStatus.CLEARED,
             cmd.date, TreasuryOperations.CHEQUE_CLEAR, docId, "پاس شدن ${title(cheque)}")
         docId
@@ -109,6 +123,7 @@ class ChequeOperations(
         val cheque = cheque(cmd.chequeId, cmd.scope)
         ensure(cmd.reason.trim().length in 3..300) { DomainError.InvalidInput("reason", "دلیل برگشت الزامی است.") }
         val docId = GlobalId.new()
+        ctx.number(DocumentSeries.CHEQUE, cmd.date, docId)
         val received = cheque.direction == ChequeDirection.RECEIVED
         gateway.settle(
             ctx, capability, cheque.accountId, if (received) Direction.PAYMENT else Direction.RECEIPT, cheque.amount, cmd.date,
@@ -127,6 +142,7 @@ class ChequeOperations(
         val account = gateway.account(cmd.accountId)
         ensure(account.kind.isOrdinary && account.scope == cmd.scope) { DomainError.InvalidInput("account", "حساب نقدی یا بانکی همین شعبه را انتخاب کنید.") }
         val docId = GlobalId.new()
+        ctx.number(DocumentSeries.CHEQUE, cmd.date, docId)
         val received = cheque.direction == ChequeDirection.RECEIVED
         gateway.settle(
             ctx, capability, account.id, if (received) Direction.RECEIPT else Direction.PAYMENT, cheque.amount, cmd.date,

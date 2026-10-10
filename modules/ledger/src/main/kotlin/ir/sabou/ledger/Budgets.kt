@@ -1,5 +1,7 @@
 package ir.sabou.ledger
 
+import ir.sabou.platform.NoDocument
+
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -33,6 +35,7 @@ interface BudgetStore {
 }
 
 /** Sets the budget of one account for several periods at once (e.g. the twelve months of a year). Nothing is posted. */
+@NoDocument
 data class SetBudget(
     override val commandId: GlobalId,
     override val scope: Scope,

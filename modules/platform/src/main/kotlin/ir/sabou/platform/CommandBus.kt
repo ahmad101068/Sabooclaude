@@ -1,5 +1,6 @@
 package ir.sabou.platform
 
+import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.Clock
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -38,10 +39,44 @@ class CommandContext internal constructor(
     val nowEpochMillis: Long,
     private val audit: AuditTrail,
     private val events: EventLog,
+    private val numbers: DocumentNumberStore,
     private val epochProvider: () -> String,
 ) {
+    private val issuedSeries = HashSet<DocumentSeries>()
+    internal val issued: Set<DocumentSeries> get() = issuedSeries
+
+    /**
+     * Issues the next number of [series] for [documentId], dated [date] (its fiscal year picks the series year),
+     * in [scope] (the command's scope by default; ignored for organization-wide series). [reverses] names the
+     * document a reversal undoes. Runs inside the command's transaction, so a failed command consumes no number.
+     */
+    fun number(
+        series: DocumentSeries,
+        date: BusinessDate,
+        documentId: GlobalId,
+        scope: Scope = this.scope,
+        reverses: Pair<DocumentSeries, GlobalId>? = null,
+    ): DocumentNumber {
+        numbers.of(series, documentId)?.let { issuedSeries += series; return it.number }
+        val label = if (series.perBranch) scopeLabel(scope) else "ORG"
+        val year = FiscalYear.of(date)
+        val number = DocumentNumber(series, year, label, numbers.next(series, year, label))
+        val original = reverses?.let { (s, id) -> numbers.of(s, id)?.number }
+        numbers.record(NumberedDocument(number, documentId, date, commandId.value, original))
+        issuedSeries += series
+        audit(AuditDraft("DOCUMENT_NUMBER", series.name, documentId.value, number.text + (original?.let { ";reverses=${it.text}" } ?: "")))
+        return number
+    }
+
+    /** The number already issued to [documentId] in [series], if any. */
+    fun numberOf(series: DocumentSeries, documentId: GlobalId): DocumentNumber? = numbers.of(series, documentId)?.number
+
+    internal var audited = false
+        private set
+
     fun audit(draft: AuditDraft) {
         audit.append(draft, actor, module, scopeLabel(scope), commandId.value, nowEpochMillis, epochProvider())
+        audited = true
     }
 
     fun emit(type: String, payload: Map<String, String>) {
@@ -78,6 +113,7 @@ class CommandBus(
     auditStore: AuditStore,
     private val events: EventLog,
     private val clock: Clock,
+    private val numbers: DocumentNumberStore,
     private val epochProvider: () -> String,
 ) {
     private val audit = AuditTrail(auditStore)
@@ -99,8 +135,14 @@ class CommandBus(
                 return@transaction CommandOutcome(GlobalId.parse(previous.resultId), replayed = true)
             }
             val now = clock.nowEpochMillis()
-            val context = CommandContext(actor, module, command.commandId, command.scope, now, audit, events, epochProvider)
+            val context = CommandContext(actor, module, command.commandId, command.scope, now, audit, events, numbers, epochProvider)
             val result = handler(command, context)
+            // A command that issues a document must have numbered it (the whole command rolls back otherwise).
+            command::class.java.getAnnotation(IssuesDocument::class.java)?.let { declared ->
+                ensure(declared.series in context.issued) { DomainError.IntegrityViolation("DOCUMENT_NOT_NUMBERED:${declared.series}:$type") }
+            }
+            // Every successful command leaves at least one audit record, even if a handler wrote none itself.
+            if (!context.audited) context.audit(AuditDraft("COMMAND", type.substringAfterLast('.'), result.value, ""))
             idempotency.save(IdempotencyRecord(command.commandId.value, type, fingerprint, result.value, now))
             CommandOutcome(result, replayed = false)
         }

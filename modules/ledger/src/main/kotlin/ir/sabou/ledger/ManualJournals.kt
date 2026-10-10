@@ -1,5 +1,11 @@
 package ir.sabou.ledger
 
+import ir.sabou.platform.NoDocument
+
+import ir.sabou.platform.DocumentSeries
+
+import ir.sabou.platform.IssuesDocument
+
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.GlobalId
@@ -15,6 +21,7 @@ import ir.sabou.platform.Permission
 
 data class ManualLine(val account: AccountCode, val debit: Money, val credit: Money, val memo: String = "")
 
+@IssuesDocument(DocumentSeries.JOURNAL)
 data class PostManualJournal(
     override val commandId: GlobalId,
     override val scope: Scope,
@@ -27,6 +34,7 @@ data class PostManualJournal(
         lines.joinToString(";") { "${it.account}:${it.debit.rial}:${it.credit.rial}:${it.memo}" }
 }
 
+@IssuesDocument(DocumentSeries.JOURNAL)
 data class ReverseManualJournal(
     override val commandId: GlobalId,
     override val scope: Scope,
@@ -38,6 +46,7 @@ data class ReverseManualJournal(
     override fun fingerprint() = "$scope|$entryId|${date.epochDay}|$reason"
 }
 
+@NoDocument
 data class ClosePeriod(
     override val commandId: GlobalId,
     val from: BusinessDate,
@@ -49,6 +58,7 @@ data class ClosePeriod(
     override fun fingerprint() = "${from.epochDay}|${to.epochDay}"
 }
 
+@NoDocument
 data class ReopenPeriod(override val commandId: GlobalId, val lockId: GlobalId, val reason: String) : Command {
     override val requiredPermission = Permission.PERIOD_REOPEN
     override val scope: Scope = Scope.Organization

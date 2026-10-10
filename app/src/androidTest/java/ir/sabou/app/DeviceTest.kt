@@ -300,6 +300,20 @@ class DeviceTest {
         assertFalse(ready(container).identity.needsBootstrap())   // current data untouched
         file.delete()
     }
+
+    @Test fun documentsAreNumberedOnTheEncryptedDatabase() {
+        val (container, core) = fresh()
+        val branch = ir.sabou.kernel.Scope.Branch(core.overview.branches().first().id)
+        val cash = core.overview.treasury().first().account.id
+        val day = ir.sabou.kernel.JalaliCalendar.date(1405, 7, 18)
+        val first = core.treasury.receipt(ir.sabou.treasury.RecordReceipt(GlobalId.new(), branch, cash, ir.sabou.treasury.ReceiptPurpose.OWNER_CAPITAL, Money.of(1_000_000), day, "آورده")).resultId
+        val second = core.treasury.receipt(ir.sabou.treasury.RecordReceipt(GlobalId.new(), branch, cash, ir.sabou.treasury.ReceiptPurpose.OWNER_CAPITAL, Money.of(1_000_000), day, "آورده")).resultId
+        assertEquals("در-1405-00001", core.numbers.of(first)!!.text)
+        assertEquals("در-1405-00002", core.numbers.of(second)!!.text)
+        container.open()                                    // numbers survive a reopen
+        val reopened = ready(container)
+        assertEquals("در-1405-00002", reopened.numbers.of(second)!!.text)
+    }
 }
 
 private object StreamingBackupCodecAccess {

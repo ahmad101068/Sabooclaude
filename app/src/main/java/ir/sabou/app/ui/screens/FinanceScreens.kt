@@ -347,7 +347,7 @@ object FinanceScreens {
     @Composable
     fun AccountHistory(nav: Nav, accountId: GlobalId) {
         val session = LocalSession.current
-        val data by load(session, accountId) { overview.accountHistory(accountId) }
+        val data by load(session, accountId) { overview.accountHistory(accountId).let { (b, list) -> Triple(b, list, numbers.ofAny(list.map { it.source.id })) } }
         var reverse by remember { mutableStateOf<TreasuryMovement?>(null) }
         var reason by rememberSaveable { mutableStateOf("") }
         val action = rememberAction()
@@ -366,7 +366,7 @@ object FinanceScreens {
                 items(rows) { m ->
                     val own = m.source.module == ModuleId.TREASURY && m.reversalOf == null && m.source.type != "TREASURY_RECONCILIATION"
                     SCard(onClick = if (own && session.can(Permission.TREASURY_REVERSE)) ({ reverse = m }) else null) {
-                        MovementRow(m, "")
+                        MovementRow(m, data.orNull()?.third?.get(m.source.id)?.let { Fa.digits(it.text) } ?: "")
                     }
                 }
             }

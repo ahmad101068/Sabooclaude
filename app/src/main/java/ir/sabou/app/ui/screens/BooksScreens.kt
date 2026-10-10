@@ -488,6 +488,7 @@ object BooksScreens {
                     SCard {
                         Text(a.name, style = SabouType.section, color = Sabou.colors.ink)
                         KeyValue("گروه / شعبه", "${a.category.ifBlank { "—" }} · ${row.branch}")
+                        row.number?.let { KeyValue("شماره سند", Fa.digits(it)) }
                         KeyValue("تاریخ خرید", Fa.date(a.acquiredOn))
                         KeyValue("روش", if (a.method == DepreciationMethod.STRAIGHT_LINE) "خط مستقیم · ${Fa.number(a.usefulLifeMonths?.toLong() ?: 0)} ماه" else "نزولی · ${Fa.percent(a.rateBp ?: 0)} در سال")
                         KeyValue("بها", Fa.toman(a.cost))

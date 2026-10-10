@@ -368,6 +368,7 @@ object OperationsScreens {
                                 ir.sabou.inventory.CountStatus.REJECTED -> ChipKind.DANGER
                             })
                         }
+                        v.number?.let { KeyValue("شماره سند", Fa.digits(it), strong = true) }
                         KeyValue("تاریخ شمارش", Fa.date(c.date))
                         KeyValue("شمارش", c.countedByName)
                         c.reviewedByName?.let { KeyValue(if (c.status == ir.sabou.inventory.CountStatus.REJECTED) "رد" else "تأیید", it) }

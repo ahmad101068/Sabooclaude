@@ -1,5 +1,11 @@
 package ir.sabou.sales
 
+import ir.sabou.platform.NoDocument
+
+import ir.sabou.platform.DocumentSeries
+
+import ir.sabou.platform.IssuesDocument
+
 import ir.sabou.inventory.InventoryGateway
 import ir.sabou.inventory.RecipeBook
 import ir.sabou.kernel.BusinessDate
@@ -23,6 +29,7 @@ import ir.sabou.platform.Permission
 import ir.sabou.treasury.Direction
 import ir.sabou.treasury.TreasuryGateway
 
+@NoDocument
 data class RegisterCustomer(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -36,6 +43,7 @@ data class RegisterCustomer(
 }
 
 /** Creates or replaces the draft of a branch's day. Drafts have no financial effect. */
+@NoDocument
 data class SaveSaleDraft(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -58,11 +66,13 @@ data class SaveSaleDraft(
         } }
 }
 
+@IssuesDocument(DocumentSeries.DAILY_SALE)
 data class PostDailySale(override val commandId: GlobalId, override val scope: Scope.Branch, val saleId: GlobalId) : Command {
     override val requiredPermission = Permission.SALES_POST
     override fun fingerprint() = "$scope|$saleId"
 }
 
+@IssuesDocument(DocumentSeries.REVERSAL)
 data class ReverseDailySale(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -74,6 +84,7 @@ data class ReverseDailySale(
     override fun fingerprint() = "$scope|$saleId|${date.epochDay}|$reason"
 }
 
+@IssuesDocument(DocumentSeries.RECEIPT)
 data class CollectReceivable(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -88,6 +99,7 @@ data class CollectReceivable(
     override fun fingerprint() = "$scope|$receivableId|$treasuryAccountId|${amount.rial}|${date.epochDay}|${cheque?.fingerprint()}"
 }
 
+@IssuesDocument(DocumentSeries.REVERSAL)
 data class ReverseCollection(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -100,6 +112,7 @@ data class ReverseCollection(
 }
 
 /** Ends the day: the sale must be posted and the cash box counted. Closed days are frozen. */
+@NoDocument
 data class CloseSalesDay(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -110,6 +123,7 @@ data class CloseSalesDay(
     override fun fingerprint() = "$scope|${date.epochDay}|${countedCash.rial}"
 }
 
+@NoDocument
 data class ReopenSalesDay(override val commandId: GlobalId, override val scope: Scope.Branch, val date: BusinessDate, val reason: String) : Command {
     override val requiredPermission = Permission.SALES_DAY_REOPEN
     override fun fingerprint() = "$scope|${date.epochDay}|$reason"
@@ -198,6 +212,7 @@ class SalesOperations(
             rows.forEach { ensure(it.dueDate >= sale.date) { DomainError.InvalidInput("dueDate", "سررسید قبل از تاریخ فروش است.") } }
         }
 
+        ctx.number(DocumentSeries.DAILY_SALE, sale.date, sale.id)
         val requirements = sale.lines.flatMap { recipes.requirements(it.menuItemId, sale.date, it.portions) }
         val consumption = inventory.consume(ctx, capability, sale.kitchenLocationId, requirements, sale.date, CONSUMPTION, sale.id, "مصرف فروش روز")
 
@@ -239,6 +254,7 @@ class SalesOperations(
         if (sale.consumed) inventory.reverseDocument(ctx, capability, CONSUMPTION, sale.id, cmd.date, cmd.reason)
         receivables.forEach { sales.saveReceivable(it.copy(voided = true)) }
         sales.saveSale(sale.copy(status = SaleStatus.REVERSED))
+        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.DAILY_SALE to sale.id)
         ctx.audit(AuditDraft("SALE_REVERSE", "DAILY_SALE", sale.id.value, cmd.reason.trim()))
         sale.id
     }
@@ -251,6 +267,7 @@ class SalesOperations(
         val saleDate = sales.sale(r.saleId)?.date
         ensure(saleDate == null || cmd.date >= saleDate) { DomainError.InvalidInput("date", "تاریخ دریافت قبل از تاریخ فروش است.") }
         val collectionId = GlobalId.new()
+        ctx.number(DocumentSeries.RECEIPT, cmd.date, collectionId)
         treasury.settle(ctx, capability, cmd.treasuryAccountId, Direction.RECEIPT, cmd.amount, cmd.date, COLLECTION, collectionId, "وصول مطالبات",
             listOf(LineDraft(StandardAccounts.RECEIVABLE, credit = cmd.amount, by = capability)), cmd.cheque?.let { ir.sabou.treasury.ChequeInstruction.New(it) })
         sales.saveCollection(Collection(collectionId, r.id, cmd.treasuryAccountId, cmd.amount, cmd.date, reversed = false))
@@ -264,6 +281,7 @@ class SalesOperations(
         ensure(r.scope == cmd.scope) { DomainError.InvalidInput("scope", "این وصول متعلق به این شعبه نیست.") }
         ensure(!collection.reversed) { DomainError.InvalidState("COLLECTION", "ALREADY_REVERSED") }
         treasury.reverseDocument(ctx, capability, COLLECTION, collection.id, cmd.date, cmd.reason)
+        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.RECEIPT to collection.id)
         sales.saveCollection(collection.copy(reversed = true))
         ctx.audit(AuditDraft("COLLECTION_REVERSE", "RECEIVABLE", r.id.value, cmd.reason.trim()))
         collection.id

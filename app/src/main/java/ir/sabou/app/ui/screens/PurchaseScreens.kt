@@ -153,8 +153,8 @@ object PurchaseScreens {
                     NavRow(R.drawable.ic_alert, "تغییر قیمت‌ها", if (changes > 0) "${Fa.number(changes.toLong())} تغییر قیمت در ۳۰ روز اخیر" else "تغییر قیمت مهمی نبوده",
                         onClick = { nav.go(Route.PriceChanges) })
                     if (list.isEmpty()) EmptyState("هنوز فاکتوری ثبت نشده است.")
-                    list.forEach { (inv, supplier, outstanding) ->
-                        val sub = "${Fa.digits(inv.supplierInvoiceNo)} · ${Fa.date(inv.date)}" +
+                    list.forEach { (inv, supplier, outstanding, number) ->
+                        val sub = (number?.let { Fa.digits(it) + " · " } ?: "") + "فاکتور ${Fa.digits(inv.supplierInvoiceNo)} · ${Fa.date(inv.date)}" +
                             (if (inv.status == InvoiceStatus.REVERSED) " · برگشت‌خورده" else if (outstanding.isZero) " · تسویه" else " · سررسید ${Fa.date(inv.dueDate)}") +
                             (if (inv.openReviewLines.isNotEmpty()) " · در انتظار بررسی" else "")
                         NavRow(R.drawable.ic_purchase, supplier, sub, Fa.tomanShort(outstanding.rial), tint = Sabou.colors.onAccentSoft,
@@ -261,7 +261,7 @@ object PurchaseScreens {
         val supplierObj = form.suppliers.firstOrNull { it.id == supplier }
 
         if (form.order != null) SCard {
-            Text("سفارش شماره ${Fa.number(form.order.order.number)} · ${form.order.supplier}", style = SabouType.bodyStrong, color = Sabou.colors.ink)
+            Text("سفارش ${form.order.number?.let(Fa::digits) ?: Fa.number(form.order.order.number)} · ${form.order.supplier}", style = SabouType.bodyStrong, color = Sabou.colors.ink)
             Text("مقدار و مبلغ هر ردیف را مطابق فاکتور تأمین‌کننده اصلاح کنید.", style = SabouType.caption, color = Sabou.colors.muted)
         }
         FormCard {
@@ -425,7 +425,8 @@ object PurchaseScreens {
                     val inv = v.invoice
                     SCard {
                         Text(v.supplier, style = SabouType.section, color = Sabou.colors.ink)
-                        KeyValue("شماره", Fa.digits(inv.supplierInvoiceNo))
+                        v.number?.let { KeyValue("شماره سند", Fa.digits(it), strong = true) }
+                        KeyValue("شماره فاکتور فروشنده", Fa.digits(inv.supplierInvoiceNo))
                         KeyValue("تاریخ / سررسید", "${Fa.date(inv.date)} / ${Fa.date(inv.dueDate)}")
                         if (inv.lines.isNotEmpty()) Divider()
                         inv.lines.forEach { l ->
@@ -985,7 +986,7 @@ object PurchaseScreens {
                             OrderStatus.RECEIVED -> "تحویل شد"
                             OrderStatus.CANCELLED -> "لغو شد"
                         }
-                        NavRow(R.drawable.ic_purchase, "${r.supplier} · شماره ${Fa.number(o.number)}", "$status · ${r.location}", Fa.tomanShort(o.total.rial),
+                        NavRow(R.drawable.ic_purchase, "${r.supplier} · ${r.number?.let(Fa::digits) ?: Fa.number(o.number)}", "$status · ${r.location}", Fa.tomanShort(o.total.rial),
                             tint = if (o.status == OrderStatus.OPEN && o.expectedDate < session.today) Sabou.colors.danger else Sabou.colors.onAccentSoft,
                             tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.OrderDetail(o.id)) })
                     }
@@ -1093,7 +1094,7 @@ object PurchaseScreens {
                 Loaded(data) { (row, items, branches) ->
                     val o = row.order
                     SCard {
-                        Text("${row.supplier} · شماره ${Fa.number(o.number)}", style = SabouType.section, color = Sabou.colors.ink)
+                        Text("${row.supplier} · ${row.number?.let(Fa::digits) ?: Fa.number(o.number)}", style = SabouType.section, color = Sabou.colors.ink)
                         KeyValue("تاریخ سفارش", Fa.date(o.date))
                         KeyValue("تحویل", "${Fa.dayTitle(o.expectedDate)} · ${row.location}")
                         Divider()

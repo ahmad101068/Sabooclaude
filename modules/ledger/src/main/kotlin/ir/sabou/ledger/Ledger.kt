@@ -9,6 +9,7 @@ import ir.sabou.kernel.SignedAmount
 import ir.sabou.kernel.ensure
 import ir.sabou.platform.AuditDraft
 import ir.sabou.platform.CommandContext
+import ir.sabou.platform.DocumentSeries
 
 /**
  * The general ledger. Not a command handler: modules call it from inside their own command, so the
@@ -53,7 +54,9 @@ class Ledger(
             postedAtEpochMillis = context.nowEpochMillis,
         )
         journals.insert(entry)
-        context.audit(AuditDraft("JOURNAL_POST", "JOURNAL", entry.id.value, "no=${entry.number};src=${draft.sourceType}:${draft.sourceId};amount=${debit.rial}"))
+        // The legal journal number: per fiscal year, organization-wide, issued in this transaction.
+        val legal = context.number(DocumentSeries.JOURNAL, draft.date, entry.id)
+        context.audit(AuditDraft("JOURNAL_POST", "JOURNAL", entry.id.value, "no=${legal.text};src=${draft.sourceType}:${draft.sourceId};amount=${debit.rial}"))
         return entry
     }
 
@@ -83,17 +86,19 @@ class Ledger(
         ensure(missing.isEmpty()) { DomainError.OwnedByAnotherModule(missing.joinToString(",")) }
         requireOpenPeriod(date)
         context.requireScope(original.scope)
+        val originalNo = context.numberOf(DocumentSeries.JOURNAL, original.id)?.text ?: original.number.toString()
         val reversal = original.copy(
             id = GlobalId.new(),
             number = journals.nextNumber(),
             date = date,
-            description = "برگشت سند ${original.number}: ${reason.trim()}",
+            description = "برگشت سند $originalNo: ${reason.trim()}",
             lines = original.lines.map { it.copy(debit = it.credit, credit = it.debit) },
             reversalOf = original.id,
             postedBy = context.actor.userId,
             postedAtEpochMillis = context.nowEpochMillis,
         )
         journals.insert(reversal)
+        context.number(DocumentSeries.JOURNAL, date, reversal.id, reverses = DocumentSeries.JOURNAL to original.id)
         context.audit(AuditDraft("JOURNAL_REVERSE", "JOURNAL", reversal.id.value, "of=${original.id};reason=${reason.trim()}"))
         return reversal
     }

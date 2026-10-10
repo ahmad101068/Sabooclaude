@@ -225,7 +225,7 @@ object ReportsScreens {
                     rows.forEach { r ->
                         SCard {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("سند ${Fa.number(r.number)} · ${Fa.date(r.date)}", style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                                Text("سند ${Fa.digits(r.number)} · ${Fa.date(r.date)}", style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
                                 Text(if (r.debit > 0) "بدهکار ${Fa.toman(r.debit)}" else "بستانکار ${Fa.toman(r.credit)}", style = SabouType.bodyStrong, color = Sabou.colors.ink)
                             }
                             Text(r.description + if (r.memo.isBlank()) "" else " · ${r.memo}", style = SabouType.caption, color = Sabou.colors.muted)

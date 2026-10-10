@@ -141,16 +141,49 @@ object Schema {
                 "CREATE INDEX stock_counts_location ON stock_counts(location_id, status)",
             ),
         ),
+        Migration(
+            7,
+            listOf(
+                // Document numbers (ADR-0016): one counter per series, fiscal year and scope; every issued number
+                // with the document carrying it. Gap-free because the counter moves inside the command's transaction.
+                "CREATE TABLE document_sequences (series TEXT NOT NULL, fiscal_year INTEGER NOT NULL, scope TEXT NOT NULL, last INTEGER NOT NULL CHECK(last >= 0), " +
+                    "PRIMARY KEY(series, fiscal_year, scope))",
+                "CREATE TABLE document_numbers (series TEXT NOT NULL, fiscal_year INTEGER NOT NULL, scope TEXT NOT NULL, sequence INTEGER NOT NULL CHECK(sequence > 0), " +
+                    "document_id TEXT NOT NULL, date INTEGER NOT NULL, command_id TEXT NOT NULL, reverses_series TEXT, reverses_year INTEGER, reverses_scope TEXT, " +
+                    "reverses_sequence INTEGER, PRIMARY KEY(series, fiscal_year, scope, sequence), UNIQUE(series, document_id))",
+                "CREATE INDEX document_numbers_document ON document_numbers(document_id)",
+            ) + immutable("document_numbers"),
+            backfill = { db ->
+                // Journals posted before numbering existed get their legal number now, in posting order per fiscal year.
+                val last = HashMap<Int, Long>()
+                db.query("SELECT id, number, date FROM journal_entries ORDER BY number").forEach { row ->
+                    val date = ir.sabou.kernel.BusinessDate(row.long("date"))
+                    val year = ir.sabou.platform.FiscalYear.of(date)
+                    val seq = (last[year] ?: 0L) + 1
+                    last[year] = seq
+                    db.execute(
+                        "INSERT INTO document_numbers (series, fiscal_year, scope, sequence, document_id, date, command_id) VALUES ('JOURNAL', ?, 'ORG', ?, ?, ?, 'migration-7')",
+                        year.toLong(), seq, row.str("id"), date.epochDay,
+                    )
+                }
+                last.forEach { (year, seq) ->
+                    db.execute("INSERT INTO document_sequences (series, fiscal_year, scope, last) VALUES ('JOURNAL', ?, 'ORG', ?)", year.toLong(), seq)
+                }
+            },
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }
 
     /** Applies pending migrations inside one transaction. Refuses a newer, unknown database. */
-    fun migrate(db: SqlDatabase) {
+    fun migrate(db: SqlDatabase) = migrate(db, latestVersion)
+
+    /** Migrates up to [target] only (tests of a single migration step). */
+    fun migrate(db: SqlDatabase, target: Int) {
         db.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
         val current = db.query("SELECT COALESCE(MAX(version), 0) AS v FROM schema_version").single().long("v").toInt()
         check(current <= latestVersion) { "DATABASE_NEWER_THAN_APP:$current>$latestVersion" }
-        val pending = migrations.filter { it.version > current }.sortedBy { it.version }
+        val pending = migrations.filter { it.version > current && it.version <= target }.sortedBy { it.version }
         if (pending.isEmpty()) return
         db.begin()
         try {

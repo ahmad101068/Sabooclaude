@@ -51,7 +51,7 @@ object ReportTables {
 
     fun ledgerDetail(accountName: String, rows: List<LedgerDetail>, from: BusinessDate, to: BusinessDate) = ReportTable(
         "گردش $accountName", period(from, to), listOf("تاریخ", "شماره سند", "شرح", "شعبه", "بدهکار", "بستانکار"),
-        rows.map { listOf(Cell.of(Fa.date(it.date)), Cell.Count(it.number), Cell.of(it.description + if (it.memo.isBlank()) "" else " · ${it.memo}"), Cell.of(it.scope), Cell.Amount(it.debit), Cell.Amount(it.credit)) },
+        rows.map { listOf(Cell.of(Fa.date(it.date)), Cell.of(Fa.digits(it.number)), Cell.of(it.description + if (it.memo.isBlank()) "" else " · ${it.memo}"), Cell.of(it.scope), Cell.Amount(it.debit), Cell.Amount(it.credit)) },
         footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOf { it.debit }), Cell.Amount(rows.sumOf { it.credit })),
         notes = listOf(TOMAN),
     )
