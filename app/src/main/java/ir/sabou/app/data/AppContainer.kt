@@ -111,7 +111,7 @@ class AppContainer(private val context: Context) {
                 // A transient error (e.g. the database being replaced meanwhile) just means: try next time.
                 val verdict = runCatching { core.verifyAuditInBackground() }.getOrNull()
                 if (verdict is StartupVerdict.RollbackDetected) synchronized(this) {
-                    if ((state.value as? AppState.Ready)?.core === core) mutableState.value = AppState.Recovery(verdict.detail)
+                    if ((state.value as? AppState.Ready)?.core === core) mutableState.value = AppState.Recovery(verdict.detail, core)
                 }
             } finally {
                 verifying = false
