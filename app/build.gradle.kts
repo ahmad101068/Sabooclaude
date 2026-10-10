@@ -1,10 +1,12 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     kotlin("android")
     kotlin("plugin.compose")
 }
 
-val appVersion = java.util.Properties().apply { rootProject.file("version.properties").inputStream().use(::load) }
+val appVersion = Properties().apply { rootProject.file("version.properties").inputStream().use { load(it) } }
 
 android {
     namespace = "ir.sabou.app"
