@@ -1,5 +1,7 @@
 package ir.sabou.purchasing
 
+import ir.sabou.platform.NoDocument
+
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
 import ir.sabou.kernel.GlobalId
@@ -15,6 +17,7 @@ import ir.sabou.platform.Permission
 import ir.sabou.platform.Role
 
 /** A new or changed approval rule (owner only). Rules apply to invoices recorded after the change. */
+@NoDocument
 data class SaveApprovalRule(
     override val commandId: GlobalId,
     /** null = a new rule. */
@@ -33,12 +36,14 @@ data class SaveApprovalRule(
 }
 
 /** One approval step on an invoice. */
+@NoDocument
 data class ApproveInvoice(override val commandId: GlobalId, override val scope: Scope.Branch, val invoiceId: GlobalId) : Command {
     override val requiredPermission = Permission.PURCHASE_APPROVE
     override fun fingerprint() = "$scope|$invoiceId"
 }
 
 /** Takes every approval back (only while nothing has been paid). */
+@NoDocument
 data class UnapproveInvoice(override val commandId: GlobalId, override val scope: Scope.Branch, val invoiceId: GlobalId, val reason: String) : Command {
     override val requiredPermission = Permission.PURCHASE_UNAPPROVE
     override fun fingerprint() = "$scope|$invoiceId|$reason"

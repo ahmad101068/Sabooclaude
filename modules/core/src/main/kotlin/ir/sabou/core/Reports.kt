@@ -66,7 +66,8 @@ data class ProfitAndLoss(
 /** One journal line behind a P&L figure. */
 data class LedgerDetail(
     val date: BusinessDate,
-    val number: Long,
+    /** The legal journal number («سح-1405-00042»). */
+    val number: String,
     val description: String,
     val scope: String,
     val debit: Long,
@@ -189,6 +190,10 @@ class Reports internal constructor(private val core: SabouCore) {
         if (!canAccess(scope)) throw DomainException(DomainError.ScopeDenied(ir.sabou.platform.CommandContext.scopeLabel(scope)))
     }
 
+    /** The legal number of a journal entry; entries are always numbered (older ones by migration 7). */
+    private fun journalNo(e: ir.sabou.ledger.JournalEntry): String =
+        core.numbers.of(ir.sabou.platform.DocumentSeries.JOURNAL, e.id)?.text ?: e.number.toString()
+
     private fun scopeName(scope: Scope): String = when (scope) {
         Scope.Organization -> "دفتر مرکزی"
         is Scope.Branch -> core.branches.all().firstOrNull { it.id == scope.branchId }?.name ?: "شعبه"
@@ -262,7 +267,7 @@ class Reports internal constructor(private val core: SabouCore) {
         branch?.let { a.require(it) }
         return core.journals.entriesTouching(account, branch, from, to).filter { a.canAccess(it.scope) }.flatMap { e ->
             e.lines.filter { it.account == account }.map { l ->
-                LedgerDetail(e.date, e.number, e.description, scopeName(e.scope), l.debit.rial, l.credit.rial, l.memo)
+                LedgerDetail(e.date, journalNo(e), e.description, scopeName(e.scope), l.debit.rial, l.credit.rial, l.memo)
             }
         }
     }

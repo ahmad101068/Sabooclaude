@@ -1,5 +1,11 @@
 package ir.sabou.purchasing
 
+import ir.sabou.platform.NoDocument
+
+import ir.sabou.platform.DocumentSeries
+
+import ir.sabou.platform.IssuesDocument
+
 import ir.sabou.inventory.InventoryGateway
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
@@ -18,6 +24,7 @@ import ir.sabou.platform.Permission
  * An order placed with a supplier before delivery. No stock or money moves; when the goods arrive
  * the invoice is recorded from it ([PostPurchaseInvoice.orderId]) and the order is closed.
  */
+@IssuesDocument(DocumentSeries.PURCHASE_ORDER)
 data class CreatePurchaseOrder(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -33,6 +40,7 @@ data class CreatePurchaseOrder(
         lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}:${it.unitPrice.rial}" }
 }
 
+@NoDocument
 data class CancelPurchaseOrder(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -69,6 +77,7 @@ class OrderOperations(
             cmd.lines, cmd.note.trim(), OrderStatus.OPEN,
         )
         purchases.saveOrder(order)
+        ctx.number(DocumentSeries.PURCHASE_ORDER, cmd.date, order.id)
         ctx.audit(AuditDraft("PURCHASE_ORDER_CREATE", "PURCHASE_ORDER", order.id.value, "no=${order.number};supplier=${supplier.id};total=${order.total.rial}"))
         order.id
     }

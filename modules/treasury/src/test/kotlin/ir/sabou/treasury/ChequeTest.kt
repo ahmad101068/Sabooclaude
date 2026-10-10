@@ -19,6 +19,7 @@ import ir.sabou.platform.ModuleId
 import ir.sabou.platform.Role
 import ir.sabou.platform.memory.InMemoryAuditStore
 import ir.sabou.platform.memory.InMemoryEventLog
+import ir.sabou.platform.memory.InMemoryDocumentNumberStore
 import ir.sabou.platform.memory.InMemoryIdempotencyStore
 import ir.sabou.platform.memory.InMemoryUnitOfWork
 import ir.sabou.platform.memory.MutableSession
@@ -38,8 +39,9 @@ class ChequeTest {
     private val movements = InMemoryMovementStore()
     private val accounts = InMemoryTreasuryAccountStore()
     private val cheques = InMemoryChequeStore()
+    private val numbers = InMemoryDocumentNumberStore().also { uow.register(it) }
     private val bus = CommandBus(session, uow, InMemoryIdempotencyStore().also { uow.register(it) },
-        InMemoryAuditStore().also { uow.register(it) }, InMemoryEventLog(), Clock { 1L }) { "e1" }
+        InMemoryAuditStore().also { uow.register(it) }, InMemoryEventLog(), Clock { 1L }, numbers) { "e1" }
     private val registry = LedgerAccessRegistry()
     private val ledger = Ledger(registry, InMemoryAccountStore(StandardAccounts.chart()), journals, InMemoryPeriodStore())
     private val cap = registry.issue(ModuleId.TREASURY)

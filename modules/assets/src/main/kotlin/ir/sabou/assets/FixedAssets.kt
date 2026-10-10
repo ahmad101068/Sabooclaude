@@ -1,5 +1,9 @@
 package ir.sabou.assets
 
+import ir.sabou.platform.DocumentSeries
+
+import ir.sabou.platform.IssuesDocument
+
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -110,6 +114,7 @@ sealed interface Funding {
     data class Existing(val accumulatedSoFar: Money, val depreciatedThrough: BusinessDate?) : Funding
 }
 
+@IssuesDocument(DocumentSeries.ASSET)
 data class AcquireAsset(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -132,18 +137,21 @@ data class AcquireAsset(
 }
 
 /** Books depreciation for every active asset of the branch up to [through] (one journal). */
+@IssuesDocument(DocumentSeries.DEPRECIATION)
 data class RunDepreciation(override val commandId: GlobalId, override val scope: Scope.Branch, val through: BusinessDate) : Command {
     override val requiredPermission = Permission.ASSET_MANAGE
     override fun fingerprint() = "$scope|${through.epochDay}"
 }
 
 /** Takes back the latest depreciation run of a branch (e.g. it was run for the wrong month). */
+@IssuesDocument(DocumentSeries.REVERSAL)
 data class ReverseDepreciationRun(override val commandId: GlobalId, override val scope: Scope.Branch, val runId: GlobalId, val date: BusinessDate, val reason: String) : Command {
     override val requiredPermission = Permission.ASSET_MANAGE
     override fun fingerprint() = "$scope|$runId|${date.epochDay}|$reason"
 }
 
 /** Sold or scrapped: depreciation up to [date], then the asset leaves the books; [proceeds] received into [treasuryAccountId]. */
+@IssuesDocument(DocumentSeries.ASSET_DISPOSAL)
 data class DisposeAsset(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -218,6 +226,7 @@ class AssetOperations(
         )
         assets.save(asset)
         ctx.audit(AuditDraft("ASSET_ACQUIRE", "FIXED_ASSET", id.value, "cost=${cmd.cost.rial};method=${cmd.method}"))
+        ctx.number(DocumentSeries.ASSET, cmd.date, id)
         id
     }
 
@@ -234,6 +243,7 @@ class AssetOperations(
         lines.forEach { (a, amount) -> assets.save(a.copy(accumulated = a.accumulated + amount, depreciatedThrough = cmd.through)) }
         assets.saveRun(DepreciationRun(runId, cmd.scope, cmd.through, cmd.through, lines.map { (a, amount) -> DepreciationLine(a.id, amount, a.depreciatedThrough) }, journal.id))
         ctx.audit(AuditDraft("DEPRECIATION_RUN", "DEPRECIATION", runId.value, "through=${cmd.through.epochDay};total=${total.rial};assets=${lines.size}"))
+        ctx.number(DocumentSeries.DEPRECIATION, cmd.through, runId)
         runId
     }
 
@@ -253,6 +263,7 @@ class AssetOperations(
         }
         assets.saveRun(run.copy(reversed = true))
         ctx.audit(AuditDraft("DEPRECIATION_REVERSE", "DEPRECIATION", run.id.value, cmd.reason.trim()))
+        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.DEPRECIATION to run.id)
         run.id
     }
 
@@ -264,6 +275,7 @@ class AssetOperations(
         ensure(cmd.reason.trim().length in 3..300) { DomainError.InvalidInput("reason", "دلیل واگذاری الزامی است.") }
         ensure(cmd.proceeds.isZero == (cmd.treasuryAccountId == null)) { DomainError.InvalidInput("account", "حساب دریافت مبلغ فروش را انتخاب کنید.") }
         val docId = GlobalId.new()
+        ctx.number(DocumentSeries.ASSET_DISPOSAL, cmd.date, docId)
         // Depreciation up to the disposal day first, so the gain or loss is measured on the true book value.
         val last = asset.depreciationThrough(cmd.date)
         val accumulated = asset.accumulated + last

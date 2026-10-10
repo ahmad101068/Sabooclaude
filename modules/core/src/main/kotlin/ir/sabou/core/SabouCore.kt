@@ -106,7 +106,8 @@ class SabouCore private constructor(
     // Pipeline and identity
     val session = Session(users, clock)
     val identity = IdentityService(users, branches, session, unitOfWork, auditStore, clock, deviceTime) { epoch }
-    private val bus = CommandBus(session, unitOfWork, SqlIdempotencyStore(db), auditStore, events, clock) { epoch }
+    internal val documentNumbers = ir.sabou.persistence.SqlDocumentNumberStore(db)
+    private val bus = CommandBus(session, unitOfWork, SqlIdempotencyStore(db), auditStore, events, clock, documentNumbers) { epoch }
     private val integrity = IntegrityGuard(anchors, auditStore)
 
     // Capabilities: issued here and nowhere else.
@@ -134,6 +135,7 @@ class SabouCore private constructor(
     val payroll = PayrollOperations(bus, ledger, registry.issue(ModuleId.PAYROLL), treasuryGateway, personnel, payrollStore, policyRegistry)
 
     val overview = Overview(this)
+    val numbers = Numbers(this)
     val reports = Reports(this)
     val buying = Buying(this)
     val books = Books(this)

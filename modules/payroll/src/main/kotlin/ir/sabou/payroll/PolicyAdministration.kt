@@ -1,5 +1,7 @@
 package ir.sabou.payroll
 
+import ir.sabou.platform.NoDocument
+
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Scope
@@ -17,6 +19,7 @@ interface PolicyStore {
     fun save(policy: StatutoryPolicy)
 }
 
+@NoDocument
 data class DefinePayrollPolicy(override val commandId: GlobalId, val policy: StatutoryPolicy) : Command {
     override val requiredPermission = Permission.PAYROLL_APPROVE
     override val scope: Scope = Scope.Organization

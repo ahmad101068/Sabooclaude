@@ -39,10 +39,10 @@ data class AccountBalance(val account: TreasuryAccount, val balance: Long)
 data class LowStock(val item: Item, val location: Location, val quantity: Quantity)
 data class BranchDay(val branch: Branch, val sale: DailySale?, val closed: Boolean)
 data class MenuEntry(val item: MenuItem, val latest: RecipeVersion?)
-data class SalesDayView(val sale: DailySale?, val day: SalesDay?, val customers: List<Customer>, val accounts: List<TreasuryAccount>)
+data class SalesDayView(val sale: DailySale?, val day: SalesDay?, val customers: List<Customer>, val accounts: List<TreasuryAccount>, val number: String? = null)
 data class CustomerBalance(val customer: Customer, val owed: Money)
 data class OpenReceivable(val receivable: Receivable, val customer: String, val outstanding: Money)
-data class InvoiceRow(val invoice: PurchaseInvoice, val supplier: String, val outstanding: Money)
+data class InvoiceRow(val invoice: PurchaseInvoice, val supplier: String, val outstanding: Money, val number: String? = null)
 data class InvoiceView(
     val invoice: PurchaseInvoice,
     val supplier: String,
@@ -55,6 +55,8 @@ data class InvoiceView(
     /** The supplier's unapplied return credit in this branch (can be applied to this invoice). */
     val supplierCredit: Money = Money.ZERO,
     val order: ir.sabou.purchasing.PurchaseOrder? = null,
+    /** Our own document number of the invoice («فخ-1405-00012»); the supplier's number is invoice.supplierInvoiceNo. */
+    val number: String? = null,
 )
 /** [owed] = open invoices; [credit] = unapplied return credit (the supplier owes us). */
 data class SupplierBalance(val supplier: Supplier, val owed: Money, val credit: Money = Money.ZERO)
@@ -72,7 +74,7 @@ data class ProductionNeed(val item: Item, val needed: Quantity, val available: Q
 data class CountSheetLine(val item: Item, val book: Quantity?)
 
 /** A stock count with its location; [showsBook] false = book quantities hidden from this reader while it is pending. */
-data class CountView(val count: ir.sabou.inventory.StockCount, val location: String, val showsBook: Boolean)
+data class CountView(val count: ir.sabou.inventory.StockCount, val location: String, val showsBook: Boolean, val number: String? = null)
 
 data class SetupStatus(val hasAccounts: Boolean, val hasItems: Boolean, val hasMenu: Boolean)
 
@@ -213,7 +215,8 @@ class Overview internal constructor(private val core: SabouCore) {
         val reviewer = a.role.allows(Permission.INVENTORY_ADJUST)
         return core.stockCounts.all().filter { it.scope == branch }.map { c ->
             val hide = !reviewer && c.status == ir.sabou.inventory.CountStatus.PENDING
-            CountView(if (hide) c.copy(lines = c.lines.map { it.copy(bookAtCount = it.counted) }) else c, names[c.locationId].orEmpty(), !hide)
+            CountView(if (hide) c.copy(lines = c.lines.map { it.copy(bookAtCount = it.counted) }) else c, names[c.locationId].orEmpty(), !hide,
+                core.numbers.of(ir.sabou.platform.DocumentSeries.STOCK_COUNT, c.id)?.text)
         }
     }
 
@@ -247,12 +250,14 @@ class Overview internal constructor(private val core: SabouCore) {
     fun salesDay(branch: Scope.Branch, date: BusinessDate): SalesDayView {
         val a = actor(Permission.SALES_VIEW)
         a.require(branch)
+        val sale = core.sales.activeSale(branch, date)
         return SalesDayView(
-            sale = core.sales.activeSale(branch, date),
+            sale = sale,
             day = core.sales.day(branch, date),
             customers = core.customers.all().filter { it.isActive && it.registeredIn == branch },
             // A cheque box takes customers' cheques (with their details); a cheque book never receives.
             accounts = core.treasuryAccounts.all().filter { it.isActive && it.scope == branch && it.kind != ir.sabou.treasury.TreasuryKind.ISSUED_CHEQUES },
+            number = sale?.let { core.numbers.of(ir.sabou.platform.DocumentSeries.DAILY_SALE, it.id)?.text },
         )
     }
 
@@ -286,7 +291,7 @@ class Overview internal constructor(private val core: SabouCore) {
         val a = actor(Permission.PURCHASE_VIEW)
         val names = core.suppliers.all().associate { it.id to it.name }
         return core.purchases.invoices().filter { a.canAccess(it.scope) }.sortedByDescending { it.date }
-            .map { InvoiceRow(it, names[it.supplierId].orEmpty(), core.purchasing.outstanding(it.id)) }
+            .let { list -> val nos = core.numbers.of(ir.sabou.platform.DocumentSeries.PURCHASE_INVOICE, list.map { it.id }); list.map { InvoiceRow(it, names[it.supplierId].orEmpty(), core.purchasing.outstanding(it.id), nos[it.id]?.text) } }
     }
 
     fun invoice(id: GlobalId): InvoiceView {
@@ -298,6 +303,7 @@ class Overview internal constructor(private val core: SabouCore) {
             core.purchases.payments(inv.id), core.purchases.returns(inv.id), core.purchases.allocationsTo(inv.id),
             core.attachments.of(ir.sabou.purchasing.PurchasingOperations.INVOICE, inv.id),
             core.purchasing.unappliedCredit(inv.supplierId, inv.scope), inv.orderId?.let { core.purchases.order(it) },
+            core.numbers.of(ir.sabou.platform.DocumentSeries.PURCHASE_INVOICE, inv.id)?.text,
         )
     }
 

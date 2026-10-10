@@ -34,7 +34,7 @@ data class SupplierAccount(
     val refunds: List<ir.sabou.purchasing.SupplierRefund>,
 )
 
-data class OrderRow(val order: PurchaseOrder, val supplier: String, val location: String)
+data class OrderRow(val order: PurchaseOrder, val supplier: String, val location: String, val number: String? = null)
 
 /** A held invoice line waiting for someone to say what it is. */
 data class ReviewItem(val invoice: PurchaseInvoice, val supplier: String, val index: Int, val line: ReviewLine)
@@ -99,14 +99,15 @@ class Buying internal constructor(private val core: SabouCore) {
         val names = supplierNames()
         val locations = core.locations.all().associate { it.id to it.name }
         return core.purchases.orders().filter { a.canAccess(it.scope) }
-            .map { OrderRow(it, names[it.supplierId].orEmpty(), locations[it.locationId].orEmpty()) }
+            .let { list -> val nos = core.numbers.of(ir.sabou.platform.DocumentSeries.PURCHASE_ORDER, list.map { it.id }); list.map { OrderRow(it, names[it.supplierId].orEmpty(), locations[it.locationId].orEmpty(), nos[it.id]?.text) } }
     }
 
     fun order(id: GlobalId): OrderRow {
         val a = actor(Permission.PURCHASE_VIEW, Permission.PURCHASE_ORDER)
         val order = core.purchases.order(id) ?: throw DomainException(DomainError.NotFound("PURCHASE_ORDER"))
         a.require(order.scope)
-        return OrderRow(order, core.suppliers.byId(order.supplierId)?.name.orEmpty(), core.locations.byId(order.locationId)?.name.orEmpty())
+        return OrderRow(order, core.suppliers.byId(order.supplierId)?.name.orEmpty(), core.locations.byId(order.locationId)?.name.orEmpty(),
+            core.numbers.of(ir.sabou.platform.DocumentSeries.PURCHASE_ORDER, order.id)?.text)
     }
 
     // ------------------------------------------------------------ Supplier account

@@ -122,3 +122,28 @@ class InMemoryAttachmentStore : Table<ir.sabou.kernel.GlobalId, Pair<ir.sabou.pl
     override fun meta(id: ir.sabou.kernel.GlobalId) = get(id)?.first
     override fun content(id: ir.sabou.kernel.GlobalId) = get(id)?.second?.copyOf()
 }
+
+class InMemoryDocumentNumberStore : ir.sabou.platform.DocumentNumberStore, Transactional {
+    private val last = HashMap<Triple<ir.sabou.platform.DocumentSeries, Int, String>, Long>()
+    private val issued = ArrayList<ir.sabou.platform.NumberedDocument>()
+
+    override fun next(series: ir.sabou.platform.DocumentSeries, fiscalYear: Int, scope: String): Long {
+        val key = Triple(series, fiscalYear, scope)
+        return ((last[key] ?: 0L) + 1).also { last[key] = it }
+    }
+    override fun record(document: ir.sabou.platform.NumberedDocument) {
+        check(issued.none { it.number == document.number || (it.number.series == document.number.series && it.documentId == document.documentId) }) { "document_number_unique" }
+        issued += document
+    }
+    override fun of(series: ir.sabou.platform.DocumentSeries, documentId: ir.sabou.kernel.GlobalId) =
+        issued.firstOrNull { it.number.series == series && it.documentId == documentId }
+    override fun ofDocument(documentId: ir.sabou.kernel.GlobalId) = issued.filter { it.documentId == documentId }
+    fun all(): List<ir.sabou.platform.NumberedDocument> = issued.toList()
+
+    override fun snapshot(): Any = HashMap(last) to issued.toList()
+    @Suppress("UNCHECKED_CAST")
+    override fun restore(snapshot: Any) {
+        val (l, i) = snapshot as Pair<Map<Triple<ir.sabou.platform.DocumentSeries, Int, String>, Long>, List<ir.sabou.platform.NumberedDocument>>
+        last.clear(); last.putAll(l); issued.clear(); issued.addAll(i)
+    }
+}

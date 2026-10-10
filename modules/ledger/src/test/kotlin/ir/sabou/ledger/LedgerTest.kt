@@ -18,6 +18,7 @@ import ir.sabou.platform.Permission
 import ir.sabou.platform.Role
 import ir.sabou.platform.memory.InMemoryAuditStore
 import ir.sabou.platform.memory.InMemoryEventLog
+import ir.sabou.platform.memory.InMemoryDocumentNumberStore
 import ir.sabou.platform.memory.InMemoryIdempotencyStore
 import ir.sabou.platform.memory.InMemoryUnitOfWork
 import ir.sabou.platform.memory.MutableSession
@@ -34,7 +35,8 @@ class LedgerTest {
     private val journals = InMemoryJournalStore()
     private val periods = InMemoryPeriodStore()
     private val audit = InMemoryAuditStore()
-    private val bus = CommandBus(session, uow, InMemoryIdempotencyStore().also { uow.register(it) }, audit, InMemoryEventLog(), Clock { 1L }) { "e1" }
+    private val numbers = InMemoryDocumentNumberStore().also { uow.register(it) }
+    private val bus = CommandBus(session, uow, InMemoryIdempotencyStore().also { uow.register(it) }, audit, InMemoryEventLog(), Clock { 1L }, numbers) { "e1" }
     private val registry = LedgerAccessRegistry()
     private val ledger = Ledger(registry, accounts, journals, periods)
     private val manualCap = registry.issue(ModuleId.LEDGER_MANUAL)

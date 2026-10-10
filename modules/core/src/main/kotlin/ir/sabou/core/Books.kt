@@ -34,7 +34,7 @@ data class BudgetLine(val account: Account, val budget: Long, val actual: Long) 
 
 data class BudgetReport(val from: BusinessDate, val to: BusinessDate, val place: String, val lines: List<BudgetLine>)
 
-data class AssetRow(val asset: FixedAsset, val branch: String, val nextDepreciation: Money)
+data class AssetRow(val asset: FixedAsset, val branch: String, val nextDepreciation: Money, val number: String? = null)
 
 /**
  * Read models of stage C (ADR-0013): cheques, invoice approvals, budgets and fixed assets. Same rules as
@@ -160,7 +160,7 @@ class Books internal constructor(private val core: SabouCore) {
         val a = actor(Permission.ASSET_VIEW, Permission.ASSET_MANAGE)
         val asset = core.assetStore.byId(id) ?: throw DomainException(DomainError.NotFound("FIXED_ASSET"))
         a.require(asset.scope)
-        return AssetRow(asset, scopeName(asset.scope), Money.ZERO)
+        return AssetRow(asset, scopeName(asset.scope), Money.ZERO, core.numbers.of(ir.sabou.platform.DocumentSeries.ASSET, asset.id)?.text)
     }
 
     fun depreciationRuns(branch: Scope.Branch): List<DepreciationRun> {

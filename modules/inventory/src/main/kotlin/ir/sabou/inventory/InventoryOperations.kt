@@ -1,5 +1,11 @@
 package ir.sabou.inventory
 
+import ir.sabou.platform.NoDocument
+
+import ir.sabou.platform.DocumentSeries
+
+import ir.sabou.platform.IssuesDocument
+
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -19,6 +25,7 @@ import ir.sabou.platform.CommandOutcome
 import ir.sabou.platform.ModuleId
 import ir.sabou.platform.Permission
 
+@NoDocument
 data class CreateItem(
     override val commandId: GlobalId,
     val name: String,
@@ -34,6 +41,7 @@ data class CreateItem(
 }
 
 /** Edits an item's ordering and storage details. The unit never changes (it would revalue history). */
+@NoDocument
 data class UpdateItem(
     override val commandId: GlobalId,
     val itemId: GlobalId,
@@ -54,6 +62,7 @@ data class UpdateItem(
 }
 
 /** A new version of how a prepared item is made; [lines] yield [outputQuantity] of it. */
+@NoDocument
 data class PublishPrepRecipe(
     override val commandId: GlobalId,
     val itemId: GlobalId,
@@ -69,6 +78,7 @@ data class PublishPrepRecipe(
 }
 
 /** Makes [quantity] of a prepared item at a location: ingredients out at average cost, the item in at that cost. */
+@IssuesDocument(DocumentSeries.PRODUCTION)
 data class RecordProduction(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -81,12 +91,14 @@ data class RecordProduction(
     override fun fingerprint() = "$scope|$locationId|$itemId|${quantity.micros}|${date.epochDay}"
 }
 
+@NoDocument
 data class CreateLocation(override val commandId: GlobalId, override val scope: Scope.Branch, val name: String) : Command {
     override val requiredPermission = Permission.INVENTORY_LOCATION_MANAGE
     override fun fingerprint() = "$scope|$name"
 }
 
 /** First-time stock of a new installation, booked against capital. */
+@IssuesDocument(DocumentSeries.OPENING_STOCK)
 data class RecordOpeningStock(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -104,6 +116,7 @@ enum class WasteReason(val givenAway: Boolean = false) {
     COMPLIMENTARY(true), STAFF_MEAL(true), DONATION(true),
 }
 
+@IssuesDocument(DocumentSeries.WASTE)
 data class RecordWaste(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -118,6 +131,7 @@ data class RecordWaste(
     override fun fingerprint() = "$scope|$locationId|$itemId|${quantity.micros}|$reason|$note|${date.epochDay}"
 }
 
+@IssuesDocument(DocumentSeries.STOCK_TRANSFER)
 data class TransferStock(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
@@ -131,6 +145,7 @@ data class TransferStock(
     override fun fingerprint() = "$scope|$fromLocationId|$toLocationId|${date.epochDay}|$note|" + lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}" }
 }
 
+@NoDocument
 data class DefineMenuItem(override val commandId: GlobalId, val name: String) : Command {
     override val requiredPermission = Permission.RECIPE_MANAGE
     override val scope: Scope = Scope.Organization
@@ -138,6 +153,7 @@ data class DefineMenuItem(override val commandId: GlobalId, val name: String) : 
     override fun fingerprint() = name
 }
 
+@NoDocument
 data class PublishRecipe(
     override val commandId: GlobalId,
     val menuItemId: GlobalId,
@@ -224,6 +240,7 @@ class InventoryOperations(
         val priced = requirements.map { gateway.item(it.itemId); IssuedCost(it.itemId, it.quantity, gateway.valueOf(gateway.balance(it.itemId, location.id), it.quantity)) }
         val total = Money.sum(priced.map { it.cost })
         val docId = GlobalId.new()
+        ctx.number(DocumentSeries.PRODUCTION, cmd.date, docId)
         val source = SourceDocument(ModuleId.INVENTORY, PRODUCTION, docId)
         // One account, one branch: no journal is needed, inventory 1301 is unchanged.
         priced.forEach { gateway.stockOut(ctx, it.itemId, location, it.quantity, it.cost, MovementKind.PRODUCTION_OUT, cmd.date, null, source, null) }
@@ -252,6 +269,7 @@ class InventoryOperations(
     fun openingStock(c: RecordOpeningStock): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
         requireLocationScope(cmd.locationId, cmd.scope)
         val docId = GlobalId.new()
+        ctx.number(DocumentSeries.OPENING_STOCK, cmd.date, docId)
         val total = Money.sum(cmd.lines.map { it.value })
         gateway.receive(ctx, cap, cmd.locationId, cmd.lines, cmd.date, OPENING, docId, "موجودی اول دوره",
             listOf(LineDraft(StandardAccounts.CAPITAL, credit = total, memo = "موجودی اول دوره", by = cap)))
@@ -264,6 +282,7 @@ class InventoryOperations(
         ensure(!cmd.quantity.isZero) { DomainError.InvalidInput("quantity", "مقدار ضایعات باید بیشتر از صفر باشد.") }
         ensure(cmd.reason != WasteReason.OTHER || cmd.note.trim().length >= 3) { DomainError.InvalidInput("note", "برای «سایر» توضیح لازم است.") }
         val docId = GlobalId.new()
+        ctx.number(DocumentSeries.WASTE, cmd.date, docId)
         val value = gateway.valueOf(gateway.balance(cmd.itemId, location.id), cmd.quantity)
         val (type, account, title) = if (cmd.reason.givenAway) Triple(COMP, StandardAccounts.COMPS, "پذیرایی و اهدایی") else Triple(WASTE, StandardAccounts.WASTE, "ضایعات")
         val journal = if (value.isZero) null else gateway.postOwn(ctx, JournalDraft(cmd.date, location.scope, type, docId, "$title: ${cmd.reason}", listOf(
@@ -288,6 +307,7 @@ class InventoryOperations(
         val priced = merged.map { gateway.item(it.itemId); IssuedCost(it.itemId, it.quantity, gateway.valueOf(gateway.balance(it.itemId, from.id), it.quantity)) }
         val total = Money.sum(priced.map { it.cost })
         val docId = GlobalId.new()
+        ctx.number(DocumentSeries.STOCK_TRANSFER, cmd.date, docId)
         val source = SourceDocument(ModuleId.INVENTORY, TRANSFER, docId)
         var outJournal: GlobalId? = null
         var inJournal: GlobalId? = null
