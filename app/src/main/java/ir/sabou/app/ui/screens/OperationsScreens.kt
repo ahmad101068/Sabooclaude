@@ -41,7 +41,7 @@ import ir.sabou.app.ui.components.NavRow
 import ir.sabou.app.ui.components.Page
 import ir.sabou.app.ui.components.Picker
 import ir.sabou.app.ui.components.PrimaryButton
-import ir.sabou.app.ui.components.QuantityInput
+import ir.sabou.app.ui.components.ItemQuantityInput
 import ir.sabou.app.ui.components.SCard
 import ir.sabou.app.ui.components.SecondaryButton
 import ir.sabou.app.ui.components.SectionTitle
@@ -194,7 +194,7 @@ object OperationsScreens {
         FormCard("موجودی اول دوره") {
             Text("کالایی که از قبل در انبار دارید با ارزش آن ثبت می‌شود (طرف مقابل: سرمایه).", style = SabouType.caption, color = Sabou.colors.muted)
             Picker("کالا", d.items.map { Choice(it.id, it.name, unitName(it.unit)) }, itemId, { itemId = it })
-            QuantityInput("مقدار", d.items.firstOrNull { it.id == itemId }?.let { unitName(it.unit) } ?: "", { qty = it })
+            ItemQuantityInput("مقدار", d.items.firstOrNull { it.id == itemId }, { qty = it })
             MoneyInput("ارزش کل", value, { value = it })
             action.error?.let { Banner(it) }
             PrimaryButton("ثبت", {
@@ -231,7 +231,7 @@ object OperationsScreens {
                         FormCard {
                             if (d.locations.size > 1) Picker("انبار", d.locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
                             Picker("کالا", d.items.map { Choice(it.id, it.name, unitName(it.unit)) }, itemId, { itemId = it })
-                            QuantityInput("مقدار", d.items.firstOrNull { it.id == itemId }?.let { unitName(it.unit) } ?: "", { qty = it })
+                            ItemQuantityInput("مقدار", d.items.firstOrNull { it.id == itemId }, { qty = it })
                             Picker("دلیل", wasteReasons, reason, { reason = it })
                             TextInput("توضیح", note, { note = it })
                             DateInput("تاریخ", date, { date = it }, session.today)
@@ -295,7 +295,7 @@ object OperationsScreens {
                         Text(item.shelf.ifBlank { "بدون محل" }, style = SabouType.bodyStrong, color = Sabou.colors.primary)
                     }
                     key(item.id) {
-                        QuantityInput(item.name + (line.book?.let { " — دفتری ${Fa.quantity(it)}" } ?: ""), unitName(item.unit), { counted[item.id] = it }, value = counted[item.id])
+                        ItemQuantityInput(item.name + (line.book?.let { " — دفتری ${Fa.quantity(it)}" } ?: ""), item, { counted[item.id] = it }, value = counted[item.id])
                     }
                 }
                 TextInput("توضیح (اختیاری)", note, { note = it }, singleLine = false)
@@ -449,7 +449,7 @@ object OperationsScreens {
                             Picker("به انبار", all.filter { it.id != source }.map { Choice(it.id, it.name, if (it.scope != branch) "شعبه دیگر" else null) }, target, { target = it })
                             Divider()
                             Picker("کالا", items.map { Choice(it.id, it.name, unitName(it.unit)) }, itemId, { itemId = it })
-                            QuantityInput("مقدار", items.firstOrNull { it.id == itemId }?.let { unitName(it.unit) } ?: "", { qty = it })
+                            ItemQuantityInput("مقدار", items.firstOrNull { it.id == itemId }, { qty = it })
                             SecondaryButton("افزودن به فهرست", { lines.add(IssueLine(itemId!!, qty!!)); itemId = null }, enabled = itemId != null && qty != null)
                             lines.forEach { l -> KeyValue(items.firstOrNull { it.id == l.itemId }?.name ?: "", Fa.quantity(l.quantity)) }
                             TextInput("توضیح", note, { note = it })

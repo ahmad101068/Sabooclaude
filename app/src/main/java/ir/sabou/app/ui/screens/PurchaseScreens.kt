@@ -44,6 +44,7 @@ import ir.sabou.app.ui.components.NavRow
 import ir.sabou.app.ui.components.Page
 import ir.sabou.app.ui.components.Picker
 import ir.sabou.app.ui.components.PrimaryButton
+import ir.sabou.app.ui.components.ItemQuantityInput
 import ir.sabou.app.ui.components.QuantityInput
 import ir.sabou.app.ui.components.SCard
 import ir.sabou.app.ui.components.SecondaryButton
@@ -287,7 +288,7 @@ object PurchaseScreens {
                         })
                         Picker("کالا", form.items.map { Choice(it.id, it.name, unitName(it.unit)) }, l.item, { l.item = it })
                         val item = l.item?.let { itemsById[it] }
-                        QuantityInput("مقدار", item?.let { unitName(it.unit) } ?: "", { l.qty = it }, value = l.qty)
+                        ItemQuantityInput("مقدار", item, { l.qty = it }, value = l.qty)
                         MoneyInput("مبلغ کل ردیف", l.value, { l.value = it })
                         val price = unitPrice(l.qty, l.value)
                         val last = l.item?.let { lastPrices[it] }
@@ -554,7 +555,7 @@ object PurchaseScreens {
                     if (inv.status == InvoiceStatus.POSTED && session.can(Permission.PURCHASE_REVERSE)) {
                         FormCard("مرجوعی یا برگشت فاکتور") {
                             if (inv.lines.isNotEmpty()) {
-                                ReturnForm(inv.scope, inv.id, inv.lines.map { it.itemId }.distinct().map { Choice(it, d.items[it]?.name ?: "") })
+                                ReturnForm(inv.scope, inv.id, inv.lines.map { it.itemId }.distinct().mapNotNull { d.items[it] })
                                 Text("اگر فاکتور تسویه شده باشد، مبلغ مرجوعی از فاکتورهای باز همین تأمین‌کننده کم می‌شود و بقیه اعتبار می‌ماند.",
                                     style = SabouType.caption, color = Sabou.colors.muted)
                                 Divider()
@@ -590,7 +591,7 @@ object PurchaseScreens {
             Segmented(listOf("کالاست", "هزینه است"), mode, { mode = it })
             if (mode == 0) {
                 Picker("کالا", items.map { Choice(it.id, it.name, unitName(it.unit)) }, itemId, { itemId = it })
-                QuantityInput("مقدار", items.firstOrNull { it.id == itemId }?.let { unitName(it.unit) } ?: "", { qty = it }, value = qty)
+                ItemQuantityInput("مقدار", items.firstOrNull { it.id == itemId }, { qty = it }, value = qty)
                 val loc = locationId ?: locations.firstOrNull()?.id
                 if (locations.size > 1) Picker("انبار", locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
                 action.error?.let { Banner(it) }
@@ -608,15 +609,15 @@ object PurchaseScreens {
     }
 
     @Composable
-    private fun ReturnForm(scope: Scope.Branch, invoiceId: GlobalId, items: List<Choice<GlobalId>>) {
+    private fun ReturnForm(scope: Scope.Branch, invoiceId: GlobalId, items: List<Item>) {
         val session = LocalSession.current
         var itemId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
         var qty by rememberSaveable { mutableStateOf<Quantity?>(null) }
         var reason by rememberSaveable { mutableStateOf("") }
         val id = rememberCommandId()
         val action = rememberAction()
-        Picker("کالای مرجوعی", items, itemId, { itemId = it })
-        QuantityInput("مقدار مرجوعی", "", { qty = it }, value = qty)
+        Picker("کالای مرجوعی", items.map { Choice(it.id, it.name, unitName(it.unit)) }, itemId, { itemId = it })
+        ItemQuantityInput("مقدار مرجوعی", items.firstOrNull { it.id == itemId }, { qty = it }, value = qty)
         TextInput("دلیل مرجوعی", reason, { reason = it })
         action.error?.let { Banner(it) }
         SecondaryButton("ثبت مرجوعی (به قیمت فاکتور)", {
@@ -1053,7 +1054,7 @@ object PurchaseScreens {
                                             if (r.price == null) last[picked]?.let { r.price = Money.of(it) }
                                         })
                                         val item = r.item?.let { itemsById[it] }
-                                        QuantityInput("مقدار", item?.let { unitName(it.unit) } ?: "", { r.qty = it }, value = r.qty)
+                                        ItemQuantityInput("مقدار", item, { r.qty = it }, value = r.qty)
                                         MoneyInput("قیمت هر ${item?.let { unitName(it.unit) } ?: "واحد"}", r.price, { r.price = it },
                                             hint = r.item?.let { last[it] }?.let { "آخرین خرید: ${Fa.toman(it)}" })
                                         if (item != null && supplier != null && item.approvedSupplierIds.isNotEmpty() && supplier !in item.approvedSupplierIds) {

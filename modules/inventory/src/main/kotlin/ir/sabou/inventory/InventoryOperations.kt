@@ -32,12 +32,13 @@ data class CreateItem(
     val unit: StockUnit,
     val minimumStock: Quantity,
     val prepared: Boolean = false,
+    val packs: List<PackUnit> = emptyList(),
 ) : Command {
     override val requiredPermission = Permission.INVENTORY_ITEM_MANAGE
     // The item catalogue is shared by all branches.
     override val scope: Scope = Scope.Organization
     override val sharedCatalog = true
-    override fun fingerprint() = "$name|$unit|${minimumStock.micros}|$prepared"
+    override fun fingerprint() = "$name|$unit|${minimumStock.micros}|$prepared|${packs.joinToString(";") { "${it.name}=${it.contains.micros}" }}"
 }
 
 /** Edits an item's ordering and storage details. The unit never changes (it would revalue history). */
@@ -53,12 +54,15 @@ data class UpdateItem(
     val preferredSupplierId: GlobalId?,
     val approvedSupplierIds: Set<GlobalId>,
     val isActive: Boolean,
+    /** The item's purchase packs; null keeps them as they are. */
+    val packs: List<PackUnit>? = null,
 ) : Command {
     override val requiredPermission = Permission.INVENTORY_ITEM_MANAGE
     override val scope: Scope = Scope.Organization
     override val sharedCatalog = true
     override fun fingerprint() = "$itemId|$name|${minimumStock.micros}|${parLevel.micros}|$shelf|$allergens|$preferredSupplierId|" +
-        approvedSupplierIds.map { it.value }.sorted().joinToString(",") + "|$isActive"
+        approvedSupplierIds.map { it.value }.sorted().joinToString(",") + "|$isActive|" +
+        (packs?.joinToString(";") { "${it.name}=${it.contains.micros}" } ?: "keep")
 }
 
 /** A new version of how a prepared item is made; [lines] yield [outputQuantity] of it. */
@@ -179,7 +183,7 @@ class InventoryOperations(
         val name = cmd.name.trim()
         ensure(name.length in 2..80) { DomainError.InvalidInput("name", "نام کالا الزامی است.") }
         ensure(items.all().none { it.name == name }) { DomainError.InvalidState("ITEM", "DUPLICATE_NAME") }
-        val item = Item(GlobalId.new(), name, cmd.unit, cmd.minimumStock, prepared = cmd.prepared)
+        val item = Item(GlobalId.new(), name, cmd.unit, cmd.minimumStock, prepared = cmd.prepared, packs = Units.validatePacks(cmd.packs))
         items.save(item)
         ctx.audit(AuditDraft("ITEM_CREATE", "ITEM", item.id.value, name))
         item.id
@@ -207,6 +211,7 @@ class InventoryOperations(
         val next = item.copy(
             name = name, minimumStock = cmd.minimumStock, parLevel = cmd.parLevel, shelf = cmd.shelf.trim(), allergens = cmd.allergens.trim(),
             preferredSupplierId = cmd.preferredSupplierId, approvedSupplierIds = cmd.approvedSupplierIds, isActive = cmd.isActive,
+            packs = cmd.packs?.let(Units::validatePacks) ?: item.packs,
         )
         items.save(next)
         ctx.audit(AuditDraft("ITEM_UPDATE", "ITEM", item.id.value, name))
