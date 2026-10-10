@@ -117,7 +117,7 @@ object Messages {
         is DomainError.InvalidState -> states["${error.entity}:${error.state.substringBefore(':')}"] ?: error.userMessage
         // Usually a form restored after the app was closed, whose first submission had already gone through.
         is DomainError.IdempotencyConflict -> "این فرم قبلاً ثبت شده است (احتمالاً پیش از بسته شدن برنامه). فهرست را بررسی کنید؛ برای ثبت مورد تازه، صفحه را از نو باز کنید."
-        is DomainError.InsufficientFunds -> "موجودی حساب کافی نیست (موجود: ${Fa.toman(error.available)} تومان)."
+        is DomainError.InsufficientFunds -> "موجودی حساب کافی نیست (موجود: ${Fa.rial(error.available)} ریال)."
         is DomainError.InsufficientStock -> "موجودی انبار کافی نیست (موجود: ${Fa.quantity(ir.sabou.kernel.Quantity.of(error.available))})."
         else -> error.userMessage
     }

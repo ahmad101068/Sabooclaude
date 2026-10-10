@@ -39,14 +39,17 @@ class FormatTest {
     @Test fun numbersAndMoney() {
         assertEquals("۴۸٬۶۵۰٬۰۰۰", Fa.number(48_650_000))
         assertEquals("−۱٬۰۰۰", Fa.number(-1_000))
-        assertEquals("۱۲٬۴۰۰٬۰۰۰", Fa.toman(124_000_000))
-        assertEquals("۱۲٫۵", Fa.toman(125))
-        assertEquals("۱۴٫۸ م", Fa.tomanShort(148_000_000))
-        assertEquals("۲۱۲٫۵ م", Fa.tomanShort(2_125_000_000))
-        assertEquals("۲ م", Fa.tomanShort(20_000_000))
-        assertEquals(Money.of(124_000_000), Fa.parseToman("۱۲٬۴۰۰٬۰۰۰"))
-        assertEquals(Money.of(50), Fa.parseToman("٥"))
-        assertNull(Fa.parseToman("12a")); assertNull(Fa.parseToman(""))
+        assertEquals("۱۲۴٬۰۰۰٬۰۰۰", Fa.rial(124_000_000))
+        assertEquals("۱۲۵", Fa.rial(125))
+        assertEquals("۱۲۵", Fa.rial(Money.of(125)))
+        assertEquals("۱۴۸ م", Fa.rialShort(148_000_000))
+        assertEquals("۲٫۱ ب", Fa.rialShort(2_125_000_000))
+        assertEquals("۲ م", Fa.rialShort(2_000_000))
+        assertEquals("۹۹۹٬۹۹۹", Fa.rialShort(999_999))
+        assertEquals(Money.of(124_000_000), Fa.parseRial("۱۲۴٬۰۰۰٬۰۰۰"))
+        assertEquals(Money.of(5), Fa.parseRial("٥"))
+        assertNull(Fa.parseRial("1000000000000000001"))
+        assertNull(Fa.parseRial("12a")); assertNull(Fa.parseRial(""))
         assertEquals(Quantity.of(2_500_000), Fa.parseQuantity("۲٫۵"))
         assertEquals(Quantity.of(250_000), Fa.parseQuantity("0.25"))
         assertNull(Fa.parseQuantity("1.1234567"))
@@ -59,7 +62,7 @@ class FormatTest {
     @Test fun errorsBecomeClearPersianSentences() {
         assertEquals("جمع روش‌های تسویه با مبلغ قابل تسویه برابر نیست.",
             Messages.of(ir.sabou.kernel.DomainError.InvalidState("DAILY_SALE", "SETTLEMENT_MISMATCH:40000")))
-        assertEquals("موجودی حساب کافی نیست (موجود: ۱٬۰۰۰ تومان).",
+        assertEquals("موجودی حساب کافی نیست (موجود: ۱۰٬۰۰۰ ریال).",
             Messages.of(ir.sabou.kernel.DomainError.InsufficientFunds("x", 10_000, 20_000)))
         assertTrue(Messages.of(IllegalStateException("boom")).startsWith("عملیات انجام نشد"))
     }

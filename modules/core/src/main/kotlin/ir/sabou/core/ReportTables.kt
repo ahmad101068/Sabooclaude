@@ -8,7 +8,7 @@ object ReportTables {
     private fun period(from: BusinessDate, to: BusinessDate) = if (from == to) Fa.date(from) else "از ${Fa.date(from)} تا ${Fa.date(to)}"
     private fun pct(bp: Long?): Cell = bp?.let { Cell.Percent(it) } ?: Cell.of("—")
     private fun amount(v: Long?): Cell = v?.let { Cell.Amount(it) } ?: Cell.of("—")
-    private const val TOMAN = "مبالغ به تومان"
+    private const val RIAL = "مبالغ به ریال"
 
     fun unitName(unit: StockUnit) = when (unit) {
         StockUnit.GRAM -> "گرم"; StockUnit.KILOGRAM -> "کیلوگرم"; StockUnit.MILLILITER -> "میلی‌لیتر"
@@ -28,10 +28,10 @@ object ReportTables {
             add(listOf(Cell.EMPTY, Cell.of("جمع هزینه‌ها"), Cell.Amount(p.totals.expenses)))
         }
         val statement = ReportTable(
-            "سود و زیان", "$place · ${period(p.from, p.to)}", listOf("کد", "شرح", "مبلغ (تومان)"), rows,
+            "سود و زیان", "$place · ${period(p.from, p.to)}", listOf("کد", "شرح", "مبلغ (ریال)"), rows,
             footer = listOf(Cell.EMPTY, Cell.of("سود (زیان) خالص"), Cell.Amount(p.totals.profit)),
             notes = listOf(
-                TOMAN,
+                RIAL,
                 "درصد بهای غذا: ${pct(p.ratios.foodBp).text} · درصد نیروی کار: ${pct(p.ratios.laborBp).text} · بهای اصلی: ${pct(p.ratios.primeBp).text} (نسبت به فروش غذا)",
                 "حقوق هر ماه در روز آخر همان ماه ثبت می‌شود؛ در بازه‌های کوتاه درصد نیروی کار را با احتیاط بخوانید.",
             ),
@@ -40,7 +40,7 @@ object ReportTables {
             title, "$place · ${period(p.from, p.to)}", listOf(label, "درآمد", "بهای تمام‌شده", "هزینه‌ها", "سود (زیان)"),
             rows.map { (k, t) -> listOf(Cell.of(k), Cell.Amount(t.revenue), Cell.Amount(t.cogs), Cell.Amount(t.expenses), Cell.Amount(t.profit)) },
             footer = listOf(Cell.of("جمع"), Cell.Amount(p.totals.revenue), Cell.Amount(p.totals.cogs), Cell.Amount(p.totals.expenses), Cell.Amount(p.totals.profit)),
-            notes = listOf(TOMAN),
+            notes = listOf(RIAL),
         )
         return listOf(
             statement,
@@ -53,7 +53,7 @@ object ReportTables {
         "گردش $accountName", period(from, to), listOf("تاریخ", "شماره سند", "شرح", "شعبه", "بدهکار", "بستانکار"),
         rows.map { listOf(Cell.of(Fa.date(it.date)), Cell.of(Fa.digits(it.number)), Cell.of(it.description + if (it.memo.isBlank()) "" else " · ${it.memo}"), Cell.of(it.scope), Cell.Amount(it.debit), Cell.Amount(it.credit)) },
         footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOf { it.debit }), Cell.Amount(rows.sumOf { it.credit })),
-        notes = listOf(TOMAN),
+        notes = listOf(RIAL),
     )
 
     fun productMix(m: ProductMix) = ReportTable(
@@ -64,7 +64,7 @@ object ReportTables {
                 amount(it.unitCost?.rial), amount(it.unitMargin), pct(it.costBp))
         },
         footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.Amount(m.gross.rial), Cell.Percent(if (m.gross.isZero) 0 else 10_000), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY),
-        notes = listOf(TOMAN, "بهای مواد با رسپی فعلی و میانگین بهای امروز انبارهای شعبه حساب شده است (اگر موجودی نباشد، آخرین قیمت خرید)."),
+        notes = listOf(RIAL, "بهای مواد با رسپی فعلی و میانگین بهای امروز انبارهای شعبه حساب شده است (اگر موجودی نباشد، آخرین قیمت خرید)."),
     )
 
     fun dayFlash(f: DayFlash): ReportTable {
@@ -83,7 +83,7 @@ object ReportTables {
             kv("نقد شمارش‌شده", amount(f.countedCash?.rial))
             kv("کسر / اضافه صندوق", amount(f.cashDifference))
         }
-        return ReportTable("گزارش پایان روز", "${f.branch} · ${Fa.dayTitle(f.date)} ${Fa.date(f.date)}", listOf("شرح", "مقدار"), rows, notes = listOf(TOMAN))
+        return ReportTable("گزارش پایان روز", "${f.branch} · ${Fa.dayTitle(f.date)} ${Fa.date(f.date)}", listOf("شرح", "مقدار"), rows, notes = listOf(RIAL))
     }
 
     private fun hours(minutes: Long): Cell = Cell.Qty(ir.sabou.kernel.Ratio.mulDiv(minutes, ir.sabou.kernel.Quantity.SCALE, 60))
@@ -101,7 +101,7 @@ object ReportTables {
             listOf(Cell.of(acc.code.value), Cell.of(acc.name), Cell.Amount(maxOf(net, 0)), Cell.Amount(maxOf(-net, 0)))
         },
         footer = listOf(Cell.EMPTY, Cell.of("جمع"), Cell.Amount(rows.sumOf { maxOf(it.second, 0) }), Cell.Amount(rows.sumOf { maxOf(-it.second, 0) })),
-        notes = listOf(TOMAN),
+        notes = listOf(RIAL),
     )
 
     fun stock(location: String, rows: List<Pair<ir.sabou.inventory.Item, ir.sabou.inventory.StockBalance>>, asOf: BusinessDate) = ReportTable(
@@ -111,7 +111,7 @@ object ReportTables {
                 if (b.quantity.isZero) Cell.of("—") else Cell.Amount(ir.sabou.kernel.Ratio.mulDiv(b.value.rial, ir.sabou.kernel.Quantity.SCALE, b.quantity.micros)))
         },
         footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOf { it.second.value.rial }), Cell.EMPTY),
-        notes = listOf(TOMAN, "میانگین بها برای یک واحد هر کالا است."),
+        notes = listOf(RIAL, "میانگین بها برای یک واحد هر کالا است."),
     )
 
     fun invoices(rows: List<InvoiceRow>) = ReportTable(
@@ -123,14 +123,14 @@ object ReportTables {
         },
         footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.filter { it.invoice.status == ir.sabou.purchasing.InvoiceStatus.POSTED }.sumOf { it.invoice.total.rial }),
             Cell.Amount(rows.sumOf { it.outstanding.rial }), Cell.EMPTY),
-        notes = listOf(TOMAN),
+        notes = listOf(RIAL),
     )
 
     fun suppliers(rows: List<SupplierBalance>) = ReportTable(
         "بدهی به تأمین‌کنندگان", "", listOf("تأمین‌کننده", "تلفن", "بدهی", "اعتبار مرجوعی"),
         rows.map { listOf(Cell.of(it.supplier.name), Cell.of(it.supplier.phone), Cell.Amount(it.owed.rial), Cell.Amount(it.credit.rial)) },
         footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.Amount(rows.sumOf { it.owed.rial }), Cell.Amount(rows.sumOf { it.credit.rial })),
-        notes = listOf(TOMAN, "اعتبار مرجوعی: مبلغ کالای برگشتی که هنوز با فاکتوری تسویه نشده است."),
+        notes = listOf(RIAL, "اعتبار مرجوعی: مبلغ کالای برگشتی که هنوز با فاکتوری تسویه نشده است."),
     )
 
     /** A purchase order as sent to the supplier. */
@@ -143,7 +143,7 @@ object ReportTables {
             listOf(Cell.Count(i + 1L), Cell.of(item?.name ?: ""), Cell.of(item?.let { unitName(it.unit) } ?: ""), Cell.Qty(l.quantity.micros), Cell.Amount(l.unitPrice.rial), Cell.Amount(l.value.rial))
         },
         footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(o.order.total.rial)),
-        notes = listOfNotNull(TOMAN, "محل تحویل: ${o.location}", o.order.note.takeIf { it.isNotBlank() }?.let { "توضیح: $it" }),
+        notes = listOfNotNull(RIAL, "محل تحویل: ${o.location}", o.order.note.takeIf { it.isNotBlank() }?.let { "توضیح: $it" }),
     )
 
     fun priceChanges(rows: List<PriceChange>, from: BusinessDate, to: BusinessDate) = ReportTable(
@@ -152,7 +152,7 @@ object ReportTables {
             listOf(Cell.of(Fa.date(it.date)), Cell.of(it.supplier), Cell.of(it.item.name), Cell.of(unitName(it.item.unit)), Cell.Amount(it.previousPrice),
                 Cell.of(Fa.date(it.previousDate)), Cell.Amount(it.price), Cell.Percent(it.changeBp))
         },
-        notes = listOf(TOMAN, "قیمت‌ها برای یک واحد هر کالاست و با فاکتور قبلی همان تأمین‌کننده مقایسه شده‌اند."),
+        notes = listOf(RIAL, "قیمت‌ها برای یک واحد هر کالاست و با فاکتور قبلی همان تأمین‌کننده مقایسه شده‌اند."),
     )
 
     fun suggestions(groups: List<SuggestionGroup>, place: String, date: BusinessDate) = ReportTable(
@@ -164,17 +164,17 @@ object ReportTables {
             }
         },
         footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(groups.sumOf { it.total.rial })),
-        notes = listOf(TOMAN, "پیشنهاد = سطح مطلوب + مصرف برنامه‌ریزی‌شده − موجودی − سفارش‌های باز."),
+        notes = listOf(RIAL, "پیشنهاد = سطح مطلوب + مصرف برنامه‌ریزی‌شده − موجودی − سفارش‌های باز."),
     )
 
     fun receivables(rows: List<OpenReceivable>) = ReportTable(
         "مطالبات از مشتریان", "", listOf("مشتری", "سررسید", "مبلغ", "مانده"),
         rows.map { listOf(Cell.of(it.customer), Cell.of(Fa.date(it.receivable.dueDate)), Cell.Amount(it.receivable.amount.rial), Cell.Amount(it.outstanding.rial)) },
-        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOf { it.outstanding.rial })), notes = listOf(TOMAN),
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOf { it.outstanding.rial })), notes = listOf(RIAL),
     )
 
     fun accountHistory(account: AccountBalance, rows: List<ir.sabou.treasury.TreasuryMovement>) = ReportTable(
-        "گردش ${account.account.name}", "مانده فعلی: ${Fa.toman(account.balance)} تومان", listOf("تاریخ", "شرح", "دریافت", "پرداخت"),
+        "گردش ${account.account.name}", "مانده فعلی: ${Fa.rial(account.balance)} ریال", listOf("تاریخ", "شرح", "دریافت", "پرداخت"),
         rows.map {
             val inbound = it.direction == ir.sabou.treasury.Direction.RECEIPT
             listOf(Cell.of(Fa.date(it.date)), Cell.of(movementLabel(it.source.type) + if (it.reversalOf != null) " (برگشت)" else ""),
@@ -183,7 +183,7 @@ object ReportTables {
         footer = listOf(Cell.of("جمع"), Cell.EMPTY,
             Cell.Amount(rows.filter { it.direction == ir.sabou.treasury.Direction.RECEIPT }.sumOf { it.amount.rial }),
             Cell.Amount(rows.filter { it.direction == ir.sabou.treasury.Direction.PAYMENT }.sumOf { it.amount.rial })),
-        notes = listOf(TOMAN),
+        notes = listOf(RIAL),
     )
 
     fun movementLabel(sourceType: String): String = when {
@@ -211,12 +211,12 @@ object ReportTables {
             { it.baseSalary.rial }, { it.absenceDeduction.rial }, { it.overtimePay.rial }, { it.gross.rial }, { it.employeeInsurance.rial },
             { it.incomeTax.rial }, { it.net.rial }, { it.employerInsurance.rial + it.unemploymentInsurance.rial },
         ).map { f -> Cell.Amount(run.payslips.sumOf(f)) },
-        notes = listOf(TOMAN),
+        notes = listOf(RIAL),
     )
 
     /** One employee's payslip as a two-column table (printed one per page). */
     fun payslip(run: ir.sabou.payroll.PayrollRun, slip: ir.sabou.payroll.Payslip, name: String, branch: String) = ReportTable(
-        "فیش حقوقی", "$name · $branch · ${period(run.from, run.to)}", listOf("شرح", "مبلغ (تومان)"),
+        "فیش حقوقی", "$name · $branch · ${period(run.from, run.to)}", listOf("شرح", "مبلغ (ریال)"),
         buildList {
             fun kv(k: String, v: Long) = add(listOf(Cell.of(k), Cell.Amount(v)))
             slip.payableDays?.let { add(listOf(Cell.of("روزهای کار (ماه ناقص)"), Cell.Count(it.toLong()))) }
@@ -224,7 +224,7 @@ object ReportTables {
             kv("حقوق و مزایای ناخالص", slip.gross.rial); kv("بیمه سهم کارمند", -slip.employeeInsurance.rial); kv("مالیات حقوق", -slip.incomeTax.rial)
         },
         footer = listOf(Cell.of("خالص پرداختی"), Cell.Amount(slip.net.rial)),
-        notes = listOf("نسخه‌ی پارامترهای قانونی: ${run.policyVersion}", "بیمه سهم کارفرما و بیکاری: ${Fa.toman(slip.employerInsurance.rial + slip.unemploymentInsurance.rial)} تومان (پرداخت کارفرما)"),
+        notes = listOf("نسخه‌ی پارامترهای قانونی: ${run.policyVersion}", "بیمه سهم کارفرما و بیکاری: ${Fa.rial(slip.employerInsurance.rial + slip.unemploymentInsurance.rial)} ریال (پرداخت کارفرما)"),
     )
 
     fun usage(u: UsageReport): ReportTable = ReportTable(
@@ -241,7 +241,7 @@ object ReportTables {
             Cell.Amount(u.theoreticalValue), Cell.Amount(u.wasteValue), Cell.Amount(u.compsValue), Cell.EMPTY, Cell.Amount(u.unexplainedValue), Cell.EMPTY),
         notes = listOf(
             "مصرف واقعی = موجودی اول + خرید + انتقال + تولید − موجودی پایان. اختلاف توضیح‌داده‌نشده همان کسری (منهای اضافه‌ی) انبارگردانی است.",
-            "مقادیر به واحد هر کالا؛ ارزش‌ها به تومان.",
+            "مقادیر به واحد هر کالا؛ ارزش‌ها به ریال.",
         ),
     )
 
@@ -266,13 +266,13 @@ object ReportTables {
                 Cell.of(chequeStatusName(c.status)), Cell.of(it.branch))
         },
         footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOf { it.cheque.amount.rial }), Cell.EMPTY, Cell.EMPTY),
-        notes = listOf(TOMAN),
+        notes = listOf(RIAL),
     )
 
     fun budget(r: BudgetReport) = ReportTable(
         "بودجه در برابر عملکرد", "${r.place} · ${period(r.from, r.to)}", listOf("کد", "حساب", "بودجه", "عملکرد", "اختلاف", "درصد مصرف"),
         r.lines.map { listOf(Cell.of(it.account.code.value), Cell.of(it.account.name), Cell.Amount(it.budget), Cell.Amount(it.actual), Cell.Amount(it.variance), pct(it.usedBp)) },
-        notes = listOf(TOMAN, "بودجه‌ی دوره‌ای که بخشی از آن در این بازه است به نسبت روزها حساب شده است. اختلاف مثبت در هزینه یعنی بیش از بودجه."),
+        notes = listOf(RIAL, "بودجه‌ی دوره‌ای که بخشی از آن در این بازه است به نسبت روزها حساب شده است. اختلاف مثبت در هزینه یعنی بیش از بودجه."),
     )
 
     fun assets(rows: List<AssetRow>, asOf: BusinessDate) = ReportTable(
@@ -287,7 +287,7 @@ object ReportTables {
         footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.filter { it.asset.status == ir.sabou.assets.AssetStatus.ACTIVE }.sumOf { it.asset.cost.rial }),
             Cell.Amount(rows.filter { it.asset.status == ir.sabou.assets.AssetStatus.ACTIVE }.sumOf { it.asset.accumulated.rial }),
             Cell.Amount(rows.filter { it.asset.status == ir.sabou.assets.AssetStatus.ACTIVE }.sumOf { it.asset.bookValue.rial }), Cell.EMPTY),
-        notes = listOf(TOMAN, "روش و نرخ استهلاک هر گروه باید با جدول استهلاکات مالیاتی و مشاور مالیاتی تطبیق داده شود."),
+        notes = listOf(RIAL, "روش و نرخ استهلاک هر گروه باید با جدول استهلاکات مالیاتی و مشاور مالیاتی تطبیق داده شود."),
     )
 
     fun countStatusName(s: ir.sabou.inventory.CountStatus) = when (s) {
@@ -311,7 +311,7 @@ object ReportTables {
                     Cell.of(listOf(l.note, l.reasonNote).filter { it.isNotBlank() }.joinToString(" · ")))
             },
             footer = listOf(Cell.of("جمع ارزش اختلاف"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(c.lines.sumOf { it.postedValue ?: 0 }), Cell.EMPTY, Cell.EMPTY),
-            notes = listOfNotNull(TOMAN, "اختلاف = شمارش‌شده − دفتری در زمان شمارش؛ منفی یعنی کسری.", c.note.takeIf { it.isNotBlank() }?.let { "توضیح: $it" },
+            notes = listOfNotNull(RIAL, "اختلاف = شمارش‌شده − دفتری در زمان شمارش؛ منفی یعنی کسری.", c.note.takeIf { it.isNotBlank() }?.let { "توضیح: $it" },
                 c.rejectReason?.let { "دلیل رد: $it" }),
         )
     }
