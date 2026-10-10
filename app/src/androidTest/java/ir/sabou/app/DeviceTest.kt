@@ -37,7 +37,7 @@ class DeviceTest {
     /** A container on a freshly erased database, signed in as a new owner. */
     private fun fresh(): Pair<AppContainer, SabouCore> {
         val container = AppContainer(context)
-        container.factoryReset(null)
+        TestData.startClean(context, container)
         val core = ready(container)
         assertTrue(core.identity.needsBootstrap())
         core.bootstrap("شعبه آزمایشی", "مالک", "owner", "123456".toCharArray())
@@ -106,25 +106,24 @@ class DeviceTest {
         container.backup(core, "password-123".toCharArray(), Uri.fromFile(file))
         assertTrue(file.length() > 0)
         // Nothing unencrypted or temporary is left behind.
-        assertFalse(File(context.cacheDir, "backup-plain.db").exists())
         assertFalse(File(context.cacheDir, "backup-sealed.db").exists())
 
-        container.factoryReset(core)
+        container.factoryReset()
         assertTrue(ready(container).identity.needsBootstrap())
 
         try {
-            container.restore(null, "wrong-password".toCharArray(), Uri.fromFile(file))
+            container.restore("wrong-password".toCharArray(), Uri.fromFile(file))
             fail("a wrong password must be refused")
         } catch (e: BackupFormatException) {
             assertEquals("authentication_failed", e.message)
         }
         assertTrue(ready(container).identity.needsBootstrap())   // untouched by the failed attempt
 
-        container.restore(null, "password-123".toCharArray(), Uri.fromFile(file))
+        container.restore("password-123".toCharArray(), Uri.fromFile(file))
         val restored = ready(container)
         assertFalse(restored.identity.needsBootstrap())
         restored.identity.login("owner", "123456".toCharArray())
-        assertFalse(context.getDatabasePath("restore-plain.db").exists())
+        assertFalse(context.getDatabasePath("restore-candidate.db").exists())
         file.delete()
     }
 
@@ -143,9 +142,19 @@ class DeviceTest {
         container.close()
         live.writeBytes(old)                               // roll the database back behind the app's back
         container.open()
+        val recovery = container.state.value as AppState.Recovery
+        // Signed out, nobody may replace the data (the screen asks for the owner first).
+        try { container.factoryReset(); fail("reset without the owner must be refused") } catch (e: ir.sabou.kernel.DomainException) {
+            assertEquals("AUTHENTICATION_REQUIRED", e.error.code)
+        }
         assertTrue(container.state.value is AppState.Recovery)
-        container.factoryReset(null)                       // the way out (besides restoring a backup)
+        recovery.core.identity.login("owner", "123456".toCharArray())
+        container.factoryReset()                           // the way out (besides restoring a backup)
         assertTrue(ready(container).identity.needsBootstrap())
+        // The rolled-back database was not deleted: it is kept in quarantine with its key.
+        val kept = container.quarantined().first()
+        assertTrue(File(kept, AppContainer.DB_NAME).length() > 0)
+        assertTrue(File(kept, "key.wrapped").exists())
         File(context.cacheDir, "x.sabou").delete()
     }
 
@@ -181,5 +190,120 @@ class DeviceTest {
         file.writeBytes(bytes)
         assertNull(container.takeDrafts())
         assertFalse(file.exists())
+    }
+
+    // ------------------------------------------------------------ crash-safe replacement (P0-1)
+
+    private fun item(core: SabouCore, name: String) =
+        core.inventory.createItem(ir.sabou.inventory.CreateItem(GlobalId.new(), name, ir.sabou.inventory.StockUnit.KILOGRAM, Quantity.ZERO))
+
+    private fun items(container: AppContainer): Set<String> {
+        val core = ready(container)
+        core.identity.login("owner", "123456".toCharArray())
+        return core.overview.items().map { it.name }.toSet()
+    }
+
+    /** A backup holding «آرد», then «شکر» added after it: the live database has both. */
+    private fun backupThenMore(): Triple<AppContainer, SabouCore, File> {
+        val (container, core) = fresh()
+        item(core, "آرد")
+        val file = File(context.cacheDir, "crash.sabou").also { it.delete() }
+        container.backup(core, "password-123".toCharArray(), Uri.fromFile(file))
+        item(core, "شکر")
+        return Triple(container, core, file)
+    }
+
+    private fun crashAt(container: AppContainer, point: String) {
+        container.faultPoint = { if (it == point) throw IllegalStateException("simulated crash at $it") }
+    }
+
+    @Test fun aRestoreInterruptedBeforeTheSwapKeepsTheCurrentDataUsable() {
+        for (point in listOf("announced", "quarantined")) {
+            val (container, _, file) = backupThenMore()
+            crashAt(container, point)
+            try { container.restore("password-123".toCharArray(), Uri.fromFile(file)); fail("expected crash at $point") } catch (e: IllegalStateException) { }
+            container.faultPoint = {}
+            container.open()                                       // the next start of the app
+            assertEquals("after a crash at $point", setOf("آرد", "شکر"), items(container))
+            file.delete()
+            container.close()
+        }
+    }
+
+    @Test fun aRestoreInterruptedAfterTheSwapOpensTheRestoredData() {
+        val (container, _, file) = backupThenMore()
+        crashAt(container, "swapped")
+        try { container.restore("password-123".toCharArray(), Uri.fromFile(file)); fail() } catch (e: IllegalStateException) { }
+        container.faultPoint = {}
+        container.open()
+        assertEquals(setOf("آرد"), items(container))
+        // The data replaced by the restore is kept in quarantine.
+        assertTrue(File(container.quarantined().first(), AppContainer.DB_NAME).length() > 0)
+        file.delete()
+    }
+
+    @Test fun aResetInterruptedAtAnyPointOpensEitherTheOldOrAnEmptyDatabase() {
+        for (point in listOf("announced", "quarantined", "keyForgotten")) {
+            val (container, core) = fresh()
+            item(core, "آرد")
+            crashAt(container, point)
+            try { container.factoryReset(); fail("expected crash at $point") } catch (e: IllegalStateException) { }
+            container.faultPoint = {}
+            container.open()
+            val state = container.state.value
+            assertTrue("after a crash at $point: $state", state is AppState.Ready)
+            val reopened = (state as AppState.Ready).core
+            if (point == "announced") assertEquals(setOf("آرد"), items(container))   // nothing moved yet: data intact
+            else assertTrue("reset completes after $point", reopened.identity.needsBootstrap())
+            container.close()
+        }
+    }
+
+    @Test fun removingTheAnchorFileIsDetected() {
+        val (container, _) = fresh()
+        container.open()
+        ready(container)
+        container.close()
+        assertTrue(File(context.noBackupFilesDir, "integrity.anchors").delete())
+        container.open()
+        val state = container.state.value
+        assertTrue("$state", state is AppState.Recovery && state.detail == "ANCHOR_MISSING")
+    }
+
+    @Test fun aSignedOutUserCannotReplaceTheDataOfAWorkingDatabase() {
+        val (container, core) = fresh()
+        core.identity.logout()
+        try { container.factoryReset(); fail("refused") } catch (e: ir.sabou.kernel.DomainException) { assertEquals("AUTHENTICATION_REQUIRED", e.error.code) }
+        assertTrue(container.quarantined().isEmpty())
+        assertFalse(ready(container).identity.needsBootstrap())   // nothing happened
+    }
+
+    @Test fun onlyAProvablyLostKeyOrUnreadableFileCountsAsPermanent() {
+        assertFalse(AppContainer.isPermanentOpenFailure(IllegalStateException("database is locked")))
+        assertFalse(AppContainer.isPermanentOpenFailure(ir.sabou.app.data.DeviceKeyUnavailableException(java.io.IOException("keystore busy"))))
+        assertTrue(AppContainer.isPermanentOpenFailure(ir.sabou.app.data.DeviceKeyUnavailableException(IllegalStateException("KEYSTORE_KEY_MISSING"))))
+        assertTrue(AppContainer.isPermanentOpenFailure(android.database.sqlite.SQLiteDatabaseCorruptException("x")))
+        assertTrue(AppContainer.isPermanentOpenFailure(RuntimeException("file is not a database: , while compiling: select count(*) from sqlite_master;")))
+    }
+
+    @Test fun anOldUnencryptedPayloadIsRefusedWithoutWritingItToDisk() {
+        val (container, _) = fresh()
+        val file = File(context.cacheDir, "v1.sabou").also { it.delete() }
+        val plain = "SQLite format 3\u0000".toByteArray() + ByteArray(4_000)
+        file.outputStream().use { StreamingBackupCodecAccess.encrypt("password-123".toCharArray(), plain, it) }
+        try {
+            container.restore("password-123".toCharArray(), Uri.fromFile(file)); fail("v1 must be refused")
+        } catch (e: BackupFormatException) {
+            assertEquals("unsupported_payload", e.message)
+        }
+        assertFalse(context.getDatabasePath("restore-candidate.db").exists())
+        assertFalse(ready(container).identity.needsBootstrap())   // current data untouched
+        file.delete()
+    }
+}
+
+private object StreamingBackupCodecAccess {
+    fun encrypt(password: CharArray, bytes: ByteArray, out: java.io.OutputStream) {
+        ir.sabou.backup.StreamingBackupCodec.encrypt(password, java.io.ByteArrayInputStream(bytes), out)
     }
 }

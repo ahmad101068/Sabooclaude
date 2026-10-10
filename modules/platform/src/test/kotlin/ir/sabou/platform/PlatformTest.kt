@@ -153,7 +153,7 @@ class PlatformTest {
         assertIs<StartupVerdict.Healthy>(guard.verify("epoch-1"))
 
         // Factory reset / restore: the rebase is recorded first, then the database is replaced (AUD-001).
-        guard.recordRebase("epoch-2", "FACTORY_RESET", 2)
+        guard.recordRebase("epoch-2", "epoch-1", "FACTORY_RESET", 2)
         audit.events.clear()
         assertIs<StartupVerdict.Healthy>(guard.verify("epoch-2"))
 
@@ -161,5 +161,33 @@ class PlatformTest {
         guard.recordCheckpoint("epoch-2", 3)
         assertIs<StartupVerdict.Healthy>(guard.verify("epoch-2"))
         assertIs<StartupVerdict.RollbackDetected>(guard.verify("epoch-1"))
+    }
+
+    @Test fun anInterruptedReplacementLeavesEitherDatabaseUsableButNoThirdOne() {
+        session.actor = actor(Role.OWNER)
+        val anchors = InMemoryAnchorStore()
+        val guard = IntegrityGuard(anchors, audit)
+        run(ping())
+        guard.recordCheckpoint("old", 1)
+        guard.recordRebase("new", "old", "RESTORE", 2)
+        // Crash before the file swap: the old database still opens. Crash after it: the new one opens.
+        assertIs<StartupVerdict.Healthy>(guard.verify("old", anchoredBefore = true))
+        assertIs<StartupVerdict.Healthy>(guard.verify("new", anchoredBefore = true))
+        assertIs<StartupVerdict.RollbackDetected>(guard.verify("third", anchoredBefore = true))
+        assertEquals("new", guard.pendingEpoch())
+        // The next startup's checkpoint settles it: only the database that actually opened stays genuine.
+        audit.events.clear()
+        guard.recordCheckpoint("new", 3)
+        assertEquals(null, guard.pendingEpoch())
+        assertIs<StartupVerdict.Healthy>(guard.verify("new", anchoredBefore = true))
+        assertIs<StartupVerdict.RollbackDetected>(guard.verify("old", anchoredBefore = true))
+    }
+
+    @Test fun aMissingAnchorIsAFirstStartOnlyForADatabaseThatWasNeverAnchored() {
+        val guard = IntegrityGuard(InMemoryAnchorStore(), audit)
+        assertIs<StartupVerdict.Healthy>(guard.verify("e", anchoredBefore = false))
+        val verdict = guard.verify("e", anchoredBefore = true)
+        assertIs<StartupVerdict.RollbackDetected>(verdict)
+        assertEquals("ANCHOR_MISSING", verdict.detail)
     }
 }

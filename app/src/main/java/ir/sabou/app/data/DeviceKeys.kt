@@ -38,6 +38,13 @@ class DeviceKeys(private val context: Context) {
     }
 
     /**
+     * The database key as stored (still wrapped by the Keystore key), or null. Kept next to a quarantined
+     * database so that file stays readable on this device after the live key has been replaced.
+     */
+    @Synchronized
+    fun wrappedDatabaseKey(): String? = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(WRAPPED_DB_KEY, null)
+
+    /**
      * Forgets the wrapped database key so the next open creates a new one. Only for a database that is
      * being erased or replaced (factory reset, restore when the old key is unusable).
      */
