@@ -71,6 +71,21 @@ object Ratio {
     }
 
     /**
+     * Relative change from [previous] to [now] in basis points (+ = up), exact (no intermediate overflow) and
+     * rounded half away from zero; null when [previous] is not positive (there is nothing to compare with).
+     * The one place a percentage change is computed: prices, sales against last month, budgets.
+     */
+    fun changeBp(previous: Long, now: Long): Long? {
+        if (previous <= 0) return null
+        val p = BigInteger.valueOf(previous)
+        val diff = BigInteger.valueOf(now).subtract(p).multiply(BigInteger.valueOf(10_000))
+        val (whole, remainder) = diff.abs().divideAndRemainder(p)
+        val magnitude = if (remainder.shiftLeft(1) >= p) whole + BigInteger.ONE else whole
+        val limited = magnitude.min(BigInteger.valueOf(Long.MAX_VALUE)).toLong()
+        return if (diff.signum() < 0) -limited else limited
+    }
+
+    /**
      * Splits [total] across [weights] proportionally. The result always sums exactly to [total];
      * the rounding remainder goes to the last non-zero weight so allocation is deterministic.
      */

@@ -386,13 +386,15 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
 
     override fun day(scope: Scope.Branch, date: BusinessDate) =
         doc("SELECT doc FROM sales_days WHERE scope = ? AND date = ?", Codec.scope(scope), date.epochDay)?.let {
-            SalesDay(Codec.branchOf(it.str("scope")), Codec.date(it.long("date")), it.bool("closed"), it.longOrNull("countedCash")?.let(Codec::money))
+            SalesDay(Codec.branchOf(it.str("scope")), Codec.date(it.long("date")), it.bool("closed"), it.longOrNull("countedCash")?.let(Codec::money),
+                Codec.idOrNull(it.strOrNull("cashAccount")), it.longOr("difference", 0), Codec.idOrNull(it.strOrNull("count")))
         }
     override fun saveDay(day: SalesDay) = upsert(
         "sales_days", listOf("scope", "date"),
         mapOf(
             "scope" to Codec.scope(day.scope), "date" to day.date.epochDay,
-            "doc" to Json.encode(mapOf("scope" to Codec.scope(day.scope), "date" to day.date.epochDay, "closed" to day.closed, "countedCash" to day.countedCash?.rial)),
+            "doc" to Json.encode(mapOf("scope" to Codec.scope(day.scope), "date" to day.date.epochDay, "closed" to day.closed, "countedCash" to day.countedCash?.rial,
+                "cashAccount" to day.cashAccountId?.value, "difference" to day.difference, "count" to day.countId?.value)),
         ),
     )
 }

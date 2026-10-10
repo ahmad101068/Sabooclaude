@@ -123,7 +123,7 @@ object PurchaseScreens {
         if (qty == null || value == null || qty.isZero) null else Ratio.mulDiv(value.rial, Quantity.SCALE, qty.micros)
 
     private fun changeText(previous: Long, now: Long): String {
-        val bp = if (previous == 0L) 0 else (now - previous) * 10_000 / previous
+        val bp = ir.sabou.kernel.Ratio.changeBp(previous, now) ?: return "قیمت اول"
         return (if (bp > 0) "+" else if (bp < 0) "−" else "") + Fa.percent(kotlin.math.abs(bp))
     }
 
@@ -294,7 +294,7 @@ object PurchaseScreens {
                         if (price != null && item != null) {
                             val text = "قیمت هر ${unitName(item.unit)}: ${Fa.rial(price)} ریال" +
                                 (last?.let { " · خرید قبلی ${Fa.rial(it)} (${changeText(it, price)})" } ?: "")
-                            val far = last != null && last > 0 && kotlin.math.abs(price - last) * 100 / last >= 5
+                            val far = last != null && (ir.sabou.kernel.Ratio.changeBp(last, price)?.let { kotlin.math.abs(it) >= 500 } ?: false)
                             Text(text, style = SabouType.caption, color = if (far) Sabou.colors.danger else Sabou.colors.muted)
                         }
                         if (item != null && supplier != null && item.approvedSupplierIds.isNotEmpty() && supplier !in item.approvedSupplierIds) {
@@ -666,7 +666,7 @@ object PurchaseScreens {
                         SCard(onClick = { nav.go(Route.PurchaseDetail(c.invoiceId)) }) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("${c.item.name} · ${c.supplier}", style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
-                                Chip(changeText(c.previousPrice, c.price), if (c.changeBp > 0) ChipKind.DANGER else ChipKind.PRIMARY)
+                                Chip(changeText(c.previousPrice, c.price), if ((c.changeBp ?: 1) > 0) ChipKind.DANGER else ChipKind.PRIMARY)
                             }
                             Text("هر ${unitName(c.item.unit)}: ${Fa.rial(c.previousPrice)} (${Fa.date(c.previousDate)}) ← ${Fa.rial(c.price)} (${Fa.date(c.date)})",
                                 style = SabouType.caption, color = Sabou.colors.muted)
@@ -1169,7 +1169,12 @@ object PurchaseScreens {
                         if (loc == null) EmptyState("انباری برای این شعبه تعریف نشده است.")
                         else {
                             val result by load(session, loc, lines) { buying.suggestions(loc, lines, session.today, minutesNow()) }
-                            Loaded(result) { groups ->
+                            Loaded(result) { suggested ->
+                                val groups = suggested.groups
+                                // What could not be broken down is said, never silently left out of the order.
+                                suggested.problems.forEach { pr ->
+                                    Banner("«${pr.name}»: ${pr.detail}", if (pr.kind == ir.sabou.core.RecipeProblem.Kind.CYCLE) ChipKind.DANGER else ChipKind.ACCENT)
+                                }
                                 if (groups.isEmpty()) EmptyState("فعلاً خریدی لازم نیست. برای کالاها «سطح مطلوب» تعریف کنید یا غذاهای برنامه را وارد کنید.")
                                 groups.forEach { g ->
                                     SCard {
@@ -1192,7 +1197,7 @@ object PurchaseScreens {
                                     }
                                 }
                                 if (groups.isNotEmpty()) ExportButtons("پیشنهاد-خرید") {
-                                    listOf(ReportTables.suggestions(buying.suggestions(loc, lines, session.today, minutesNow()), locations.firstOrNull { it.id == loc }?.name ?: "", session.today))
+                                    listOf(ReportTables.suggestions(buying.suggestions(loc, lines, session.today, minutesNow()).groups, locations.firstOrNull { it.id == loc }?.name ?: "", session.today))
                                 }
                             }
                         }

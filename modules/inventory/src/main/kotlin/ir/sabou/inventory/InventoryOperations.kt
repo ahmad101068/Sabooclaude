@@ -219,6 +219,11 @@ class InventoryOperations(
         ensure(!cmd.outputQuantity.isZero) { DomainError.InvalidInput("output", "مقدار تولید باید بیشتر از صفر باشد.") }
         validateLines(cmd.lines)
         ensure(cmd.lines.none { it.itemId == item.id }) { DomainError.InvalidInput("lines", "کالای آماده نمی‌تواند ماده‌ی اولیه‌ی خودش باشد.") }
+        // No recipe may (indirectly) use the item it makes: production and costing would never end.
+        PrepGraph(recipes) { items.byId(it)?.prepared == true }.cycleWith(item.id, cmd.lines, cmd.effectiveFrom)?.let { cycle ->
+            val names = cycle.joinToString(" ← ") { items.byId(it)?.name ?: "؟" }
+            throw DomainException(DomainError.InvalidInput("lines", "این رسپی چرخه می‌سازد: $names"))
+        }
         val existing = recipes.prepVersions(item.id)
         ensure(existing.none { it.effectiveFrom >= cmd.effectiveFrom }) { DomainError.InvalidState("RECIPE", "NOT_AFTER_LATEST_VERSION") }
         val version = PrepRecipe(GlobalId.new(), item.id, (existing.maxOfOrNull { it.version } ?: 0) + 1, cmd.effectiveFrom, cmd.outputQuantity, cmd.lines)
