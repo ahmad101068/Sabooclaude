@@ -50,3 +50,14 @@ class InMemorySalesStore : SalesStore, Transactional {
         days.clear(); days.putAll(l[3] as Map<Pair<Scope.Branch, Long>, SalesDay>)
     }
 }
+
+class InMemoryMenuPriceStore : ir.sabou.sales.MenuPriceStore, Transactional {
+    private val prices = ArrayList<ir.sabou.sales.MenuPrice>()
+    override fun versions(menuItemId: GlobalId) = prices.filter { it.menuItemId == menuItemId }
+    override fun all() = prices.toList()
+    override fun save(price: ir.sabou.sales.MenuPrice) { prices += price }
+    override fun nextSequence(): Long = (prices.maxOfOrNull { it.sequence } ?: 0L) + 1
+    override fun snapshot(): Any = ArrayList(prices)
+    @Suppress("UNCHECKED_CAST")
+    override fun restore(snapshot: Any) { prices.clear(); prices.addAll(snapshot as List<ir.sabou.sales.MenuPrice>) }
+}
