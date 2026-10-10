@@ -70,7 +70,14 @@ enum class InvoiceStatus { POSTED, REVERSED }
 /** Goods only (including held lines), expense lines only, or both. */
 enum class InvoiceCategory { GOODS, EXPENSES, MIXED }
 
-data class Approval(val userId: GlobalId, val name: String, val atEpochMillis: Long)
+/** One approval step. [self] = the person approved an invoice they recorded themselves (owner only), with [reason]. */
+data class Approval(val userId: GlobalId, val name: String, val atEpochMillis: Long, val self: Boolean = false, val reason: String? = null)
+
+/**
+ * Whether the owner may approve an invoice they recorded themselves, and up to which total. A self-approval
+ * always needs a reason. Default: allowed without a cap (a one-person business), which the owner can tighten.
+ */
+data class SelfApprovalPolicy(val allowed: Boolean = true, val maxAmount: Money? = null)
 
 /**
  * An invoice matching every non-null condition needs [steps] approvals (by different people, none of
@@ -95,6 +102,8 @@ interface ApprovalRuleStore {
     fun all(): List<ApprovalRule>
     fun byId(id: GlobalId): ApprovalRule?
     fun save(rule: ApprovalRule)
+    fun selfApproval(): SelfApprovalPolicy
+    fun saveSelfApproval(policy: SelfApprovalPolicy)
 }
 
 data class PurchaseInvoice(

@@ -35,11 +35,19 @@ data class SaveApprovalRule(
     override fun fingerprint() = "$ruleId|$name|$branch|$supplierId|$category|${minAmount.rial}|$steps|$isActive"
 }
 
-/** One approval step on an invoice. */
+/** One approval step on an invoice. [reason] is required when the owner approves an invoice they recorded. */
 @NoDocument
-data class ApproveInvoice(override val commandId: GlobalId, override val scope: Scope.Branch, val invoiceId: GlobalId) : Command {
+data class ApproveInvoice(override val commandId: GlobalId, override val scope: Scope.Branch, val invoiceId: GlobalId, val reason: String? = null) : Command {
     override val requiredPermission = Permission.PURCHASE_APPROVE
-    override fun fingerprint() = "$scope|$invoiceId"
+    override fun fingerprint() = "$scope|$invoiceId|${reason?.trim()}"
+}
+
+/** The owner's self-approval policy (owner only). */
+@NoDocument
+data class SetSelfApprovalPolicy(override val commandId: GlobalId, val allowed: Boolean, val maxAmount: Money?) : Command {
+    override val requiredPermission = Permission.APPROVAL_RULES
+    override val scope: Scope = Scope.Organization
+    override fun fingerprint() = "$allowed|${maxAmount?.rial}"
 }
 
 /** Takes every approval back (only while nothing has been paid). */
@@ -72,11 +80,29 @@ class ApprovalOperations(
         val me = ctx.actor.userId
         // Separation of duties: each step by someone else, and not by whoever recorded it (the owner excepted).
         ensure(invoice.approvals.none { it.userId == me }) { DomainError.InvalidState("PURCHASE_INVOICE", "SAME_APPROVER") }
-        ensure(invoice.recordedBy != me || ctx.actor.role == Role.OWNER) { DomainError.InvalidState("PURCHASE_INVOICE", "RECORDER_CANNOT_APPROVE") }
-        val approval = Approval(me, ctx.actor.displayName, ctx.nowEpochMillis)
+        val self = invoice.recordedBy == me
+        ensure(!self || ctx.actor.role == Role.OWNER) { DomainError.InvalidState("PURCHASE_INVOICE", "RECORDER_CANNOT_APPROVE") }
+        val reason = cmd.reason?.trim()?.takeIf { self }
+        if (self) {
+            // The owner approving their own invoice: only as the policy allows, and always saying why.
+            val policy = rules.selfApproval()
+            ensure(policy.allowed) { DomainError.InvalidState("PURCHASE_INVOICE", "SELF_APPROVAL_DISABLED") }
+            ensure(policy.maxAmount == null || invoice.total <= policy.maxAmount) { DomainError.InvalidState("PURCHASE_INVOICE", "SELF_APPROVAL_OVER_LIMIT") }
+            ensure((reason?.length ?: 0) in 3..300) { DomainError.InvalidInput("reason", "تأیید فاکتوری که خودتان ثبت کرده‌اید دلیل لازم دارد.") }
+        }
+        val approval = Approval(me, ctx.actor.displayName, ctx.nowEpochMillis, self, reason)
         purchases.saveInvoice(invoice.copy(approvals = invoice.approvals + approval))
-        ctx.audit(AuditDraft("PURCHASE_INVOICE_APPROVE", "PURCHASE_INVOICE", invoice.id.value, "step=${invoice.approvals.size + 1}/${invoice.requiredApprovals}"))
+        ctx.audit(AuditDraft("PURCHASE_INVOICE_APPROVE", "PURCHASE_INVOICE", invoice.id.value,
+            "step=${invoice.approvals.size + 1}/${invoice.requiredApprovals}" + if (self) ";self;reason=$reason" else ""))
         invoice.id
+    }
+
+    fun setSelfApproval(c: SetSelfApprovalPolicy): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
+        ensure(cmd.maxAmount?.isZero != true) { DomainError.InvalidInput("amount", "سقف باید بیشتر از صفر باشد؛ برای منع کامل، تأیید خودی را خاموش کنید.") }
+        val policy = SelfApprovalPolicy(cmd.allowed, cmd.maxAmount)
+        rules.saveSelfApproval(policy)
+        ctx.audit(AuditDraft("SELF_APPROVAL_POLICY", "APPROVAL_POLICY", "self", "allowed=${policy.allowed};max=${policy.maxAmount?.rial}"))
+        GlobalId.new()
     }
 
     fun unapprove(c: UnapproveInvoice): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
