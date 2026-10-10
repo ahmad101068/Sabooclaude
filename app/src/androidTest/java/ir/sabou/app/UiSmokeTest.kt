@@ -38,7 +38,7 @@ class UiSmokeTest {
 
     @Test fun everyPageOpensAndItsDraftCanBeSaved() {
         val container = app.container
-        container.factoryReset(null)
+        TestData.startClean(instrumentation.targetContext, container)
         val core = (container.state.value as AppState.Ready).core
         core.bootstrap("شعبه آزمایشی", "مالک", "owner", "123456".toCharArray())
         val actor = checkNotNull(core.session.currentActor())

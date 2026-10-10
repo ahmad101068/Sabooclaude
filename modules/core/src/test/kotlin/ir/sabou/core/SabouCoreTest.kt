@@ -313,4 +313,57 @@ class SabouCoreTest {
         assertEquals(listOf(w.branch.branchId), core.overview.branches().map { it.id })
         assertTrue(assertFailsWith<DomainException> { core.overview.payables() }.error.code.startsWith("PERMISSION_DENIED"))
     }
+
+    @Test fun removingTheAnchorFileDoesNotLetAnOlderCopyIn() {
+        val core = boot()
+        setUp(core)
+        assertEquals(StartupVerdict.Healthy, core.verifyStartup())
+        // Same database, anchor file gone (InMemoryAnchorStore() = empty store): refused, not "first start".
+        val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:$file")).also { open += it }
+        val verdict = SabouCore.open(db, InMemoryAnchorStore(), clock).verifyStartup()
+        assertIs<StartupVerdict.RollbackDetected>(verdict)
+        assertEquals("ANCHOR_MISSING", verdict.detail)
+        // A brand-new database with no anchor is a genuine first start.
+        assertEquals(StartupVerdict.Healthy, SabouCore.open(JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("new.db")}")).also { open += it },
+            InMemoryAnchorStore(), clock).verifyStartup())
+    }
+
+    @Test fun anInterruptedReplacementKeepsTheOldDatabaseUsableAndTheAnnouncingCoreStopsWriting() {
+        val core = boot()
+        val w = setUp(core)
+        assertEquals(StartupVerdict.Healthy, core.verifyStartup())
+        core.acceptReplacement(SabouCore.newEpoch(), "RESTORE")
+        // The announcing core accepts no further write: nothing can land in a file that is being replaced.
+        val sealed = assertFailsWith<DomainException> {
+            core.treasury.receipt(RecordReceipt(id(), w.branch, w.cash, ReceiptPurpose.OTHER_INCOME, rial(1), day, "x"))
+        }
+        assertEquals("INVALID_STATE:DATABASE:SEALED:RESTORE", sealed.error.code)
+        // The process dies before the swap: the untouched database opens normally (no lockout).
+        val reopened = boot()
+        assertEquals(StartupVerdict.Healthy, reopened.verifyStartup())
+        reopened.identity.login("owner", "123456".toCharArray())
+        reopened.treasury.receipt(RecordReceipt(id(), w.branch, w.cash, ReceiptPurpose.OTHER_INCOME, rial(1), day, "after"))
+    }
+
+    @Test fun aDatabaseWithoutUsersMayBeReplacedWithoutSigningIn() {
+        val core = boot()
+        assertEquals(StartupVerdict.Healthy, core.verifyStartup())
+        assertTrue(core.identity.needsBootstrap())
+        core.acceptReplacement(SabouCore.newEpoch(), "RESTORE")   // first run on a new phone: restore a backup
+        assertTrue(core.isSealed)
+    }
+
+    @Test fun exclusiveWaitsForTheWriteInProgressAndKeepsNewOnesOut() {
+        val core = boot()
+        setUp(core)
+        val inside = java.util.concurrent.CountDownLatch(1)
+        val order = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val writer = Thread {
+            core.unitOfWork.transaction { inside.countDown(); Thread.sleep(300); order += "write-end" }
+        }.also { it.start() }
+        inside.await()
+        core.exclusive { order += "exclusive" }
+        writer.join()
+        assertEquals(listOf("write-end", "exclusive"), order)
+    }
 }

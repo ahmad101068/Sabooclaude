@@ -598,12 +598,12 @@ object MeScreens {
             Confirm("بازیابی پشتیبان؟", "همه داده‌های فعلی با پشتیبان جایگزین می‌شود و باید دوباره وارد شوید.", "بازیابی کن", onConfirm = {
                 val uri = restoreUri!!
                 val pw = restorePassword.toCharArray()
-                work("بازیابی انجام شد.") { container.restore(session.core, pw, uri) }
+                work("بازیابی انجام شد.") { container.restore(pw, uri) }
             }, onDismiss = { confirmRestore = false }, danger = true)
         }
         if (confirmReset) {
             ir.sabou.app.ui.EraseConfirm(onConfirm = {
-                work("همه داده‌ها پاک شد.") { container.factoryReset(session.core) }
+                work("برنامه از نو شروع شد؛ داده‌های قبلی روی دستگاه کنار گذاشته شد.") { container.factoryReset() }
             }, onDismiss = { confirmReset = false })
         }
     }

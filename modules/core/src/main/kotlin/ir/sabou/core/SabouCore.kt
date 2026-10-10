@@ -144,7 +144,7 @@ class SabouCore private constructor(
      * the app can show a recovery screen instead of crashing. [verifyAuditFull] re-checks everything.
      */
     fun verifyStartup(): StartupVerdict {
-        val verdict = integrity.verify(epoch)
+        val verdict = integrity.verify(epoch, anchoredBefore = meta.get(ANCHORED) == "true")
         if (verdict != StartupVerdict.Healthy) return verdict
         return try {
             val anchor = anchors.latest()
@@ -157,6 +157,8 @@ class SabouCore private constructor(
             AuditTrail(auditStore).verify(from)
             if (from == null) unitOfWork.transaction { meta.put(LAST_FULL_VERIFY, clock.nowEpochMillis().toString()) }
             integrity.recordCheckpoint(epoch, clock.nowEpochMillis())
+            // From now on this database expects an anchor: its absence later means the anchor file was removed.
+            if (meta.get(ANCHORED) != "true") unitOfWork.transaction { meta.put(ANCHORED, "true") }
             applyEventRetention()
             StartupVerdict.Healthy
         } catch (e: ir.sabou.kernel.DomainException) {
@@ -197,14 +199,24 @@ class SabouCore private constructor(
     }
 
     /**
-     * Records the rebase anchor for a database that is about to replace this one. Only a signed-in user
-     * holding the matching permission may announce a restore or reset; the decision is audited first.
+     * Announces that this database is about to be replaced (restore or factory reset) and closes it to writes.
+     * Only a signed-in user holding the matching permission may do it, and the decision is audited first — except
+     * on a database without any user yet (first run), where there is nothing to protect. The anchor accepts both
+     * this database and the new one until the next startup checkpoint, so an interrupted swap is never a lockout.
+     * After this call the core refuses every write; the caller replaces the file and opens a new core.
      */
-    fun acceptReplacement(newEpoch: String, reason: String) {
+    fun acceptReplacement(newEpoch: String, reason: String) = unitOfWork.exclusive {
         val permission = if (reason == "FACTORY_RESET") ir.sabou.platform.Permission.FACTORY_RESET else ir.sabou.platform.Permission.BACKUP_RESTORE
-        administrative(permission, "DATABASE_REPLACE", "$reason:$newEpoch")
-        integrity.recordRebase(newEpoch, reason, clock.nowEpochMillis())
+        if (!identity.needsBootstrap()) administrative(permission, "DATABASE_REPLACE", "$reason:$newEpoch")
+        integrity.recordRebase(newEpoch, epoch, reason, clock.nowEpochMillis())
+        unitOfWork.seal(reason)
     }
+
+    /** Runs [block] (e.g. exporting the database) while no write is in progress or can start. */
+    fun <T> exclusive(block: () -> T): T = unitOfWork.exclusive(block)
+
+    /** True once [acceptReplacement] succeeded: this core no longer accepts writes. */
+    val isSealed: Boolean get() = unitOfWork.isSealed
 
     /** Checks and audits taking a full backup. Call before exporting the database. */
     fun authorizeBackup() {
@@ -264,6 +276,8 @@ class SabouCore private constructor(
 
         const val SYNC_ENABLED = "sync_enabled"
         const val LAST_FULL_VERIFY = "audit_full_verified_at"
+        /** Set once the first checkpoint anchor has been written for this database. */
+        const val ANCHORED = "anchored"
         const val FULL_VERIFY_DAYS = 7L
         const val BACKGROUND_VERIFY_HOURS = 24L
         const val LOCAL_EVENT_DAYS = 90L

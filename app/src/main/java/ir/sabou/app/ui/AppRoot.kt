@@ -91,12 +91,15 @@ fun AppRoot(container: AppContainer, ui: UiState) {
             AppState.Opening -> Splash()
             is AppState.Failed -> RecoveryScreen(
                 container, s.detail, title = "برنامه باز نشد",
-                explanation = "پایگاه داده یا کلید امن دستگاه در دسترس نیست. دوباره تلاش کنید؛ اگر تکرار شد، از پشتیبان بازیابی کنید.",
+                explanation = if (s.permanent) "کلید امن دستگاه از دست رفته یا فایل داده قابل خواندن نیست. از پشتیبان بازیابی کنید یا از نو شروع کنید؛ فایل فعلی پاک نمی‌شود و کنار گذاشته می‌شود."
+                else "پایگاه داده یا کلید امن دستگاه فعلاً در دسترس نیست. دوباره تلاش کنید؛ اگر تکرار شد گوشی را یک بار خاموش و روشن کنید. هیچ داده‌ای پاک نمی‌شود.",
                 retry = { container.open() },
+                replaceable = s.permanent,
             )
             is AppState.Recovery -> RecoveryScreen(
                 container, s.detail, title = "بررسی یکپارچگی ناموفق بود",
-                explanation = "داده‌های این دستگاه با آخرین وضعیت ثبت‌شده هم‌خوانی ندارد. ممکن است پایگاه داده با نسخه قدیمی‌تری جایگزین یا دست‌کاری شده باشد.",
+                explanation = "داده‌های این دستگاه با آخرین وضعیت ثبت‌شده هم‌خوانی ندارد. ممکن است پایگاه داده با نسخه قدیمی‌تری جایگزین یا دست‌کاری شده باشد. برای بازیابی یا شروع از نو، مالک باید وارد شود.",
+                ownerCore = s.core,
             )
             is AppState.Ready -> {
                 val session = ui.session
@@ -136,13 +139,20 @@ private fun Splash() {
 }
 
 /**
- * Shown when the database does not continue the recorded history (e.g. it was replaced with an older
- * copy) or the audit chain failed. Nothing is lost silently: the user restores a backup or starts over.
+ * Shown when the database cannot be opened or does not continue the recorded history. Nothing is ever lost
+ * silently: a failure that may pass offers only "try again"; replacing the data is offered without signing in
+ * only when the database is provably unreadable ([replaceable]); when it opens ([ownerCore]) an owner signs in
+ * first. Whatever is replaced is kept in quarantine on the device.
  */
 @Composable
-private fun RecoveryScreen(container: AppContainer, detail: String, title: String, explanation: String, retry: (() -> Unit)? = null) {
+private fun RecoveryScreen(
+    container: AppContainer, detail: String, title: String, explanation: String,
+    retry: (() -> Unit)? = null, replaceable: Boolean = false, ownerCore: SabouCore? = null,
+) {
     val scope = rememberCoroutineScope()
     var confirmReset by remember { mutableStateOf(false) }
+    var resetError by remember { mutableStateOf<String?>(null) }
+    var signedIn by remember(ownerCore) { mutableStateOf(false) }
 
     Page {
         Spacer(Modifier.height(24.dp))
@@ -150,14 +160,47 @@ private fun RecoveryScreen(container: AppContainer, detail: String, title: Strin
         Banner(explanation)
         Text("کد: $detail", style = SabouType.caption, color = Sabou.colors.muted)
         if (retry != null) PrimaryButton("تلاش دوباره", { scope.launch(Dispatchers.IO) { retry() } })
-        RestoreCard(container)
-        FormCard("شروع از نو") {
-            Text("همه داده‌های این دستگاه پاک می‌شود و برنامه مثل نصب اول باز می‌شود.", style = SabouType.body, color = Sabou.colors.muted)
-            SecondaryButton("پاک کردن همه داده‌ها", { confirmReset = true }, danger = true)
+        if (ownerCore != null && !signedIn) OwnerSignIn(ownerCore) { signedIn = true }
+        if (replaceable || signedIn) {
+            RestoreCard(container)
+            FormCard("شروع از نو") {
+                Text("برنامه مثل نصب اول باز می‌شود. داده‌های فعلی پاک نمی‌شوند و روی همین دستگاه کنار گذاشته می‌شوند.", style = SabouType.body, color = Sabou.colors.muted)
+                resetError?.let { Banner(it) }
+                SecondaryButton("شروع از نو", { confirmReset = true }, danger = true)
+            }
         }
     }
     if (confirmReset) {
-        EraseConfirm(onConfirm = { scope.launch(Dispatchers.IO) { container.factoryReset(null) } }, onDismiss = { confirmReset = false })
+        EraseConfirm(onConfirm = {
+            scope.launch {
+                resetError = withContext(Dispatchers.IO) { runCatching { container.factoryReset() }.exceptionOrNull()?.let(Messages::of) }
+            }
+        }, onDismiss = { confirmReset = false })
+    }
+}
+
+/** An owner proves who they are before data is replaced on the recovery screen. */
+@Composable
+private fun OwnerSignIn(core: SabouCore, onOwner: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var username by remember { mutableStateOf("") }
+    var pin by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    FormCard("ورود مالک") {
+        TextInput("نام کاربری", username, { username = it })
+        TextInput("رمز", pin, { pin = it }, keyboard = KeyboardType.NumberPassword, secret = true)
+        error?.let { Banner(it) }
+        PrimaryButton("ورود", {
+            busy = true; error = null
+            scope.launch {
+                val result = withContext(Dispatchers.IO) { runCatching { core.identity.login(username, Fa.latinDigits(pin).toCharArray()) } }
+                busy = false; pin = ""
+                result.onSuccess { actor ->
+                    if (actor.isOwner) onOwner() else { core.identity.logout(); error = "فقط مالک می‌تواند داده‌ها را بازیابی یا از نو شروع کند." }
+                }.onFailure { error = "نام کاربری یا رمز درست نیست." }
+            }
+        }, enabled = username.isNotBlank() && pin.length >= 6, busy = busy)
     }
 }
 
@@ -176,10 +219,10 @@ internal fun EraseConfirm(onConfirm: () -> Unit, onDismiss: () -> Unit) {
     val ready = typed.trim().replace('ك', 'ک').replace('ي', 'ی') == ERASE_WORD && seconds == 0
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("پاک کردن همه داده‌ها", style = SabouType.section, color = Sabou.colors.danger) },
+        title = { Text("شروع از نو", style = SabouType.section, color = Sabou.colors.danger) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("همه فروش‌ها، حساب‌ها، انبار و حقوق این دستگاه برای همیشه پاک می‌شود. اگر فایل پشتیبان دارید، به‌جای این کار «بازیابی» را بزنید.",
+                Text("برنامه با داده‌های خالی باز می‌شود. داده‌های فعلی روی همین دستگاه کنار گذاشته می‌شوند ولی در برنامه دیده نمی‌شوند. اگر فایل پشتیبان دارید، به‌جای این کار «بازیابی» را بزنید.",
                     style = SabouType.body)
                 TextInput("برای تأیید بنویسید: $ERASE_WORD", typed, { typed = it })
             }
@@ -216,7 +259,7 @@ private fun RestoreCard(container: AppContainer, title: String = "بازیابی
             busy = true; error = null
             scope.launch {
                 error = withContext(Dispatchers.IO) {
-                    runCatching { container.restore(null, password.toCharArray(), source) }.exceptionOrNull()?.let(::restoreMessage)
+                    runCatching { container.restore(password.toCharArray(), source) }.exceptionOrNull()?.let(::restoreMessage)
                 }
                 busy = false
             }
@@ -226,6 +269,7 @@ private fun RestoreCard(container: AppContainer, title: String = "بازیابی
 
 internal fun restoreMessage(e: Throwable): String = when {
     e is ir.sabou.backup.BackupFormatException && e.message == "authentication_failed" -> "رمز اشتباه است یا فایل آسیب دیده است."
+    e is ir.sabou.backup.BackupFormatException && e.message == "unsupported_payload" -> "این فایل پشتیبان قدیمی است و پشتیبانی نمی‌شود."
     e is ir.sabou.backup.BackupFormatException -> "این فایل پشتیبان معتبر سابو نیست."
     e.message?.startsWith("BACKUP_INTEGRITY") == true -> "یکپارچگی داده‌های این فایل پشتیبان تأیید نشد."
     e.message?.startsWith("DATABASE_NEWER_THAN_APP") == true -> "این پشتیبان با نسخه جدیدتری از برنامه ساخته شده است؛ ابتدا برنامه را به‌روز کنید."

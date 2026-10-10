@@ -4,11 +4,16 @@ import android.content.Context
 import android.net.Uri
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
+import ir.sabou.backup.BackupFormatException
 import ir.sabou.backup.StreamingBackupCodec
 import ir.sabou.core.SabouCore
 import ir.sabou.kernel.Clock
+import ir.sabou.kernel.DomainError
+import ir.sabou.kernel.DomainException
+import ir.sabou.platform.IntegrityGuard
 import ir.sabou.platform.StartupVerdict
 import ir.sabou.platform.memory.InMemoryAnchorStore
+import ir.sabou.platform.memory.InMemoryAuditStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
@@ -17,21 +22,40 @@ import java.io.File
 sealed interface AppState {
     data object Opening : AppState
     data class Ready(val core: SabouCore) : AppState
-    /** The database does not continue the anchored history, or the audit chain failed. */
-    data class Recovery(val detail: String) : AppState
-    data class Failed(val detail: String) : AppState
+    /**
+     * The database opens but does not continue the anchored history, or its audit chain failed. Its [core] is
+     * available only so that an owner can sign in and authorize a restore or reset; no business screen uses it.
+     */
+    data class Recovery(val detail: String, val core: SabouCore) : AppState
+    /**
+     * The database could not be opened. [permanent]: the key is provably lost or the file is not a readable
+     * database — only then may data be replaced without signing in. Otherwise the failure may pass (retry).
+     */
+    data class Failed(val detail: String, val permanent: Boolean) : AppState
 }
 
 /**
  * Owns the encrypted database and the single SabouCore. All methods block: call them off the main thread.
+ *
+ * Replacing the database (restore, factory reset) follows one crash-safe protocol:
+ * 1. authorize, announce the new epoch as a PENDING rebase (old and new database both accepted) and seal the
+ *    current core, so no write can start or be in progress;
+ * 2. keep the current database in quarantine (with its wrapped key) — data is never deleted;
+ * 3. switch files with an atomic rename (restore) or move the old file away (reset);
+ * 4. open; the first healthy startup records a checkpoint that settles which database is genuine.
+ * A crash at any point leaves either the old or the new database, and either one opens normally.
  */
 class AppContainer(private val context: Context) {
     private val keys = DeviceKeys(context)
     private val anchors = FileAnchorStore(File(context.noBackupFilesDir, "integrity.anchors"), keys)
+    private val quarantine = File(context.noBackupFilesDir, QUARANTINE_DIR)
     private var helper: SupportSQLiteOpenHelper? = null
 
     private val mutableState = MutableStateFlow<AppState>(AppState.Opening)
     val state: StateFlow<AppState> = mutableState
+
+    /** Test hook: called after each step of a replacement; a device test throws here to simulate a crash. */
+    @Volatile internal var faultPoint: (String) -> Unit = {}
 
     init {
         System.loadLibrary("sqlcipher")
@@ -41,8 +65,8 @@ class AppContainer(private val context: Context) {
     @Synchronized
     fun ensureOpen() {
         if (helper == null && state.value is AppState.Opening) {
-            // A crash in the middle of a backup or restore must not leave a plaintext copy behind.
-            File(context.cacheDir, BACKUP_PLAIN).delete()   // left by versions before payload v2
+            // A crash in the middle of a backup or restore must not leave a copy behind. The live database is
+            // never among these: an unfinished restore simply keeps the database that is still in place.
             File(context.cacheDir, BACKUP_SEALED).delete()
             context.deleteDatabase(RESTORE_CANDIDATE)
             context.deleteDatabase(RESTORE_STAGED)
@@ -55,14 +79,17 @@ class AppContainer(private val context: Context) {
         close()   // re-opening (retry, after restore/reset) never leaks the previous connection
         mutableState.value = AppState.Opening
         mutableState.value = try {
+            // A brand-new database takes the epoch announced by an unfinished reset (crash after the old file
+            // was moved away), so the interrupted reset completes instead of looking like a swap.
+            val epoch = newEpoch ?: runCatching { IntegrityGuard(anchors, InMemoryAuditStore()).pendingEpoch() }.getOrNull()
             val db = openHelper(DB_NAME, keys.databasePassphrase()).also { helper = it }.writableDatabase
-            val core = SabouCore.open(AndroidSqlDatabase(db), anchors, Clock.SYSTEM, newDatabaseEpoch = newEpoch)
+            val core = SabouCore.open(AndroidSqlDatabase(db), anchors, Clock.SYSTEM, newDatabaseEpoch = epoch)
             when (val verdict = runCatching { core.verifyStartup() }.getOrElse { StartupVerdict.RollbackDetected(it.message ?: "ANCHOR") }) {
                 StartupVerdict.Healthy -> AppState.Ready(core).also { verifyInBackgroundIfDue(core) }
-                is StartupVerdict.RollbackDetected -> AppState.Recovery(verdict.detail)
+                is StartupVerdict.RollbackDetected -> AppState.Recovery(verdict.detail, core)
             }
         } catch (e: Throwable) {
-            AppState.Failed(e.message ?: e::class.java.simpleName)
+            AppState.Failed(e.message ?: e::class.java.simpleName, permanent = isPermanentOpenFailure(e))
         }
     }
 
@@ -161,13 +188,37 @@ class AppContainer(private val context: Context) {
         helper = null
     }
 
+    /** The core of the current database, whether healthy or in recovery. */
+    private fun currentCore(): SabouCore? = when (val s = state.value) {
+        is AppState.Ready -> s.core
+        is AppState.Recovery -> s.core
+        else -> null
+    }
+
+    /**
+     * Who may replace the database. With a readable database the core decides (signed-in user with the
+     * permission, or a database without users yet). Without one, only a provably unreadable database may be
+     * replaced without signing in; a failure that may pass must be retried, never answered by erasing.
+     */
+    private fun announceReplacement(newEpoch: String, reason: String) {
+        val core = currentCore()
+        if (core != null) {
+            core.acceptReplacement(newEpoch, reason)
+            return
+        }
+        val failed = state.value as? AppState.Failed
+        if (failed == null || !failed.permanent) throw DomainException(DomainError.InvalidState("DATABASE", "NOT_REPLACEABLE_NOW"))
+        IntegrityGuard(anchors, InMemoryAuditStore()).recordRebase(newEpoch, "", reason, System.currentTimeMillis())
+    }
+
     /**
      * Writes an encrypted, password-protected backup (format 4) of the whole database to [target].
-     * The core checks the signed-in user's permission, verifies the full audit chain and audits it first.
+     * The core checks the signed-in user's permission, verifies the full audit chain and audits it first; the
+     * export then runs with every write held back, so the copy is one consistent moment of the books.
      *
      * No plaintext copy ever touches the disk: the database is exported into a temporary SQLCipher file
      * under a fresh random key, and the backup carries that key and file inside its password encryption
-     * (payload v2: MAGIC + key + encrypted database).
+     * (payload: MAGIC + key + encrypted database).
      */
     @Synchronized
     fun backup(core: SabouCore, password: CharArray, target: Uri) {
@@ -176,11 +227,13 @@ class AppContainer(private val context: Context) {
         val sealed = File(context.cacheDir, BACKUP_SEALED).also { it.delete() }
         val exportKey = randomHexKey()
         try {
-            db.execSQL("ATTACH DATABASE ? AS export KEY '$exportKey'", arrayOf<Any?>(sealed.absolutePath))
-            try {
-                db.query("SELECT sqlcipher_export('export')").use { it.moveToFirst() }
-            } finally {
-                db.execSQL("DETACH DATABASE export")
+            core.exclusive {
+                db.execSQL("ATTACH DATABASE ? AS export KEY '$exportKey'", arrayOf<Any?>(sealed.absolutePath))
+                try {
+                    db.query("SELECT sqlcipher_export('export')").use { it.moveToFirst() }
+                } finally {
+                    db.execSQL("DETACH DATABASE export")
+                }
             }
             val out = context.contentResolver.openOutputStream(target, "w") ?: error("BACKUP_TARGET_UNAVAILABLE")
             out.use { o ->
@@ -198,8 +251,9 @@ class AppContainer(private val context: Context) {
         ByteArray(32).also(java.security.SecureRandom()::nextBytes).joinToString("") { "%02x".format(it) }
 
     /**
-     * Writes the decrypted payload to [file]: v2 (MAGIC + key + SQLCipher file) keeps the file encrypted
-     * and returns its key; a v1 payload (a plain SQLite file, older backups) is written as is → "".
+     * Writes the decrypted payload (MAGIC + key + SQLCipher file) to [file] and keeps the key. Anything else is
+     * refused: the old plain-SQLite payload (v1) would have to be written to disk unencrypted, and this product
+     * has no backups of that kind to restore.
      */
     private class PayloadSplitter(private val file: java.io.OutputStream) : java.io.OutputStream() {
         private val head = java.io.ByteArrayOutputStream()
@@ -216,69 +270,73 @@ class AppContainer(private val context: Context) {
         private fun decide() {
             decided = true
             val bytes = head.toByteArray()
-            if (bytes.size >= HEADER && bytes.copyOfRange(0, PAYLOAD_MAGIC.size).contentEquals(PAYLOAD_MAGIC)) {
-                key = String(bytes, PAYLOAD_MAGIC.size, KEY_CHARS, Charsets.US_ASCII)
-                require(key.all { it in '0'..'9' || it in 'a'..'f' }) { "bad_backup_key" }
-                file.write(bytes, HEADER, bytes.size - HEADER)
-            } else {
-                file.write(bytes)
+            if (bytes.size < HEADER || !bytes.copyOfRange(0, PAYLOAD_MAGIC.size).contentEquals(PAYLOAD_MAGIC)) {
+                throw BackupFormatException("unsupported_payload")
             }
+            key = String(bytes, PAYLOAD_MAGIC.size, KEY_CHARS, Charsets.US_ASCII)
+            if (!key.all { it in '0'..'9' || it in 'a'..'f' }) throw BackupFormatException("bad_backup_key")
+            file.write(bytes, HEADER, bytes.size - HEADER)
         }
         override fun flush() = file.flush()
         override fun close() {
-            if (!decided) decide()
-            file.close()
+            try {
+                if (!decided) decide()
+            } finally {
+                file.close()
+            }
         }
         companion object { const val HEADER = 8 + KEY_CHARS }
     }
 
     /**
-     * Restores a backup: decrypt → open and fully verify the candidate on its own → copy it into a new
-     * database encrypted with this device's key → announce the replacement (REBASE anchor) → swap files.
-     * Nothing of the current database is touched until the candidate has passed every check.
+     * Restores a backup: decrypt → verify the candidate on its own (schema, full audit chain) → copy it into a
+     * new database encrypted with this device's key → announce + seal → quarantine the current database →
+     * atomic rename → open. Nothing of the current database is touched until the candidate has passed every
+     * check, and the current database is kept in quarantine afterwards.
      */
     @Synchronized
-    fun restore(current: SabouCore?, password: CharArray, source: Uri) {
+    fun restore(password: CharArray, source: Uri) {
         context.deleteDatabase(RESTORE_CANDIDATE)
         context.deleteDatabase(RESTORE_STAGED)
-        val plain = context.getDatabasePath(RESTORE_CANDIDATE).also { it.parentFile?.mkdirs() }
-        var payloadKey = ""
+        val candidateFile = context.getDatabasePath(RESTORE_CANDIDATE).also { it.parentFile?.mkdirs() }
         val staged = context.getDatabasePath(RESTORE_STAGED)
         val epoch: String
+        var keyReplaced = false
         try {
+            var payloadKey = ""
             val input = context.contentResolver.openInputStream(source) ?: error("BACKUP_SOURCE_UNAVAILABLE")
-            // The candidate stays encrypted on disk under the backup's own key (v2); only v1 backups are plain.
+            // The candidate stays encrypted on disk under the backup's own key.
             input.use { i ->
-                val splitter = PayloadSplitter(plain.outputStream())
+                val splitter = PayloadSplitter(candidateFile.outputStream())
                 splitter.use { o -> StreamingBackupCodec.decrypt(password, i, o, MAX_RESTORE_BYTES) }
                 payloadKey = splitter.key
             }
 
-            // 1. Verify the candidate in isolation (schema version, full audit chain) with throwaway anchors.
+            // 1. Verify the candidate in isolation: schema version and the whole audit chain.
             val candidateHelper = openHelper(RESTORE_CANDIDATE, payloadKey.toByteArray(Charsets.US_ASCII))
             epoch = try {
                 val candidate = SabouCore.open(AndroidSqlDatabase(candidateHelper.writableDatabase), InMemoryAnchorStore())
-                val verdict = candidate.verifyStartup()
+                val verdict = candidate.verifyAuditFull()
                 check(verdict == StartupVerdict.Healthy) { "BACKUP_INTEGRITY:${(verdict as StartupVerdict.RollbackDetected).detail}" }
                 candidate.epoch
             } finally {
                 candidateHelper.close()
             }
 
-            // 2. Copy into a new database encrypted with the device key. When the app could not even open
-            //    (no signed-in core, e.g. the Keystore key was lost), the old key is replaced by a new one.
+            // 2. Copy into a new database encrypted with the device key. A device whose key is provably lost
+            //    (the only case in which the database could not be opened at all) gets a new key.
             val passphrase = try {
                 keys.databasePassphrase()
             } catch (e: DeviceKeyUnavailableException) {
-                // Replace the key only when it is provably gone (not after a passing Keystore hiccup).
-                if (current != null || !DeviceKeys.isPermanentlyLost(e)) throw e
-                keys.forgetDatabaseKey()
+                if (currentCore() != null || !DeviceKeys.isPermanentlyLost(e)) throw e
+                keys.forgetDatabaseKey()   // the unreadable file itself is still quarantined in step 4
+                keyReplaced = true
                 keys.databasePassphrase()
             }
             val stagedHelper = openHelper(RESTORE_STAGED, passphrase)
             try {
                 val db = stagedHelper.writableDatabase
-                db.execSQL("ATTACH DATABASE ? AS candidate KEY '$payloadKey'", arrayOf<Any?>(plain.absolutePath))
+                db.execSQL("ATTACH DATABASE ? AS candidate KEY '$payloadKey'", arrayOf<Any?>(candidateFile.absolutePath))
                 try {
                     db.query("SELECT sqlcipher_export('main', 'candidate')").use { it.moveToFirst() }
                 } finally {
@@ -288,49 +346,82 @@ class AppContainer(private val context: Context) {
                 stagedHelper.close()
             }
         } catch (e: Throwable) {
-            // Nothing of the live database has been touched yet.
-            context.deleteDatabase(RESTORE_STAGED)
+            context.deleteDatabase(RESTORE_STAGED)   // nothing of the live database has been touched
             throw e
         } finally {
             context.deleteDatabase(RESTORE_CANDIDATE)
         }
 
-        // 3. Announce (authorized and audited by the core when signed in), then swap. From here on the
-        //    app always re-opens, whatever happens.
+        // 3. Announce and seal (authorized and audited by the core). Refused → nothing happened.
         try {
-            if (current != null) current.acceptReplacement(epoch, "RESTORE") else anchorsRebase(epoch, "RESTORE")
+            announceReplacement(epoch, "RESTORE")
         } catch (e: Throwable) {
             context.deleteDatabase(RESTORE_STAGED)
             throw e
         }
-        clearDrafts()   // drafts belong to the replaced database
+        // 4. From here on the app always re-opens, and whichever file is in place opens normally.
         try {
+            faultPoint("announced")
+            clearDrafts()   // drafts belong to the replaced database
             close()
-            // rename(2) replaces the live file atomically; only its side files are removed first.
+            keepInQuarantine("RESTORE", move = false, withKey = !keyReplaced)
+            faultPoint("quarantined")
+            // A leftover journal of the old file must not be applied to the new one (the file was closed cleanly).
             listOf("-journal", "-wal", "-shm").forEach { File(context.getDatabasePath(DB_NAME).path + it).delete() }
             check(staged.renameTo(context.getDatabasePath(DB_NAME))) { "RESTORE_SWAP_FAILED" }
+            faultPoint("swapped")
         } finally {
             open()
         }
     }
 
-    /** Erases all data. The new database's epoch is announced first, so the next start is healthy. */
+    /**
+     * Starts over with an empty database. The current database is moved to quarantine with its key — never
+     * deleted — and the new database's epoch is announced first, so the next start is healthy even if the
+     * process dies half-way.
+     */
     @Synchronized
-    fun factoryReset(current: SabouCore?) {
+    fun factoryReset() {
         val epoch = SabouCore.newEpoch()
-        if (current != null) current.acceptReplacement(epoch, "FACTORY_RESET") else anchorsRebase(epoch, "FACTORY_RESET")
-        clearDrafts()
+        announceReplacement(epoch, "FACTORY_RESET")
         try {
+            faultPoint("announced")
+            clearDrafts()
             close()
-            context.deleteDatabase(DB_NAME)
+            keepInQuarantine("FACTORY_RESET", move = true)
+            faultPoint("quarantined")
             keys.forgetDatabaseKey()   // the new database gets a new key (also recovers from a lost Keystore key)
+            faultPoint("keyForgotten")
         } finally {
             open(newEpoch = epoch)
         }
     }
 
-    private fun anchorsRebase(epoch: String, reason: String) =
-        ir.sabou.platform.IntegrityGuard(anchors, ir.sabou.platform.memory.InMemoryAuditStore()).recordRebase(epoch, reason, System.currentTimeMillis())
+    /**
+     * Keeps the current database file (and its still-wrapped key) under no-backup storage. [move] renames the
+     * file away (reset: the live name must become free); otherwise it is copied (restore: the live file is
+     * replaced atomically afterwards). Only the newest [QUARANTINE_KEEP] entries are kept.
+     */
+    private fun keepInQuarantine(reason: String, move: Boolean, withKey: Boolean = true) {
+        val live = context.getDatabasePath(DB_NAME)
+        if (!live.exists()) return
+        val dir = File(quarantine, "${System.currentTimeMillis()}-$reason").also { check(it.mkdirs() || it.isDirectory) { "QUARANTINE_UNAVAILABLE" } }
+        val target = File(dir, DB_NAME)
+        if (move) {
+            check(live.renameTo(target)) { "QUARANTINE_MOVE_FAILED" }
+        } else {
+            val tmp = File(dir, "$DB_NAME.tmp")
+            live.inputStream().use { i -> java.io.FileOutputStream(tmp).use { o -> i.copyTo(o); o.fd.sync() } }
+            check(tmp.renameTo(target)) { "QUARANTINE_COPY_FAILED" }
+        }
+        if (withKey) keys.wrappedDatabaseKey()?.let { File(dir, "key.wrapped").writeText(it) }
+        File(dir, "reason.txt").writeText(reason)
+        quarantine.listFiles()?.filter { it.isDirectory }?.sortedByDescending { it.name }?.drop(QUARANTINE_KEEP)?.forEach { it.deleteRecursively() }
+    }
+
+    /** Quarantined databases, newest first (for support and the device tests). */
+    internal fun quarantined(): List<File> =
+        quarantine.listFiles()?.filter { it.isDirectory }?.sortedByDescending { it.name }.orEmpty()
 
     private fun openHelper(name: String, passphrase: ByteArray): SupportSQLiteOpenHelper {
         val callback = object : SupportSQLiteOpenHelper.Callback(1) {
@@ -348,13 +439,27 @@ class AppContainer(private val context: Context) {
 
     companion object {
         const val DB_NAME = "sabou.db"
-        private const val BACKUP_PLAIN = "backup-plain.db"
         private const val BACKUP_SEALED = "backup-sealed.db"
         private val PAYLOAD_MAGIC = "SABOUDB2".toByteArray(Charsets.US_ASCII)
         private const val KEY_CHARS = 64
         private const val DRAFT_VERSION = "app_version"
-        private const val RESTORE_CANDIDATE = "restore-plain.db"
+        private const val RESTORE_CANDIDATE = "restore-candidate.db"
         private const val RESTORE_STAGED = "sabou-restore.db"
         private const val MAX_RESTORE_BYTES = 2L * 1024 * 1024 * 1024
+        private const val QUARANTINE_DIR = "quarantine"
+        private const val QUARANTINE_KEEP = 3
+
+        /**
+         * A failure that will not pass by retrying: the Keystore key is gone, or the file is not a database this
+         * key can read. Anything else (a busy file, a full disk, a passing Keystore error) may pass.
+         */
+        internal fun isPermanentOpenFailure(e: Throwable): Boolean = DeviceKeys.isPermanentlyLost(e) ||
+            generateSequence(e) { it.cause }.any {
+                // By name: SQLCipher ships its own copies of the framework's SQLite exception classes.
+                it.javaClass.simpleName in PERMANENT_SQLITE_ERRORS ||
+                    it.message?.contains("file is not a database", ignoreCase = true) == true
+            }
+
+        private val PERMANENT_SQLITE_ERRORS = setOf("SQLiteDatabaseCorruptException", "SQLiteNotADatabaseException")
     }
 }

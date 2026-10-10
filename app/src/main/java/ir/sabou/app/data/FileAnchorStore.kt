@@ -36,7 +36,7 @@ class FileAnchorStore(private val file: File, private val keys: DeviceKeys) : An
     private fun lines(): List<String> = if (file.exists()) file.readLines().filter { it.isNotBlank() } else emptyList()
 
     private fun encode(a: IntegrityAnchor): String {
-        val body = listOf(a.kind.name, a.epoch, a.sequence.toString(), a.hash, a.reason, a.recordedAtEpochMillis.toString(), a.position.toString())
+        val body = listOf(a.kind.name, a.epoch, a.sequence.toString(), a.hash, a.reason, a.recordedAtEpochMillis.toString(), a.position.toString(), a.previousEpoch)
             .joinToString(SEP) { it.replace(SEP, " ") }.toByteArray(Charsets.UTF_8)
         return b64(body) + "." + b64(keys.hmac(body))
     }
@@ -46,7 +46,7 @@ class FileAnchorStore(private val file: File, private val keys: DeviceKeys) : An
         val body = Base64.decode(bodyText, Base64.NO_WRAP)
         if (!MessageDigest.isEqual(keys.hmac(body), Base64.decode(macText, Base64.NO_WRAP))) return null
         val f = String(body, Charsets.UTF_8).split(SEP)
-        IntegrityAnchor(AnchorKind.valueOf(f[0]), f[1], f[2].toLong(), f[3], f[4], f[5].toLong(), f.getOrNull(6)?.toLong() ?: 0L)
+        IntegrityAnchor(AnchorKind.valueOf(f[0]), f[1], f[2].toLong(), f[3], f[4], f[5].toLong(), f.getOrNull(6)?.toLong() ?: 0L, f.getOrNull(7).orEmpty())
     }.getOrNull()
 
     private fun b64(bytes: ByteArray) = Base64.encodeToString(bytes, Base64.NO_WRAP)

@@ -1,5 +1,7 @@
 package ir.sabou.persistence
 
+import ir.sabou.kernel.DomainError
+import ir.sabou.kernel.DomainException
 import ir.sabou.platform.UnitOfWork
 
 /**
@@ -25,13 +27,20 @@ class SqlRow(private val values: Map<String, Any?>) {
     fun bytes(column: String): ByteArray = values[column] as ByteArray
 }
 
-/** One transaction per command; nested calls join it. */
+/**
+ * One transaction per command; nested calls join it. Every write of the system passes through here, so this
+ * is also the single barrier for replacing the database: [exclusive] waits for the transaction in progress and
+ * keeps new ones out while it runs; [seal] closes the gate for good (the database is about to be replaced),
+ * so no write can land in a file that is being copied or swapped.
+ */
 class SqlUnitOfWork(private val db: SqlDatabase) : UnitOfWork {
     private val depth = ThreadLocal.withInitial { 0 }
+    @Volatile private var sealedReason: String? = null
 
     @Synchronized
     override fun <T> transaction(block: () -> T): T {
         if (depth.get() > 0) return block()
+        requireOpen()
         db.begin()
         depth.set(1)
         try {
@@ -44,6 +53,25 @@ class SqlUnitOfWork(private val db: SqlDatabase) : UnitOfWork {
         } finally {
             depth.set(0)
         }
+    }
+
+    /** Runs [block] with no other transaction in progress or starting; transactions inside [block] still work. */
+    @Synchronized
+    fun <T> exclusive(block: () -> T): T {
+        requireOpen()
+        return block()
+    }
+
+    /** From now on every transaction is refused. Waits for the one in progress (same monitor). */
+    @Synchronized
+    fun seal(reason: String) {
+        sealedReason = reason
+    }
+
+    val isSealed: Boolean get() = sealedReason != null
+
+    private fun requireOpen() {
+        sealedReason?.let { throw DomainException(DomainError.InvalidState("DATABASE", "SEALED:$it")) }
     }
 }
 
