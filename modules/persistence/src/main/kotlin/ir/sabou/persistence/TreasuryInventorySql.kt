@@ -8,6 +8,7 @@ import ir.sabou.kernel.Quantity
 import ir.sabou.inventory.Item
 import ir.sabou.inventory.ItemStore
 import ir.sabou.inventory.Location
+import ir.sabou.inventory.PackUnit
 import ir.sabou.inventory.LocationStore
 import ir.sabou.inventory.MenuItem
 import ir.sabou.inventory.MovementKind
@@ -132,6 +133,7 @@ class SqlItemStore(db: SqlDatabase) : SqlTable(db), ItemStore {
         parLevel = Codec.qty(d.longOr("par", 0)), shelf = d.strOr("shelf", ""), allergens = d.strOr("allergens", ""),
         prepared = d.boolOr("prepared", false), preferredSupplierId = Codec.idOrNull(d.strOrNull("preferredSupplier")),
         approvedSupplierIds = d.strsOr("approvedSuppliers").map(Codec::id).toSet(),
+        packs = d.docsOr("packs").map { PackUnit(it.str("name"), Codec.qty(it.long("contains"))) },
     )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM items WHERE id = ?", id.value)?.let(::read)
     override fun all() = docs("SELECT doc FROM items ORDER BY rowid").map(::read)
@@ -144,6 +146,7 @@ class SqlItemStore(db: SqlDatabase) : SqlTable(db), ItemStore {
                     "id" to item.id.value, "name" to item.name, "unit" to item.unit.name, "minimum" to item.minimumStock.micros, "active" to item.isActive,
                     "par" to item.parLevel.micros, "shelf" to item.shelf, "allergens" to item.allergens, "prepared" to item.prepared,
                     "preferredSupplier" to item.preferredSupplierId?.value, "approvedSuppliers" to item.approvedSupplierIds.map { it.value }.sorted(),
+                    "packs" to item.packs.map { mapOf("name" to it.name, "contains" to it.contains.micros) },
                 ),
             ),
         ),

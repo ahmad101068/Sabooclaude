@@ -47,6 +47,7 @@ import ir.sabou.app.ui.components.NavRow
 import ir.sabou.app.ui.components.Page
 import ir.sabou.app.ui.components.Picker
 import ir.sabou.app.ui.components.PrimaryButton
+import ir.sabou.app.ui.components.ItemQuantityInput
 import ir.sabou.app.ui.components.QuantityInput
 import ir.sabou.app.ui.components.SCard
 import ir.sabou.app.ui.components.SecondaryButton
@@ -354,7 +355,7 @@ object MeScreens {
                             rows.forEach { r ->
                                 key(r) {
                                     Picker("ماده اولیه", items.values.filter { it.isActive }.map { Choice(it.id, it.name, unitName(it.unit)) }, r.item, { r.item = it })
-                                    QuantityInput("مقدار خالص برای یک پرس", r.item?.let { items[it] }?.let { unitName(it.unit) } ?: "", { r.qty = it }, value = r.qty)
+                                    ItemQuantityInput("مقدار خالص برای یک پرس", r.item?.let { items[it] }, { r.qty = it }, value = r.qty)
                                     TextInput("بازده ٪ (خالی = ۱۰۰)", r.yieldText, { r.yieldText = it }, keyboard = KeyboardType.Number,
                                         error = if (r.yieldPercent == null) "بین ۱ تا ۱۰۰" else null)
                                     Divider()

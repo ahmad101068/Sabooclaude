@@ -1,5 +1,7 @@
 package ir.sabou.app.ui.components
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -338,6 +340,70 @@ fun QuantityInput(
     var text by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(value?.let(Fa::quantity) ?: "") }
     TextInput("$label ($unit)", text, { text = it; onChange(if (it.isBlank()) blankAs else Fa.parseQuantity(it)) }, modifier, keyboard = KeyboardType.Decimal,
         error = if (text.isNotBlank() && Fa.parseQuantity(text) == null) "مقدار معتبر نیست" else null)
+}
+
+/**
+ * Quantity of a known [item], typed in any of its units — its own unit, a metric sibling (گرم for a کیلوگرم item)
+ * or one of its purchase packs. Reports the quantity in the item's stock unit (converted by Units, the one place
+ * units change); [value] is in the stock unit too.
+ */
+@Composable
+fun ItemQuantityInput(
+    label: String,
+    item: ir.sabou.inventory.Item?,
+    onChange: (ir.sabou.kernel.Quantity?) -> Unit,
+    modifier: Modifier = Modifier,
+    blankAs: ir.sabou.kernel.Quantity? = null,
+    value: ir.sabou.kernel.Quantity? = null,
+) {
+    val choices = item?.let(ir.sabou.inventory.Units::choices) ?: listOf(ir.sabou.inventory.EntryUnit.Stock)
+    // The unit choice belongs to the item (its packs); the typed text stays when another item is picked.
+    var selectedKey by androidx.compose.runtime.saveable.rememberSaveable(item?.id) { mutableStateOf(unitKey(ir.sabou.inventory.EntryUnit.Stock)) }
+    val unit = choices.firstOrNull { unitKey(it) == selectedKey } ?: ir.sabou.inventory.EntryUnit.Stock
+    var text by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(value?.let(Fa::quantity) ?: "") }
+    fun stock(t: String, u: ir.sabou.inventory.EntryUnit): ir.sabou.kernel.Quantity? =
+        if (t.isBlank()) blankAs
+        else Fa.parseQuantity(t)?.let { typed -> if (item == null) typed else runCatching { ir.sabou.inventory.Units.toStock(item, typed, u) }.getOrNull() }
+    // A different item means a different stock unit and packs: report the text again, read in the new item's unit.
+    var reportedFor by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(item?.id?.value) }
+    if (reportedFor != item?.id?.value) {
+        reportedFor = item?.id?.value
+        androidx.compose.runtime.SideEffect { onChange(stock(text, ir.sabou.inventory.EntryUnit.Stock)) }
+    }
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (item != null && choices.size > 1) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                choices.forEach { c ->
+                    val selected = unitKey(c) == selectedKey
+                    Text(
+                        unitLabel(item, c), style = SabouType.label,
+                        color = if (selected) Sabou.colors.onPrimary else Sabou.colors.ink,
+                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(if (selected) Sabou.colors.primary else Sabou.colors.track)
+                            .clickable { selectedKey = unitKey(c); onChange(stock(text, c)) }.padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
+            }
+        }
+        val converted = stock(text, unit)
+        val unitText = item?.let { unitLabel(it, unit) }
+        TextInput(if (unitText == null) label else "$label ($unitText)", text, { text = it; onChange(stock(it, unit)) }, keyboard = KeyboardType.Decimal,
+            error = if (text.isNotBlank() && converted == null) "مقدار معتبر نیست" else null)
+        if (item != null && unit != ir.sabou.inventory.EntryUnit.Stock && text.isNotBlank() && converted != null) {
+            Text("= ${Fa.quantity(converted)} ${ir.sabou.app.ui.screens.unitName(item.unit)}", style = SabouType.caption, color = Sabou.colors.muted)
+        }
+    }
+}
+
+private fun unitKey(u: ir.sabou.inventory.EntryUnit): String = when (u) {
+    ir.sabou.inventory.EntryUnit.Stock -> "S"
+    is ir.sabou.inventory.EntryUnit.Metric -> "M:" + u.unit.name
+    is ir.sabou.inventory.EntryUnit.Pack -> "P:" + u.name
+}
+
+private fun unitLabel(item: ir.sabou.inventory.Item, u: ir.sabou.inventory.EntryUnit): String = when (u) {
+    ir.sabou.inventory.EntryUnit.Stock -> ir.sabou.app.ui.screens.unitName(item.unit)
+    is ir.sabou.inventory.EntryUnit.Metric -> ir.sabou.app.ui.screens.unitName(u.unit)
+    is ir.sabou.inventory.EntryUnit.Pack -> u.name
 }
 
 /** Jalali date field: opens a month calendar; quick choices for today and yesterday. */
