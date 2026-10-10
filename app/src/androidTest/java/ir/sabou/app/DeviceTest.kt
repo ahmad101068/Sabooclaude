@@ -203,13 +203,13 @@ class DeviceTest {
         return core.overview.items().map { it.name }.toSet()
     }
 
-    /** A backup holding item "A", then item "B" added after it: the live database has A and B. */
+    /** A backup holding «آرد», then «شکر» added after it: the live database has both. */
     private fun backupThenMore(): Triple<AppContainer, SabouCore, File> {
         val (container, core) = fresh()
-        item(core, "A")
+        item(core, "آرد")
         val file = File(context.cacheDir, "crash.sabou").also { it.delete() }
         container.backup(core, "password-123".toCharArray(), Uri.fromFile(file))
-        item(core, "B")
+        item(core, "شکر")
         return Triple(container, core, file)
     }
 
@@ -224,7 +224,7 @@ class DeviceTest {
             try { container.restore("password-123".toCharArray(), Uri.fromFile(file)); fail("expected crash at $point") } catch (e: IllegalStateException) { }
             container.faultPoint = {}
             container.open()                                       // the next start of the app
-            assertEquals("after a crash at $point", setOf("A", "B"), items(container))
+            assertEquals("after a crash at $point", setOf("آرد", "شکر"), items(container))
             file.delete()
             container.close()
         }
@@ -236,7 +236,7 @@ class DeviceTest {
         try { container.restore("password-123".toCharArray(), Uri.fromFile(file)); fail() } catch (e: IllegalStateException) { }
         container.faultPoint = {}
         container.open()
-        assertEquals(setOf("A"), items(container))
+        assertEquals(setOf("آرد"), items(container))
         // The data replaced by the restore is kept in quarantine.
         assertTrue(File(container.quarantined().first(), AppContainer.DB_NAME).length() > 0)
         file.delete()
@@ -245,7 +245,7 @@ class DeviceTest {
     @Test fun aResetInterruptedAtAnyPointOpensEitherTheOldOrAnEmptyDatabase() {
         for (point in listOf("announced", "quarantined", "keyForgotten")) {
             val (container, core) = fresh()
-            item(core, "A")
+            item(core, "آرد")
             crashAt(container, point)
             try { container.factoryReset(); fail("expected crash at $point") } catch (e: IllegalStateException) { }
             container.faultPoint = {}
@@ -253,7 +253,7 @@ class DeviceTest {
             val state = container.state.value
             assertTrue("after a crash at $point: $state", state is AppState.Ready)
             val reopened = (state as AppState.Ready).core
-            if (point == "announced") assertEquals(setOf("A"), items(container))   // nothing moved yet: data intact
+            if (point == "announced") assertEquals(setOf("آرد"), items(container))   // nothing moved yet: data intact
             else assertTrue("reset completes after $point", reopened.identity.needsBootstrap())
             container.close()
         }
