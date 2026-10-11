@@ -42,7 +42,6 @@ import ir.sabou.kernel.Money
 import ir.sabou.kernel.Scope
 import ir.sabou.platform.Permission
 import ir.sabou.purchasing.InvoiceStatus
-import ir.sabou.sales.SaleStatus
 import ir.sabou.sales.Settlement
 import ir.sabou.treasury.TreasuryKind
 
@@ -76,34 +75,34 @@ fun HomeScreen(nav: Nav) {
         val accounts = (safe { overview.paymentAccounts() } ?: emptyList()).associateBy { it.id }
         val today = branch?.let { b ->
             safe { overview.today(date).firstOrNull { Scope.Branch(it.branch.id) == b } }?.let { day ->
-                val all = day.sale
-                val sale = all?.takeIf { it.status == SaleStatus.POSTED }
-                val liquid = sale?.settlements?.filterIsInstance<Settlement.Liquid>().orEmpty()
+                // Posted sales only count; drafts are shown apart.
+                val posted = day.posted
+                val liquid = posted.flatMap { it.settlements }.filterIsInstance<Settlement.Liquid>()
                 Today(
-                    net = sale?.netFood?.rial,
-                    draft = all?.takeIf { it.status == SaleStatus.DRAFT }?.netFood?.rial,
+                    net = posted.takeIf { it.isNotEmpty() }?.sumOf { it.netFood.rial },
+                    draft = day.drafts.takeIf { it.isNotEmpty() }?.sumOf { it.netFood.rial },
                     status = when {
                         day.closed -> "روز بسته"
-                        all == null -> "ثبت نشده"
-                        all.status == SaleStatus.POSTED -> "ثبت نهایی"
-                        else -> "پیش‌نویس"
+                        posted.isNotEmpty() -> "${Fa.number(posted.size.toLong())} فروش"
+                        day.drafts.isNotEmpty() -> "پیش‌نویس"
+                        else -> "ثبت نشده"
                     },
                     statusKind = if (day.closed) ChipKind.NEUTRAL else ChipKind.ACCENT,
                     cash = liquid.filter { accounts[it.treasuryAccountId]?.kind.let { k -> k == TreasuryKind.CASH || k == TreasuryKind.PETTY_CASH } }.sumOf { it.amount.rial },
                     card = liquid.filter { accounts[it.treasuryAccountId]?.kind.let { k -> k == TreasuryKind.CARD_TERMINAL || k == TreasuryKind.BANK } }.sumOf { it.amount.rial },
-                    credit = sale?.settlements?.filterIsInstance<Settlement.Credit>().orEmpty().sumOf { it.amount.rial },
+                    credit = posted.flatMap { it.settlements }.filterIsInstance<Settlement.Credit>().sumOf { it.amount.rial },
                 )
             }
         }
 
         val todos = buildList {
             today?.draft?.let {
-                add(Todo(R.drawable.ic_sales, "فروش امروز هنوز ثبت نهایی نشده", "پیش‌نویس ${Fa.rial(it)} ریال؛ تا ثبت نهایی، موجودی و دفاتر تغییر نمی‌کنند", Route.Sales, true))
+                add(Todo(R.drawable.ic_sales, "پیش‌نویس فروش امروز هنوز ثبت نهایی نشده", "جمع ${Fa.rial(it)} ریال؛ تا ثبت نهایی، موجودی و دفاتر تغییر نمی‌کنند", Route.Sales, true))
             }
             if (branch != null) {
                 val yesterday = date.plusDays(-1)
                 safe { overview.today(yesterday).firstOrNull { Scope.Branch(it.branch.id) == branch } }?.let { d ->
-                    if (d.sale?.status == SaleStatus.POSTED && !d.closed) {
+                    if (d.sales.isNotEmpty() && !d.closed) {
                         add(Todo(R.drawable.ic_clock, "بستن روز فروش دیروز", "شمارش صندوق و بستن روز مانده است", Route.Sales, true))
                     }
                 }

@@ -15,6 +15,7 @@ object Messages {
         "CUSTOMER:CREDIT_LIMIT_EXCEEDED" to "مبلغ نسیه از سقف اعتبار مشتری بیشتر است.",
         "CUSTOMER:DUPLICATE" to "مشتری با این نام قبلاً ثبت شده است.",
         "CUSTOMER:INACTIVE" to "این مشتری غیرفعال است.",
+        "SALES_DAY:HAS_DRAFTS" to "این روز فروش پیش‌نویس دارد؛ آن‌ها را ثبت نهایی کنید یا کنار بگذارید، بعد روز را ببندید.",
         "DAILY_SALE:ALREADY_POSTED" to "فروش این روز قبلاً ثبت نهایی شده است.",
         "DAILY_SALE:HAS_COLLECTIONS" to "برای نسیه‌های این روز دریافت ثبت شده؛ ابتدا آن دریافت‌ها را برگشت بزنید.",
         "DAILY_SALE:NOT_POSTED" to "فروش این روز هنوز ثبت نهایی نشده است.",

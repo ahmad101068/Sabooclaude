@@ -183,7 +183,7 @@ class SalesTest {
     @Test fun closedDayIsFrozenAndOnlyTheOwnerReopensIt() {
         session.actor = manager
         val sale = draft(standardSettlements())
-        assertEquals("INVALID_STATE:DAILY_SALE:NOT_POSTED", code { ops.closeDay(CloseSalesDay(GlobalId.new(), branch, day, cash, rial(400_000))) })
+        assertEquals("INVALID_STATE:SALES_DAY:HAS_DRAFTS", code { ops.closeDay(CloseSalesDay(GlobalId.new(), branch, day, cash, rial(400_000))) })
         ops.post(PostDailySale(GlobalId.new(), branch, sale))
         ops.closeDay(CloseSalesDay(GlobalId.new(), branch, day, cash, rial(400_000)))
         assertEquals("INVALID_STATE:SALES_DAY:CLOSED", code { ops.reverse(ReverseDailySale(GlobalId.new(), branch, sale, day, "اشتباه")) })
@@ -298,6 +298,33 @@ class SalesTest {
         assertEquals(395_000, treasury.balance(cash))
         assertEquals(5_000, ledger.balance(StandardAccounts.CASH_OVER_SHORT).rial)
         assertEquals(5_000, salesStore.day(branch, day)!!.difference)
+    }
+
+    // ------------------------------------------------------------ Many sales a day
+
+    @Test fun aDayHasManySalesEachNumberedAndPostedOnItsOwn() {
+        fun bill(portions: Long, saleId: GlobalId? = null) = ops.saveDraft(SaveSaleDraft(GlobalId.new(), branch, day, kitchen,
+            listOf(SaleLineInput(pizza, Quantity.units(portions), rial(50_000))), Money.ZERO, Money.ZERO, Money.ZERO,
+            listOf(Settlement.Liquid(cash, rial(50_000 * portions))), saleId = saleId)).resultId
+        val first = bill(2); val second = bill(3)
+        assertTrue(first != second)
+        assertEquals(2, salesStore.salesOn(branch, day).size)
+        assertEquals(first, bill(4, saleId = first))                     // editing a draft keeps it
+        assertEquals(rial(200_000), salesStore.sale(first)!!.gross)
+        ops.post(PostDailySale(GlobalId.new(), branch, first))
+        ops.post(PostDailySale(GlobalId.new(), branch, second))
+        assertEquals(350_000, treasury.balance(cash))
+        val seqs = listOf(first, second).map { numbers.of(ir.sabou.platform.DocumentSeries.DAILY_SALE, it)!!.number.sequence }
+        assertEquals(listOf(1L, 2L), seqs)
+        assertEquals("INVALID_STATE:DAILY_SALE:ALREADY_POSTED", code { bill(1, saleId = first) })
+
+        // A draft left over blocks the close until it is posted or discarded.
+        val leftover = bill(1)
+        assertEquals("INVALID_STATE:SALES_DAY:HAS_DRAFTS", code { ops.closeDay(CloseSalesDay(GlobalId.new(), branch, day, cash, rial(350_000))) })
+        ops.discardDraft(DiscardSaleDraft(GlobalId.new(), branch, leftover))
+        assertEquals(SaleStatus.DISCARDED, salesStore.sale(leftover)!!.status)
+        ops.closeDay(CloseSalesDay(GlobalId.new(), branch, day, cash, rial(350_000)))
+        assertEquals(0, salesStore.day(branch, day)!!.difference)
     }
 }
 

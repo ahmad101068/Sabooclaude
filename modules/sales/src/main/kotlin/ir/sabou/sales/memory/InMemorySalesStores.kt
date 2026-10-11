@@ -27,8 +27,7 @@ class InMemorySalesStore : SalesStore, Transactional {
     private val days = LinkedHashMap<Pair<Scope.Branch, Long>, SalesDay>()
 
     override fun sale(id: GlobalId) = sales[id]
-    override fun activeSale(scope: Scope.Branch, date: BusinessDate) =
-        sales.values.firstOrNull { it.scope == scope && it.date == date && it.status != SaleStatus.REVERSED }
+    override fun salesOn(scope: Scope.Branch, date: BusinessDate) = sales.values.filter { it.scope == scope && it.date == date }
     override fun saveSale(sale: DailySale) { sales[sale.id] = sale }
     override fun receivable(id: GlobalId) = receivables[id]
     override fun receivablesOfSale(saleId: GlobalId) = receivables.values.filter { it.saleId == saleId }

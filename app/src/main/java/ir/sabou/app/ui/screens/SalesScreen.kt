@@ -69,6 +69,7 @@ import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
 import ir.sabou.platform.Permission
 import ir.sabou.sales.CloseSalesDay
+import ir.sabou.sales.DiscardSaleDraft
 import ir.sabou.sales.Customer
 import ir.sabou.sales.DailySale
 import ir.sabou.sales.PostDailySale
@@ -86,15 +87,18 @@ private class SalesData(
     val kitchens: List<Location>,
     val accounts: List<TreasuryAccount>,
     val customers: List<Customer>,
-    val sale: DailySale?,
+    /** The day's sales: drafts, posted and reversed, in recording order. */
+    val sales: List<DailySale>,
     val day: SalesDay?,
-    /** The sale's document number once posted. */
-    val number: String? = null,
+    /** Document number of each posted sale. */
+    val numbers: Map<GlobalId, String> = emptyMap(),
     /** Menu price in force per menu item on the day (no entry: the item has no menu price). */
     val prices: Map<GlobalId, Money> = emptyMap(),
     val cashBoxes: List<ir.sabou.core.AccountBalance> = emptyList(),
     val countNumber: String? = null,
 )
+
+private const val NEW_SALE = "new"
 
 @Composable
 fun SalesScreen(nav: Nav) {
@@ -109,38 +113,139 @@ fun SalesScreen(nav: Nav) {
                     kitchens = overview.locations(branch).filter { it.isActive },
                     accounts = view.accounts,
                     customers = view.customers,
-                    sale = view.sale,
+                    sales = view.sales,
                     day = view.day,
-                    number = view.number,
+                    numbers = view.numbers,
                     prices = overview.menuPrices(branch, date).mapNotNull { v -> v.price?.let { v.item.id to it } }.toMap(),
                     cashBoxes = view.cashBoxes,
                     countNumber = view.countNumber,
                 )
             }
+            // The open sale: null = the day's list, NEW_SALE = a new draft, otherwise a sale id.
+            var selected by rememberSaveable(branch, date) { mutableStateOf<String?>(null) }
             val d = state.orNull()
-            Header("فروش روز", Fa.dayTitle(date)) {
-                when {
-                    d?.day?.closed == true -> Chip("روز بسته", ChipKind.NEUTRAL)
-                    d?.sale?.status == SaleStatus.POSTED -> Chip("ثبت نهایی", ChipKind.PRIMARY)
-                    d?.sale != null -> Chip("پیش‌نویس", ChipKind.NEUTRAL)
-                    else -> Unit
-                }
+            Header("فروش", Fa.dayTitle(date)) {
+                if (d?.day?.closed == true) Chip("روز بسته", ChipKind.NEUTRAL)
+                else d?.let { v -> Chip("${Fa.number(v.sales.count { it.status == SaleStatus.POSTED }.toLong())} فروش", ChipKind.PRIMARY) }
             }
             LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                item { SCard { DateInput("تاریخ", date, { date = it }, session.today) } }
+                if (selected == null) item { SCard { DateInput("تاریخ", date, { date = it }, session.today) } }
                 item {
                     Loaded(state) { data ->
+                        val open = selected?.let { id -> data.sales.firstOrNull { it.id.value == id } }
                         when {
                             data.menu.isEmpty() -> EmptyState("هنوز منویی تعریف نشده است. از «من ← منو و رسپی» آیتم‌های منو را تعریف کنید.")
                             data.kitchens.isEmpty() -> EmptyState("برای این شعبه آشپزخانه یا انباری تعریف نشده است.")
-                            data.sale?.status == SaleStatus.POSTED -> PostedDay(branch, date, data)
-                            data.day?.closed == true -> Banner("این روز بسته شده است.", ChipKind.ACCENT)
-                            // Keyed by branch and date only: saving a new draft must not reset the form or its error.
-                            else -> key(branch, date) { Editor(branch, date, data) }
+                            selected == null -> DayView(branch, date, data) { selected = it }
+                            selected == NEW_SALE || open?.status == SaleStatus.DRAFT -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                BackToDay { selected = null }
+                                if (data.day?.closed == true) Banner("این روز بسته شده است.", ChipKind.ACCENT)
+                                // Keyed by the selection only: saving the draft must not reset the form or its error.
+                                else key(branch, date, selected) { Editor(branch, date, data, open) { selected = null } }
+                            }
+                            open != null -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                BackToDay { selected = null }
+                                SaleDetail(branch, date, data, open)
+                            }
+                            else -> DayView(branch, date, data) { selected = it }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun BackToDay(onClick: () -> Unit) {
+    Text("← فروش‌های این روز", style = SabouType.label, color = Sabou.colors.primary, modifier = Modifier.clickable(onClick = onClick).padding(vertical = 6.dp))
+}
+
+// ---------------------------------------------------------------- The day: its sales and its close
+
+@Composable
+private fun DayView(branch: Scope.Branch, date: BusinessDate, data: SalesData, open: (String) -> Unit) {
+    val session = LocalSession.current
+    val closed = data.day?.closed == true
+    val posted = data.sales.filter { it.status == SaleStatus.POSTED }
+    val drafts = data.sales.filter { it.status == SaleStatus.DRAFT }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SCard {
+            KeyValue("فروش ثبت‌شدهٔ روز (ریال)", Fa.rial(Money.sum(posted.map { it.payable })), strong = true)
+            KeyValue("تعداد فروش", Fa.number(posted.size.toLong()))
+            if (drafts.isNotEmpty()) Text("${Fa.number(drafts.size.toLong())} پیش‌نویس هنوز ثبت نهایی نشده و در فروش حساب نمی‌شود.",
+                style = SabouType.caption, color = Sabou.colors.onAccentSoft)
+        }
+        if (!closed && session.can(Permission.SALES_RECORD)) PrimaryButton("فروش جدید", { open(NEW_SALE) })
+        if (data.sales.isEmpty()) EmptyState("برای این روز هنوز فروشی ثبت نشده است.")
+        data.sales.reversed().forEach { sale ->
+            val (title, kind, chip) = when (sale.status) {
+                SaleStatus.POSTED -> Triple(data.numbers[sale.id]?.let(Fa::digits) ?: "فروش", ChipKind.PRIMARY, "ثبت نهایی")
+                SaleStatus.DRAFT -> Triple("پیش‌نویس", ChipKind.ACCENT, "پیش‌نویس")
+                SaleStatus.REVERSED -> Triple(data.numbers[sale.id]?.let(Fa::digits) ?: "فروش", ChipKind.NEUTRAL, "برگشت‌خورده")
+                SaleStatus.DISCARDED -> Triple("کنار گذاشته", ChipKind.NEUTRAL, "کنار گذاشته")
+            }
+            val names = data.menu.associate { it.id to it.name }
+            SCard(onClick = { open(sale.id.value) }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                    Chip(chip, kind)
+                }
+                KeyValue(sale.lines.take(3).joinToString("، ") { "${names[it.menuItemId] ?: "آیتم"} ×${Fa.quantity(it.portions)}" } +
+                    if (sale.lines.size > 3) " …" else "", Fa.rial(sale.payable) + " ریال")
+            }
+        }
+        DayClose(branch, date, data)
+    }
+}
+
+@Composable
+private fun DayClose(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
+    val session = LocalSession.current
+    val action = rememberAction()
+    var counted by rememberSaveable { mutableStateOf<Money?>(null) }
+    var cashBox by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+    var reason by rememberSaveable { mutableStateOf("") }
+    val commandId = rememberSaveable(branch, date) { mutableStateOf(GlobalId.new()) }
+    val closed = data.day?.closed == true
+    val drafts = data.sales.count { it.status == SaleStatus.DRAFT }
+    data.day?.takeIf { it.closed }?.let { day ->
+        SCard {
+            Text("شمارش صندوق", style = SabouType.section, color = Sabou.colors.ink)
+            data.countNumber?.let { KeyValue("شماره سند", Fa.digits(it)) }
+            day.countedCash?.let { KeyValue("نقد شمارش‌شده", Fa.rial(it) + " ریال") }
+            if (day.difference != 0L) KeyValue(if (day.difference < 0) "کسری صندوق" else "اضافه صندوق", Fa.rial(kotlin.math.abs(day.difference)) + " ریال",
+                if (day.difference < 0) Sabou.colors.danger else Sabou.colors.moneyIn)
+            else if (day.countId != null) Text("صندوق با دفاتر برابر بود.", style = SabouType.caption, color = Sabou.colors.muted)
+        }
+    }
+    action.error?.let { Banner(it) }
+    if (!closed && session.can(Permission.SALES_DAY_CLOSE)) {
+        FormCard("شمارش صندوق و بستن روز") {
+            if (drafts > 0) Banner("${Fa.number(drafts.toLong())} پیش‌نویس باقی است؛ آن‌ها را ثبت نهایی کنید یا کنار بگذارید.", ChipKind.ACCENT)
+            if (data.cashBoxes.isEmpty()) Banner("برای این شعبه صندوق نقدی تعریف نشده است.", ChipKind.ACCENT)
+            else {
+                val box = data.cashBoxes.firstOrNull { it.account.id == cashBox } ?: data.cashBoxes.first()
+                if (data.cashBoxes.size > 1) Picker("صندوق", data.cashBoxes.map { Choice(it.account.id, it.account.name) }, box.account.id, { cashBox = it })
+                KeyValue("مانده دفتری صندوق", Fa.rial(box.balance) + " ریال")
+                MoneyInput("نقد شمارش‌شده صندوق", counted, { counted = it }, hint = "پس از بستن، فروش‌های این روز قابل تغییر نیست مگر با بازگشایی مالک.")
+                counted?.let { c ->
+                    val diff = c.rial - box.balance
+                    if (diff != 0L) Banner((if (diff < 0) "کسری صندوق: " else "اضافه صندوق: ") + Fa.rial(kotlin.math.abs(diff)) + " ریال — با بستن روز در حساب «کسر و اضافه صندوق» ثبت می‌شود.", ChipKind.ACCENT)
+                }
+                PrimaryButton("شمارش و بستن روز", {
+                    val c = counted ?: return@PrimaryButton
+                    action.run({ salesOps.closeDay(CloseSalesDay(commandId.value, branch, date, box.account.id, c)) }) { commandId.value = GlobalId.new(); counted = null }
+                }, enabled = counted != null && drafts == 0, busy = action.busy)
+            }
+        }
+    }
+    if (closed && session.can(Permission.SALES_DAY_REOPEN)) {
+        FormCard("بازگشایی روز") {
+            TextInput("دلیل بازگشایی", reason, { reason = it })
+            SecondaryButton("بازگشایی روز", {
+                action.run({ salesOps.reopenDay(ReopenSalesDay(commandId.value, branch, date, reason)) }) { commandId.value = GlobalId.new(); reason = "" }
+            }, enabled = reason.trim().length >= 3)
         }
     }
 }
@@ -297,9 +402,11 @@ private fun SaleLineEditor(form: SaleForm, id: GlobalId, canOverride: Boolean) {
 }
 
 @Composable
-private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
+private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData, sale: DailySale?, onDone: () -> Unit) {
     val session = LocalSession.current
-    val form = rememberSaveable(saver = saleFormSaver(data, session.today)) { SaleForm(data.sale, data, session.today) }
+    val form = rememberSaveable(saver = saleFormSaver(data, session.today)) { SaleForm(sale, data, session.today) }
+    // The draft this form edits; set once it is first saved, so later saves replace it instead of adding another sale.
+    var saleId by rememberSaveable { mutableStateOf(sale?.id) }
     val action = rememberAction()
     val draftId = rememberSaveable { mutableStateOf(GlobalId.new()) }
     val postId = rememberSaveable { mutableStateOf(GlobalId.new()) }
@@ -420,17 +527,18 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                 action.error?.let { Banner(it) }
                 val kitchen = form.kitchen
                 fun draft() = SaveSaleDraft(draftId.value, branch, date, kitchen!!, form.lines(), form.discount ?: Money.ZERO,
-                    form.service ?: Money.ZERO, form.tax ?: Money.ZERO, form.settlements(), form.count(form.guests) ?: 0, form.count(form.transactions) ?: 0)
+                    form.service ?: Money.ZERO, form.tax ?: Money.ZERO, form.settlements(), form.count(form.guests) ?: 0, form.count(form.transactions) ?: 0, saleId)
                 SecondaryButton("ذخیره پیش‌نویس", {
-                    action.run({ salesOps.saveDraft(draft()) }) { draftId.value = GlobalId.new() }
+                    action.run({ salesOps.saveDraft(draft()) }) { saved -> saleId = saved.resultId; draftId.value = GlobalId.new() }
                 }, enabled = kitchen != null && !action.busy)
                 if (session.can(Permission.SALES_POST)) {
-                    PrimaryButton("ثبت نهایی فروش روز", {
+                    PrimaryButton("ثبت نهایی این فروش", {
                         // Two commands: the draft is saved (and its id retired) even if posting then fails,
                         // so a corrected retry never reuses a command id with different content.
                         action.run({ salesOps.saveDraft(draft()) }) { saved ->
+                            saleId = saved.resultId
                             draftId.value = GlobalId.new()
-                            action.run({ salesOps.post(PostDailySale(postId.value, branch, saved.resultId)) }) { postId.value = GlobalId.new() }
+                            action.run({ salesOps.post(PostDailySale(postId.value, branch, saved.resultId)) }) { postId.value = GlobalId.new(); onDone() }
                         }
                     }, enabled = kitchen != null && form.payable() == form.settled(), busy = action.busy)
                     Text("با ثبت نهایی، مصرف مواد اولیه به بهای تمام‌شده، درآمد، واریز به صندوق‌ها و طلب مشتریان یک‌جا و با هم ثبت می‌شود.",
@@ -439,6 +547,11 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                     Text("ثبت نهایی با مدیر شعبه است؛ پیش‌نویس را ذخیره کنید.", style = SabouType.caption, color = Sabou.colors.muted)
                 }
                 SecondaryButton("بازگشت به تسویه", { form.step = 1 })
+                saleId?.let { id ->
+                    SecondaryButton("کنار گذاشتن این پیش‌نویس", {
+                        action.run({ salesOps.discardDraft(DiscardSaleDraft(GlobalId.new(), branch, id)) }) { onDone() }
+                    }, enabled = !action.busy, danger = true)
+                }
             }
         }
     }
@@ -469,15 +582,12 @@ private fun Summary(form: SaleForm) {
     }
 }
 
-// ---------------------------------------------------------------- Posted day
+// ---------------------------------------------------------------- One posted (or reversed) sale
 
 @Composable
-private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
+private fun SaleDetail(branch: Scope.Branch, date: BusinessDate, data: SalesData, sale: DailySale) {
     val session = LocalSession.current
-    val sale = data.sale!!
     val action = rememberAction()
-    var counted by rememberSaveable { mutableStateOf<Money?>(null) }
-    var cashBox by rememberSaveable { mutableStateOf<GlobalId?>(null) }
     var reason by rememberSaveable { mutableStateOf("") }
     var confirmReverse by remember { mutableStateOf(false) }
     val commandId = rememberSaveable(sale.id) { mutableStateOf(GlobalId.new()) }
@@ -485,7 +595,8 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SCard {
-            data.number?.let { KeyValue("شماره سند", Fa.digits(it), strong = true) }
+            data.numbers[sale.id]?.let { KeyValue("شماره سند", Fa.digits(it), strong = true) }
+            if (sale.status == SaleStatus.REVERSED) Banner("این فروش برگشت خورده است؛ آثار آن با سند برگشتی خنثی شده.", ChipKind.NEUTRAL)
             KeyValue("فروش ناخالص", Fa.rial(sale.gross))
             KeyValue("تخفیف", "− " + Fa.rial(sale.discount), Sabou.colors.danger)
             KeyValue("حق سرویس", Fa.rial(sale.serviceCharge))
@@ -493,7 +604,6 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
             Divider()
             KeyValue("جمع تسویه‌شده (ریال)", Fa.rial(sale.payable), strong = true)
             if (sale.guests > 0) KeyValue("مهمان · میانگین هر نفر", "${Fa.number(sale.guests.toLong())} · ${Fa.rial(sale.netFood.rial / sale.guests)}")
-            if (sale.transactions > 0) KeyValue("فاکتور · میانگین هر فاکتور", "${Fa.number(sale.transactions.toLong())} · ${Fa.rial(sale.payable.rial / sale.transactions)}")
             KeyValue("بهای تمام‌شده مواد", Fa.rial(sale.cost))
             if (!sale.netFood.isZero) {
                 KeyValue("درصد بهای غذا (Food cost)", Fa.percent(ir.sabou.kernel.Ratio.mulDiv(sale.cost.rial, 10_000, sale.netFood.rial)))
@@ -517,54 +627,18 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
                 }
             }
         }
-        data.day?.takeIf { it.closed }?.let { day ->
-            SCard {
-                Text("شمارش صندوق", style = SabouType.section, color = Sabou.colors.ink)
-                data.countNumber?.let { KeyValue("شماره سند", Fa.digits(it)) }
-                day.countedCash?.let { KeyValue("نقد شمارش‌شده", Fa.rial(it) + " ریال") }
-                if (day.difference != 0L) KeyValue(if (day.difference < 0) "کسری صندوق" else "اضافه صندوق", Fa.rial(kotlin.math.abs(day.difference)) + " ریال",
-                    if (day.difference < 0) Sabou.colors.danger else Sabou.colors.moneyIn)
-                else if (day.countId != null) Text("صندوق با دفاتر برابر بود.", style = SabouType.caption, color = Sabou.colors.muted)
-            }
-        }
         action.error?.let { Banner(it) }
-        if (!closed && session.can(Permission.SALES_DAY_CLOSE)) {
-            FormCard("بستن روز") {
-                if (data.cashBoxes.isEmpty()) Banner("برای این شعبه صندوق نقدی تعریف نشده است.", ChipKind.ACCENT)
-                else {
-                    val box = data.cashBoxes.firstOrNull { it.account.id == cashBox } ?: data.cashBoxes.first()
-                    if (data.cashBoxes.size > 1) Picker("صندوق", data.cashBoxes.map { Choice(it.account.id, it.account.name) }, box.account.id, { cashBox = it })
-                    KeyValue("مانده دفتری صندوق", Fa.rial(box.balance) + " ریال")
-                    MoneyInput("نقد شمارش‌شده صندوق", counted, { counted = it }, hint = "پس از بستن، فروش این روز قابل تغییر نیست مگر با بازگشایی مالک.")
-                    counted?.let { c ->
-                        val diff = c.rial - box.balance
-                        if (diff != 0L) Banner((if (diff < 0) "کسری صندوق: " else "اضافه صندوق: ") + Fa.rial(kotlin.math.abs(diff)) + " ریال — با بستن روز در حساب «کسر و اضافه صندوق» ثبت می‌شود.", ChipKind.ACCENT)
-                    }
-                    PrimaryButton("شمارش و بستن روز", {
-                        val c = counted ?: return@PrimaryButton
-                        action.run({ salesOps.closeDay(CloseSalesDay(commandId.value, branch, date, box.account.id, c)) }) { commandId.value = GlobalId.new() }
-                    }, enabled = counted != null, busy = action.busy)
-                }
-            }
-        }
-        if (closed && session.can(Permission.SALES_DAY_REOPEN)) {
-            FormCard("بازگشایی روز") {
-                TextInput("دلیل بازگشایی", reason, { reason = it })
-                SecondaryButton("بازگشایی روز", {
-                    action.run({ salesOps.reopenDay(ReopenSalesDay(commandId.value, branch, date, reason)) }) { commandId.value = GlobalId.new(); reason = "" }
-                }, enabled = reason.trim().length >= 3)
-            }
-        }
-        if (!closed && session.can(Permission.SALES_REVERSE)) {
-            FormCard("برگشت فروش روز") {
-                Text("همه آثار فروش (مصرف انبار، درآمد، واریزها و طلب‌ها) با یک سند برگشتی خنثی می‌شود. سوابق حذف نمی‌شوند.", style = SabouType.caption, color = Sabou.colors.muted)
+        if (!closed && sale.status == SaleStatus.POSTED && session.can(Permission.SALES_REVERSE)) {
+            FormCard("برگشت این فروش") {
+                Text("همه آثار این فروش (مصرف انبار، درآمد، واریزها و طلب‌ها) با یک سند برگشتی خنثی می‌شود. سوابق حذف نمی‌شوند.", style = SabouType.caption, color = Sabou.colors.muted)
                 TextInput("دلیل برگشت", reason, { reason = it })
                 SecondaryButton("برگشت فروش", { confirmReverse = true }, enabled = reason.trim().length >= 3, danger = true)
             }
         }
     }
     if (confirmReverse) {
-        Confirm("برگشت فروش این روز؟", "پس از برگشت می‌توانید فروش را دوباره و درست ثبت کنید.", "برگشت بزن", onConfirm = {
+        Confirm("برگشت این فروش؟", "پس از برگشت می‌توانید فروش را دوباره و درست ثبت کنید.", "برگشت بزن", onConfirm = {
+            confirmReverse = false
             action.run({ salesOps.reverse(ReverseDailySale(commandId.value, branch, sale.id, date, reason)) }) { commandId.value = GlobalId.new(); reason = "" }
         }, onDismiss = { confirmReverse = false }, danger = true)
     }
