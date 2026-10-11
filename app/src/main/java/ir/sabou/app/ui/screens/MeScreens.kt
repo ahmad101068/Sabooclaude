@@ -530,6 +530,54 @@ object MeScreens {
         }
     }
 
+    /** The nightly backup (ADR-0025): folder, password once, status, run now, switch off. */
+    @Composable
+    private fun AutoBackupCard() {
+        val session = LocalSession.current
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        var status by remember { mutableStateOf(ir.sabou.app.data.AutoBackup.status(context)) }
+        var folder by remember { mutableStateOf<Uri?>(null) }
+        var password by remember { mutableStateOf("") }
+        var password2 by remember { mutableStateOf("") }
+        var busy by remember { mutableStateOf(false) }
+        var message by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+        val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> folder = uri }
+        fun runNow() {
+            busy = true; message = null
+            scope.launch {
+                val r = withContext(Dispatchers.IO) { ir.sabou.app.data.AutoBackup.runNow(context) }
+                busy = false
+                status = ir.sabou.app.data.AutoBackup.status(context)
+                message = r.fold({ "پشتیبان ساخته شد: $it" to true }, { restoreMessage(it) to false })
+            }
+        }
+        FormCard("پشتیبان خودکار شبانه") {
+            Text("هر شب یک فایل پشتیبان رمزگذاری‌شده در پوشه‌ای که انتخاب می‌کنید (کارت حافظه، پوشه‌ی همگام با فضای ابری، فلش) ساخته می‌شود و ${Fa.number(ir.sabou.app.data.AutoBackup.KEEP.toLong())} نسخه‌ی آخر می‌ماند. " +
+                "رمز یک بار گرفته می‌شود و فقط روی همین گوشی، قفل‌شده با کلید امن اندروید، می‌ماند؛ برای بازیابی روی گوشی دیگر همین رمز لازم است — جایی جدا از گوشی بنویسید.",
+                style = SabouType.caption, color = Sabou.colors.muted)
+            message?.let { (text, ok) -> Banner(text, if (ok) ChipKind.PRIMARY else ChipKind.DANGER) }
+            if (status.enabled) {
+                Banner("روشن است.", ChipKind.PRIMARY, R.drawable.ic_check)
+                status.lastSuccess?.let { KeyValue("آخرین پشتیبان", Fa.digits(java.text.SimpleDateFormat("yyyy/MM/dd HH:mm", java.util.Locale.US).format(java.util.Date(it)))) }
+                    ?: Text("هنوز پشتیبانی ساخته نشده است.", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
+                status.lastError?.let { Banner("آخرین تلاش ناموفق بود: $it", ChipKind.ACCENT) }
+                SecondaryButton("پشتیبان همین حالا", { runNow() }, enabled = !busy)
+                SecondaryButton("خاموش کردن", { ir.sabou.app.data.AutoBackup.disable(context); status = ir.sabou.app.data.AutoBackup.status(context) }, danger = true)
+            } else {
+                SecondaryButton(if (folder == null) "انتخاب پوشه‌ی پشتیبان" else "پوشه انتخاب شد ✓", { pick.launch(null) })
+                TextInput("رمز پشتیبان (حداقل ۱۰ نویسه)", password, { password = it }, secret = true)
+                TextInput("تکرار رمز", password2, { password2 = it }, secret = true, error = if (password2.isNotEmpty() && password2 != password) "یکسان نیست" else null)
+                PrimaryButton("روشن کردن و اولین پشتیبان", {
+                    val f = folder ?: return@PrimaryButton
+                    runCatching { ir.sabou.app.data.AutoBackup.enable(context, session.actor.userId, f, password.toCharArray()) }
+                        .onSuccess { password = ""; password2 = ""; status = ir.sabou.app.data.AutoBackup.status(context); runNow() }
+                        .onFailure { message = "این پوشه قابل استفاده نیست؛ پوشه‌ی دیگری انتخاب کنید." to false }
+                }, enabled = folder != null && password.length >= 10 && password == password2, busy = busy)
+            }
+        }
+    }
+
     /** Alerts on this phone (ADR-0024): what is announced, and a switch. */
     @Composable
     private fun AlertsCard() {
@@ -786,6 +834,7 @@ object MeScreens {
                     PrimaryButton("ساخت پشتیبان", { create.launch("sabou-${Fa.latinDigits(Fa.date(session.today)).replace('/', '-')}.sabou") },
                         enabled = password.length >= 10 && password == password2, busy = busy)
                 }
+                AutoBackupCard()
                 if (session.can(Permission.BACKUP_RESTORE)) {
                     FormCard("بازیابی از پشتیبان") {
                         Text("داده‌های فعلی با محتوای فایل جایگزین می‌شود. فایل پیش از جایگزینی کامل بررسی می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)

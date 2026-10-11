@@ -64,6 +64,7 @@ private data class HomeData(val today: Today?, val todos: List<Todo>, val setupM
 @Composable
 fun HomeScreen(nav: Nav) {
     val session = LocalSession.current
+    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val branch = session.branch
     val data by load(session, branch) {
         val date = session.today
@@ -96,6 +97,15 @@ fun HomeScreen(nav: Nav) {
         }
 
         val todos = buildList {
+            if (session.can(Permission.BACKUP_CREATE)) {
+                val backup = ir.sabou.app.data.AutoBackup.status(appContext)
+                val days = ir.sabou.app.data.AutoBackup.daysSinceLast(appContext)
+                when {
+                    !backup.enabled -> add(Todo(R.drawable.ic_backup, "پشتیبان خودکار خاموش است", "با گم شدن یا خرابی گوشی، داده‌ها از دست می‌رود", Route.Backup, true))
+                    backup.lastError != null && (days == null || days >= 1) -> add(Todo(R.drawable.ic_backup, "پشتیبان خودکار ناموفق بود", backup.lastError, Route.Backup, true))
+                    days != null && days >= 2 -> add(Todo(R.drawable.ic_backup, "آخرین پشتیبان ${Fa.number(days)} روز پیش", "پوشه یا گوشی را بررسی کنید", Route.Backup, true))
+                }
+            }
             if (session.actor.role == ir.sabou.platform.Role.OWNER && !identity.hasRecoveryCode()) {
                 add(Todo(R.drawable.ic_lock, "کد بازیابی رمز مالک را بسازید", "بدون آن، رمز فراموش‌شده فقط با بازیابی پشتیبان برمی‌گردد", Route.Security, true))
             }
