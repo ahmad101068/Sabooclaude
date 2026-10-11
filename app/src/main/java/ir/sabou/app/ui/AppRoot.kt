@@ -53,6 +53,7 @@ import ir.sabou.app.ui.components.SecondaryButton
 import ir.sabou.app.ui.components.TextInput
 import ir.sabou.app.ui.screens.BankRecScreens
 import ir.sabou.app.ui.screens.BooksScreens
+import ir.sabou.app.ui.screens.ClosingScreens
 import ir.sabou.app.ui.screens.CountPlanScreens
 import ir.sabou.app.ui.screens.PrepScreens
 import ir.sabou.app.ui.screens.FinanceScreens
@@ -532,6 +533,7 @@ private fun Pages(route: Route, nav: Nav) {
         Route.Transfer -> FinanceScreens.TransferForm(nav)
         Route.Reconcile -> FinanceScreens.ReconcileForm(nav)
         Route.BankStatements -> BankRecScreens.Statements(nav)
+        Route.MonthClose -> ClosingScreens.MonthClose(nav)
         is Route.StatementDetail -> BankRecScreens.Detail(nav, route.statementId)
         Route.Receivables -> FinanceScreens.Receivables(nav)
         is Route.Collect -> FinanceScreens.CollectForm(nav, route.receivableId)

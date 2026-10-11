@@ -187,6 +187,7 @@ object FinanceScreens {
                 if (session.can(Permission.SALES_VIEW)) item { NavRow(R.drawable.ic_person, "طلب از مشتریان", "دریافت نسیه‌ها", onClick = { nav.go(Route.Receivables) }) }
                 if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "بدهی به تأمین‌کنندگان", "فاکتورهای پرداخت‌نشده", onClick = { nav.go(Route.Purchases) }) }
                 if (session.can(Permission.LEDGER_VIEW)) item { NavRow(R.drawable.ic_finance, "تراز آزمایشی", "مانده همه حساب‌های دفتر کل", onClick = { nav.go(Route.TrialBalance) }) }
+                if (session.can(Permission.PERIOD_CLOSE)) item { NavRow(R.drawable.ic_check, "بستن ماه", "چک‌لیست پایان دوره و قفل دوره", onClick = { nav.go(Route.MonthClose) }) }
                 if (session.can(Permission.TREASURY_VIEW) || session.can(Permission.CHEQUE_MANAGE)) item {
                     NavRow(R.drawable.ic_payment, "چک‌ها", "دریافتی و پرداختی، سررسیدها، وصول و برگشت", tint = Sabou.colors.bank, tile = Sabou.colors.bankSoft, onClick = { nav.go(Route.Cheques) })
                 }

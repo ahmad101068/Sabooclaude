@@ -153,6 +153,7 @@ class SabouCore private constructor(
     val buying = Buying(this)
     val prep = Prep(this)
     val bankRec = BankRec(this)
+    val closing = Closing(this)
     val books = Books(this)
 
     /**
