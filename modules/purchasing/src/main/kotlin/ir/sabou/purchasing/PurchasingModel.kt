@@ -44,7 +44,8 @@ object Weekdays {
 }
 
 /** Goods line. [supplierItemName] is what the supplier calls it; it is remembered for next time. */
-data class InvoiceLine(val itemId: GlobalId, val quantity: Quantity, val value: Money, val supplierItemName: String = "") {
+/** [expiresOn]: the expiry printed on the goods, when there is one (ADR-0030). */
+data class InvoiceLine(val itemId: GlobalId, val quantity: Quantity, val value: Money, val supplierItemName: String = "", val expiresOn: BusinessDate? = null) {
     /** Rial per whole unit of the item. */
     val unitPrice: Long get() = if (quantity.isZero) 0 else Ratio.mulDiv(value.rial, Quantity.SCALE, quantity.micros)
 }

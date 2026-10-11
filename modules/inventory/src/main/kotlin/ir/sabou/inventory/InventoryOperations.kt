@@ -56,13 +56,15 @@ data class UpdateItem(
     val isActive: Boolean,
     /** The item's purchase packs; null keeps them as they are. */
     val packs: List<PackUnit>? = null,
+    /** Days it keeps (1..3650), or null for no shelf life. */
+    val shelfLifeDays: Int? = null,
 ) : Command {
     override val requiredPermission = Permission.INVENTORY_ITEM_MANAGE
     override val scope: Scope = Scope.Organization
     override val sharedCatalog = true
     override fun fingerprint() = "$itemId|$name|${minimumStock.micros}|${parLevel.micros}|$shelf|$allergens|$preferredSupplierId|" +
         approvedSupplierIds.map { it.value }.sorted().joinToString(",") + "|$isActive|" +
-        (packs?.joinToString(";") { "${it.name}=${it.contains.micros}" } ?: "keep")
+        (packs?.joinToString(";") { "${it.name}=${it.contains.micros}" } ?: "keep") + "|${shelfLifeDays ?: "-"}"
 }
 
 /** A new version of how a prepared item is made; [lines] yield [outputQuantity] of it. */
@@ -216,6 +218,7 @@ class InventoryOperations(
         ensure(items.all().none { it.id != item.id && it.name == name }) { DomainError.InvalidState("ITEM", "DUPLICATE_NAME") }
         ensure(cmd.parLevel.isZero || cmd.parLevel >= cmd.minimumStock) { DomainError.InvalidInput("parLevel", "سقف سفارش باید از حد سفارش بیشتر باشد.") }
         ensure(cmd.shelf.length <= 80 && cmd.allergens.length <= 200) { DomainError.InvalidInput("text", "متن بیش از حد طولانی است.") }
+        ensure(cmd.shelfLifeDays == null || cmd.shelfLifeDays in 1..3650) { DomainError.InvalidInput("shelfLife", "ماندگاری باید بین ۱ و ۳۶۵۰ روز باشد.") }
         ensure(cmd.preferredSupplierId == null || cmd.approvedSupplierIds.isEmpty() || cmd.preferredSupplierId in cmd.approvedSupplierIds) {
             DomainError.InvalidInput("supplier", "تأمین‌کننده‌ی اصلی باید در فهرست مجاز باشد.")
         }
@@ -231,7 +234,7 @@ class InventoryOperations(
         val next = item.copy(
             name = name, minimumStock = cmd.minimumStock, parLevel = cmd.parLevel, shelf = cmd.shelf.trim(), allergens = cmd.allergens.trim(),
             preferredSupplierId = cmd.preferredSupplierId, approvedSupplierIds = cmd.approvedSupplierIds, isActive = cmd.isActive,
-            packs = cmd.packs?.let(Units::validatePacks) ?: item.packs,
+            packs = cmd.packs?.let(Units::validatePacks) ?: item.packs, shelfLifeDays = cmd.shelfLifeDays,
         )
         items.save(next)
         ctx.audit(AuditDraft("ITEM_UPDATE", "ITEM", item.id.value, name))
@@ -274,7 +277,8 @@ class InventoryOperations(
         val source = SourceDocument(ModuleId.INVENTORY, PRODUCTION, docId)
         // One account, one branch: no journal is needed, inventory 1301 is unchanged.
         priced.forEach { gateway.stockOut(ctx, it.itemId, location, it.quantity, it.cost, MovementKind.PRODUCTION_OUT, cmd.date, null, source, null) }
-        gateway.stockIn(ctx, item.id, location, cmd.quantity, total, MovementKind.PRODUCTION_IN, cmd.date, null, source, null)
+        gateway.stockIn(ctx, item.id, location, cmd.quantity, total, MovementKind.PRODUCTION_IN, cmd.date, null, source, null,
+            listOfNotNull(gateway.shelfLifeEnd(item, cmd.date)?.let { LotPart(it, cmd.quantity) }))
         gateway.settleShortages(ctx, gateway.ownCapability, location, item.id, cmd.date)
         ctx.audit(AuditDraft("PRODUCTION", "ITEM", item.id.value, "loc=${location.id};qty=${cmd.quantity.micros};cost=${total.rial}"))
         docId
@@ -353,8 +357,8 @@ class InventoryOperations(
             ))).id
         }
         priced.forEach {
-            gateway.stockOut(ctx, it.itemId, from, it.quantity, it.cost, MovementKind.TRANSFER_OUT, cmd.date, outJournal, source, null)
-            gateway.stockIn(ctx, it.itemId, to, it.quantity, it.cost, MovementKind.TRANSFER_IN, cmd.date, inJournal, source, null)
+            val carried = gateway.stockOut(ctx, it.itemId, from, it.quantity, it.cost, MovementKind.TRANSFER_OUT, cmd.date, outJournal, source, null)
+            gateway.stockIn(ctx, it.itemId, to, it.quantity, it.cost, MovementKind.TRANSFER_IN, cmd.date, inJournal, source, null, carried)
         }
         priced.forEach { gateway.settleShortages(ctx, gateway.ownCapability, to, it.itemId, cmd.date) }
         docId

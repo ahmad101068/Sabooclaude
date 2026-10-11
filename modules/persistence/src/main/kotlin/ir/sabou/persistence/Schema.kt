@@ -198,6 +198,16 @@ object Schema {
                 "CREATE TABLE pos_aliases (pos TEXT NOT NULL, name_key TEXT NOT NULL, menu_item_id TEXT NOT NULL REFERENCES menu_items(id), PRIMARY KEY(pos, name_key))",
             ),
         ),
+        Migration(
+            11,
+            listOf(
+                // Expiry lots: a quantity layer over the stock balance (ADR-0030).
+                "CREATE TABLE stock_lots (id TEXT PRIMARY KEY, item_id TEXT NOT NULL REFERENCES items(id), location_id TEXT NOT NULL REFERENCES locations(id), " +
+                    "expires_on INTEGER NOT NULL, open INTEGER NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX stock_lots_open ON stock_lots(item_id, location_id, open, expires_on)",
+                "CREATE INDEX stock_lots_location ON stock_lots(location_id, open)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

@@ -29,6 +29,8 @@ data class Item(
     val approvedSupplierIds: Set<GlobalId> = emptySet(),
     /** Purchase packs (sack, carton): quantities may be typed in them and are converted by [Units]. */
     val packs: List<PackUnit> = emptyList(),
+    /** Days it keeps after it comes in or is made; goods then get an expiry date without typing one (ADR-0030). */
+    val shelfLifeDays: Int? = null,
 )
 
 /** A storeroom or kitchen. Always inside one branch: stock always has an owner (AUD-011). */

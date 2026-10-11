@@ -127,6 +127,7 @@ object PhoneAlerts {
         Alert.Kind.APPROVAL -> "فاکتور در انتظار تأیید"
         Alert.Kind.FOOD_COST -> "بهای مواد غذاها"
         Alert.Kind.INVOICE_MATCH -> "مغایرت فاکتور با سفارش"
+        Alert.Kind.EXPIRY -> "تاریخ انقضا"
     }
 }
 

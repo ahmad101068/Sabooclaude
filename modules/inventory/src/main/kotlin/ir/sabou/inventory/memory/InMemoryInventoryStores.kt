@@ -104,3 +104,10 @@ class InMemoryShortageStore : ir.sabou.platform.memory.Table<GlobalId, ir.sabou.
         values().filter { it.locationId in locationIds && it.status == ir.sabou.inventory.StockShortage.Status.OPEN }.sortedBy { it.date }
     override fun save(shortage: ir.sabou.inventory.StockShortage) = put(shortage.id, shortage)
 }
+
+class InMemoryLotStore : ir.sabou.platform.memory.Table<GlobalId, ir.sabou.inventory.StockLot>(), ir.sabou.inventory.LotStore {
+    override fun open(itemId: GlobalId, locationId: GlobalId) =
+        values().filter { it.itemId == itemId && it.locationId == locationId && !it.remaining.isZero }.sortedWith(ir.sabou.inventory.FEFO)
+    override fun openAt(locationIds: Set<GlobalId>) = values().filter { it.locationId in locationIds && !it.remaining.isZero }.sortedWith(ir.sabou.inventory.FEFO)
+    override fun save(lot: ir.sabou.inventory.StockLot) = put(lot.id, lot)
+}

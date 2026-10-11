@@ -12,7 +12,7 @@ import ir.sabou.platform.Permission
  * only if it comes back.
  */
 data class Alert(val key: String, val kind: Kind, val title: String, val text: String) {
-    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH }
+    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH, EXPIRY }
 }
 
 /**
@@ -35,6 +35,17 @@ class Alerts internal constructor(private val core: SabouCore) {
                         safe { core.overview.openShortages(Scope.Branch(b.id)) }.forEach { v ->
                             add(Alert("SHORT:${v.shortage.id.value}", Alert.Kind.SHORTAGE, "کسری مصرف «${v.item.name}»",
                                 "فروش ${Fa.quantity(v.shortage.open)} بیش از موجودی دفتری ${v.location.name} مصرف کرد؛ با ثبت خرید یا انبارگردانی بسته می‌شود."))
+                        }
+                    }
+                }
+                if (actor.role.allows(Permission.INVENTORY_VIEW)) {
+                    core.branches.all().filter { actor.canAccess(Scope.Branch(it.id)) }.forEach { b ->
+                        safe { core.overview.lots(Scope.Branch(b.id), today, EXPIRY_DAYS) }.forEach { v ->
+                            val left = v.lot.daysLeft(today)
+                            val state = when { left < 0 -> "expired"; left == 0L -> "today"; else -> "soon" }
+                            add(Alert("EXPIRY:${v.lot.id.value}:$state", Alert.Kind.EXPIRY,
+                                when { left < 0 -> "«${v.item.name}» تاریخ گذشته است"; left == 0L -> "«${v.item.name}» امروز منقضی می‌شود"; else -> "«${v.item.name}» فردا منقضی می‌شود" },
+                                "${Fa.quantity(v.lot.remaining)} در ${v.location.name} · انقضا ${Fa.date(v.lot.expiresOn)}. اول همین را مصرف کنید یا ضایعات ثبت کنید."))
                         }
                     }
                 }
@@ -89,5 +100,7 @@ class Alerts internal constructor(private val core: SabouCore) {
         const val PRICE_DAYS = 2L
         const val PRICE_THRESHOLD_BP = 1_000L
         const val CHEQUE_DAYS = 2L
+        /** Goods expiring by tomorrow (and those past their date) are alerted. */
+        const val EXPIRY_DAYS = 1L
     }
 }

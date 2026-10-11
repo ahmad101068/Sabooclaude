@@ -363,7 +363,7 @@ class PurchasingOperations(
         val title = "خرید از ${supplier.name} · فاکتور $number"
         if (cmd.lines.isNotEmpty()) {
             inventory.receive(
-                ctx, capability, cmd.locationId!!, cmd.lines.map { ReceiptLine(it.itemId, it.quantity, it.value) }, cmd.date, INVOICE, invoiceId, title,
+                ctx, capability, cmd.locationId!!, cmd.lines.map { ReceiptLine(it.itemId, it.quantity, it.value, it.expiresOn) }, cmd.date, INVOICE, invoiceId, title,
                 listOf(LineDraft(StandardAccounts.PAYABLE, credit = goods, memo = supplier.name, by = capability)),
             )
         }

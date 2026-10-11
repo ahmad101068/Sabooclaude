@@ -78,8 +78,8 @@ class SqlSupplierStore(db: SqlDatabase) : SqlTable(db), SupplierStore {
 }
 
 class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
-    private fun lines(l: List<InvoiceLine>) = l.map { mapOf("item" to it.itemId.value, "qty" to it.quantity.micros, "value" to it.value.rial, "supplierName" to it.supplierItemName.ifEmpty { null }) }
-    private fun linesOf(d: List<Doc>) = d.map { InvoiceLine(Codec.id(it.str("item")), Codec.qty(it.long("qty")), Codec.money(it.long("value")), it.strOr("supplierName", "")) }
+    private fun lines(l: List<InvoiceLine>) = l.map { mapOf("item" to it.itemId.value, "qty" to it.quantity.micros, "value" to it.value.rial, "supplierName" to it.supplierItemName.ifEmpty { null }, "expires" to it.expiresOn?.epochDay) }
+    private fun linesOf(d: List<Doc>) = d.map { InvoiceLine(Codec.id(it.str("item")), Codec.qty(it.long("qty")), Codec.money(it.long("value")), it.strOr("supplierName", ""), it.longOrNull("expires")?.let(::BusinessDate)) }
 
     private fun resolutionOf(d: Doc?) = d?.let {
         ReviewResolution(

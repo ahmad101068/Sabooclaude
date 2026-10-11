@@ -77,6 +77,9 @@ import ir.sabou.payroll.ReversePayroll
 import ir.sabou.payroll.RunStatus
 import ir.sabou.platform.Permission
 
+/** Goods expiring within this many days are listed on the stock screen. */
+private const val EXPIRY_CARD_DAYS = 3L
+
 object OperationsScreens {
 
     // ------------------------------------------------------------ Hub (design: Operations)
@@ -155,6 +158,21 @@ object OperationsScreens {
                                 open.forEach { v ->
                                     KeyValue("${v.item.name} · ${v.location.name}", "${Fa.quantity(v.shortage.open)} ${unitName(v.item.unit)} · ${Fa.date(v.shortage.date)}")
                                 }
+                            }
+                        }
+                        val expiring by load(session, branch) { overview.lots(branch, session.today, EXPIRY_CARD_DAYS) }
+                        expiring.orNull()?.takeIf { it.isNotEmpty() }?.let { lots ->
+                            SCard {
+                                Text("تاریخ انقضا", style = SabouType.section, color = Sabou.colors.ink)
+                                Text("اول همین‌ها را مصرف کنید (اول منقضی، اول مصرف). تاریخ‌گذشته را با دلیل «تاریخ گذشته» ضایعات ثبت کنید.",
+                                    style = SabouType.caption, color = Sabou.colors.muted)
+                                lots.forEach { v ->
+                                    val left = v.lot.daysLeft(session.today)
+                                    val text = when { left < 0 -> "گذشته (${Fa.date(v.lot.expiresOn)})"; left == 0L -> "امروز"; left == 1L -> "فردا"; else -> "${Fa.number(left)} روز دیگر" }
+                                    KeyValue("${v.item.name} · ${Fa.quantity(v.lot.remaining)} ${unitName(v.item.unit)} · ${v.location.name}", text,
+                                        valueColor = if (left <= 0) Sabou.colors.danger else Sabou.colors.ink)
+                                }
+                                if (session.can(Permission.INVENTORY_WASTE) && lots.any { it.lot.daysLeft(session.today) < 0 }) SecondaryButton("ثبت ضایعات", { nav.go(Route.Waste) })
                             }
                         }
                         Loaded(balances) { list ->
