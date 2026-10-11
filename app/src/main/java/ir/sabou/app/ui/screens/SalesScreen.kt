@@ -541,7 +541,7 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData, sa
                             action.run({ salesOps.post(PostDailySale(postId.value, branch, saved.resultId)) }) { postId.value = GlobalId.new(); onDone() }
                         }
                     }, enabled = kitchen != null && form.payable() == form.settled(), busy = action.busy)
-                    Text("با ثبت نهایی، مصرف مواد اولیه به بهای تمام‌شده، درآمد، واریز به صندوق‌ها و طلب مشتریان یک‌جا و با هم ثبت می‌شود.",
+                    Text("با ثبت نهایی، مصرف مواد اولیه به بهای تمام‌شده، درآمد، واریز به صندوق‌ها و طلب مشتریان یک‌جا ثبت می‌شود. کمبود موجودی دفتری جلوی ثبت را نمی‌گیرد؛ به‌صورت «کسری مصرف» می‌ماند تا با ورود کالا تسویه شود.",
                         style = SabouType.caption, color = Sabou.colors.muted)
                 } else {
                     Text("ثبت نهایی با مدیر شعبه است؛ پیش‌نویس را ذخیره کنید.", style = SabouType.caption, color = Sabou.colors.muted)
@@ -608,6 +608,11 @@ private fun SaleDetail(branch: Scope.Branch, date: BusinessDate, data: SalesData
             if (!sale.netFood.isZero) {
                 KeyValue("درصد بهای غذا (Food cost)", Fa.percent(ir.sabou.kernel.Ratio.mulDiv(sale.cost.rial, 10_000, sale.netFood.rial)))
             }
+        }
+        val shortages by load(session, sale.id, sale.status) { overview.saleShortages(branch, sale.id) }
+        shortages.orNull()?.filter { it.shortage.status == ir.sabou.inventory.StockShortage.Status.OPEN }?.takeIf { it.isNotEmpty() }?.let { open ->
+            Banner("این فروش بیشتر از موجودی دفتری مصرف کرد: " + open.joinToString("، ") { "${it.item.name} ${Fa.quantity(it.shortage.open)} ${unitName(it.item.unit)}" } +
+                ". با ورود کالا به انبار به بهای خودش تسویه می‌شود؛ اگر زودتر انبارگردانی شود، با برآورد بهای آخرین خرید بسته می‌شود.", ChipKind.ACCENT)
         }
         SCard {
             Text("اقلام فروش", style = SabouType.section, color = Sabou.colors.ink)

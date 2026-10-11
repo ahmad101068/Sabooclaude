@@ -180,6 +180,16 @@ object Schema {
                 "CREATE INDEX menu_prices_item ON menu_prices(menu_item_id, scope, effective_from)",
             ) + immutable("menu_prices"),
         ),
+        Migration(
+            9,
+            listOf(
+                // Consumption beyond book stock, settled later at cost (ADR-0022).
+                "CREATE TABLE stock_shortages (id TEXT PRIMARY KEY, item_id TEXT NOT NULL REFERENCES items(id), location_id TEXT NOT NULL REFERENCES locations(id), " +
+                    "date INTEGER NOT NULL, source_type TEXT NOT NULL, source_id TEXT NOT NULL, status TEXT NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX stock_shortages_open ON stock_shortages(item_id, location_id, status)",
+                "CREATE INDEX stock_shortages_source ON stock_shortages(source_type, source_id)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

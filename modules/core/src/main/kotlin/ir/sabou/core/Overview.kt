@@ -43,6 +43,7 @@ data class BranchDay(val branch: Branch, val sales: List<DailySale>, val closed:
     val drafts: List<DailySale> get() = sales.filter { it.status == ir.sabou.sales.SaleStatus.DRAFT }
 }
 data class MenuEntry(val item: MenuItem, val latest: RecipeVersion?)
+data class ShortageView(val item: Item, val location: Location, val shortage: ir.sabou.inventory.StockShortage)
 
 /**
  * A menu item's price in one branch on one day: [price] in force (null: none, typed at the sale), whether it is
@@ -268,6 +269,23 @@ class Overview internal constructor(private val core: SabouCore) {
                 val q = stocked[item.id]?.quantity ?: Quantity.ZERO
                 if (q < item.minimumStock) LowStock(item, location, q) else null
             }
+        }
+    }
+
+    /** Consumption beyond book stock still waiting to be settled at [branch]'s locations (ADR-0022). */
+    fun openShortages(branch: Scope.Branch): List<ShortageView> {
+        actor(Permission.INVENTORY_VIEW, Permission.SALES_VIEW).require(branch)
+        val locations = core.locations.all().filter { it.scope == branch }.associateBy { it.id }
+        return core.inventoryGateway.openShortages(locations.keys).mapNotNull { sh ->
+            ShortageView(core.items.byId(sh.itemId) ?: return@mapNotNull null, locations.getValue(sh.locationId), sh)
+        }
+    }
+
+    /** Shortages recorded by one sale (open, settled, written off or cancelled). */
+    fun saleShortages(branch: Scope.Branch, saleId: ir.sabou.kernel.GlobalId): List<ShortageView> {
+        actor(Permission.SALES_VIEW).require(branch)
+        return core.inventoryGateway.shortagesOf(ir.sabou.sales.SalesOperations.CONSUMPTION, saleId).mapNotNull { sh ->
+            ShortageView(core.items.byId(sh.itemId) ?: return@mapNotNull null, core.locations.byId(sh.locationId) ?: return@mapNotNull null, sh)
         }
     }
 

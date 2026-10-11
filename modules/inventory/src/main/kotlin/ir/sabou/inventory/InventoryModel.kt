@@ -122,6 +122,8 @@ interface StockStore {
     fun movementsAt(locationId: GlobalId, from: BusinessDate, to: BusinessDate): List<StockMovement>
     /** Net quantity and value per item at [locationId] from movements dated before [date]. */
     fun totalsBefore(locationId: GlobalId, date: BusinessDate): List<MovementTotal>
+    /** Rial per stock unit of the item's most recent purchase receipt anywhere, or null. */
+    fun lastInboundUnitCost(itemId: GlobalId): Long?
 }
 
 interface RecipeStore {

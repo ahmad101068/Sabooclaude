@@ -275,6 +275,7 @@ class InventoryOperations(
         // One account, one branch: no journal is needed, inventory 1301 is unchanged.
         priced.forEach { gateway.stockOut(ctx, it.itemId, location, it.quantity, it.cost, MovementKind.PRODUCTION_OUT, cmd.date, null, source, null) }
         gateway.stockIn(ctx, item.id, location, cmd.quantity, total, MovementKind.PRODUCTION_IN, cmd.date, null, source, null)
+        gateway.settleShortages(ctx, gateway.ownCapability, location, item.id, cmd.date)
         ctx.audit(AuditDraft("PRODUCTION", "ITEM", item.id.value, "loc=${location.id};qty=${cmd.quantity.micros};cost=${total.rial}"))
         docId
     }
@@ -355,6 +356,7 @@ class InventoryOperations(
             gateway.stockOut(ctx, it.itemId, from, it.quantity, it.cost, MovementKind.TRANSFER_OUT, cmd.date, outJournal, source, null)
             gateway.stockIn(ctx, it.itemId, to, it.quantity, it.cost, MovementKind.TRANSFER_IN, cmd.date, inJournal, source, null)
         }
+        priced.forEach { gateway.settleShortages(ctx, gateway.ownCapability, to, it.itemId, cmd.date) }
         docId
     }
 

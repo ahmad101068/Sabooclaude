@@ -147,12 +147,11 @@ class SabouCoreTest {
         val w = setUp(core)
         val journalsBefore = core.journals.all().size
         val auditBefore = core.db.query("SELECT COUNT(*) AS n FROM audit_events").single().long("n")
-        val tooBig = core.salesOps.saveDraft(
-            SaveSaleDraft(id(), w.branch, day, w.kitchen, listOf(SaleLineInput(w.pizza, Quantity.units(60), rial(100_000))),
-                rial(0), rial(0), rial(0), listOf(Settlement.Liquid(w.cash, rial(6_000_000)))),
-        ).resultId
-        val auditWithDraft = auditBefore + 1
-        val e = assertFailsWith<DomainException> { core.salesOps.post(PostDailySale(id(), w.branch, tooBig)) }   // needs 12 kg, has 10
+        // Throwing away more cheese than there is fails as a whole (waste, unlike a sale, must be in stock).
+        val e = assertFailsWith<DomainException> {
+            core.inventory.waste(ir.sabou.inventory.RecordWaste(id(), w.branch, w.kitchen, w.cheese, Quantity.units(12), ir.sabou.inventory.WasteReason.SPOILAGE, "", day))
+        }
+        val auditWithDraft = auditBefore
         assertTrue(e.error.code.startsWith("INSUFFICIENT_STOCK"))
         assertEquals(journalsBefore, core.journals.all().size)
         assertEquals(auditWithDraft, core.db.query("SELECT COUNT(*) AS n FROM audit_events").single().long("n"))
@@ -366,4 +365,43 @@ class SabouCoreTest {
         writer.join()
         assertEquals(listOf("write-end", "exclusive"), order)
     }
+
+    // ------------------------------------------------------------ Sale beyond book stock (ADR-0022)
+
+    @Test fun aSaleBeyondBookStockPostsAndTheShortageIsSettledOrWrittenOff() {
+        val core = boot()
+        val w = setUp(core)                                   // 10 kg cheese at 3,000,000 a kg
+        fun sell(portions: Long) = core.salesOps.saveDraft(SaveSaleDraft(id(), w.branch, day, w.kitchen, listOf(SaleLineInput(w.pizza, Quantity.units(portions), rial(100_000))),
+            rial(0), rial(0), rial(0), listOf(Settlement.Liquid(w.cash, rial(100_000 * portions))))).resultId.also { core.salesOps.post(PostDailySale(id(), w.branch, it)) }
+        val first = sell(60)                                  // needs 12 kg: 10 issued, 2 kg short
+        assertEquals(ir.sabou.sales.SaleStatus.POSTED, core.sales.sale(first)!!.status)
+        assertEquals(Quantity.ZERO, core.inventoryGateway.balance(w.cheese, w.kitchen).quantity)
+        val open = core.inventoryGateway.openShortages(setOf(w.kitchen)).single()
+        assertEquals(Quantity.units(2), open.open)
+        assertEquals(30_000_000, core.ledger.balance(StandardAccounts.COGS).rial)
+
+        // Cheese comes in: the 2 kg are taken from it at its cost (3,500,000 a kg).
+        val supplier = core.purchasing.registerSupplier(RegisterSupplier(id(), "لبنیات دوم", "021")).resultId
+        core.purchasing.postInvoice(PostPurchaseInvoice(id(), w.branch, supplier, "۹", w.kitchen, day, day, listOf(InvoiceLine(w.cheese, Quantity.units(4), rial(14_000_000)))))
+        assertEquals(Quantity.units(2), core.inventoryGateway.balance(w.cheese, w.kitchen).quantity)
+        assertEquals(37_000_000, core.ledger.balance(StandardAccounts.COGS).rial)
+        assertTrue(core.inventoryGateway.openShortages(setOf(w.kitchen)).isEmpty())
+        assertBooksAgree(core, w)
+
+        // Another shortage of 1 kg, then a count finds 0 kg: written off at the last cost (3,500,000).
+        sell(15)                                              // needs 3 kg, has 2
+        val count = core.counts.submit(ir.sabou.inventory.SubmitStockCount(id(), w.branch, w.kitchen, day, listOf(ir.sabou.inventory.CountEntry(w.cheese, Quantity.ZERO)))).resultId
+        core.counts.approve(ir.sabou.inventory.ApproveStockCount(id(), w.branch, count, emptyMap()))
+        assertTrue(core.inventoryGateway.openShortages(setOf(w.kitchen)).isEmpty())
+        assertEquals(37_000_000 + 7_000_000 + 3_500_000, core.ledger.balance(StandardAccounts.COGS).rial)
+        assertEquals(-3_500_000, core.ledger.balance(StandardAccounts.INVENTORY_VARIANCE).rial)
+        assertBooksAgree(core, w)
+
+        // Reversing the first sale brings back what it took, including the 2 kg settled later.
+        core.salesOps.reverse(ir.sabou.sales.ReverseDailySale(id(), w.branch, first, day, "ثبت اشتباه"))
+        assertEquals(Quantity.units(12), core.inventoryGateway.balance(w.cheese, w.kitchen).quantity)
+        assertEquals(10_500_000, core.ledger.balance(StandardAccounts.COGS).rial)
+        assertBooksAgree(core, w)
+    }
 }
+

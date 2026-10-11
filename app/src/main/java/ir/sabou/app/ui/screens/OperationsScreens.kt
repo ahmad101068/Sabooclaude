@@ -146,6 +146,17 @@ object OperationsScreens {
                         val balances by load(session, loc) { loc?.let { overview.stock(it) }.orEmpty() }
                         if (d.locations.size > 1) Picker("انبار", d.locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
                         if (d.items.isEmpty()) EmptyState("کالایی تعریف نشده است.", "تعریف کالا") { nav.go(Route.Items) }
+                        val shortages by load(session, branch) { overview.openShortages(branch) }
+                        shortages.orNull()?.takeIf { it.isNotEmpty() }?.let { open ->
+                            SCard {
+                                Text("کسری مصرف باز", style = SabouType.section, color = Sabou.colors.onAccentSoft)
+                                Text("فروش بیش از موجودی دفتری مصرف کرده است. با ثبت خرید، انتقال یا تولید همین کالا در همین انبار خودکار تسویه می‌شود؛ انبارگردانی آن را با برآورد بهای آخرین خرید می‌بندد.",
+                                    style = SabouType.caption, color = Sabou.colors.muted)
+                                open.forEach { v ->
+                                    KeyValue("${v.item.name} · ${v.location.name}", "${Fa.quantity(v.shortage.open)} ${unitName(v.item.unit)} · ${Fa.date(v.shortage.date)}")
+                                }
+                            }
+                        }
                         Loaded(balances) { list ->
                             val byItem = list.associateBy { it.itemId }
                             SCard {
