@@ -22,6 +22,7 @@ MODULES = {  # module -> direct dependencies (must mirror build.gradle.kts)
     'payroll': ['treasury'],
     'assets': ['treasury'],
     'backup': ['kernel'],
+    'posimport': ['kernel'],
     'persistence': ['sales', 'purchasing', 'payroll', 'assets'],
     'core': ['persistence'],
 }

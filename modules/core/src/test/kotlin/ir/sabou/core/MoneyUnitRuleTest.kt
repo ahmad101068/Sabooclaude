@@ -24,6 +24,8 @@ class MoneyUnitRuleTest {
             .first { File(it, "settings.gradle.kts").exists() }
         val sources = listOf("app/src/main", "modules").map { File(root, it) }
             .flatMap { dir -> dir.walkTopDown().filter { it.isFile && it.extension in setOf("kt", "xml") && "/src/main/" in it.path && "/build/" !in it.path }.toList() }
+            // The one edge where a file written in Toman is read (and converted, ADR-0026).
+            .filter { "/modules/posimport/" !in it.path }
         assertTrue(sources.size > 100, "found only ${sources.size} source files")
         val hits = sources.flatMap { f ->
             f.readLines().withIndex().flatMap { (i, line) ->
