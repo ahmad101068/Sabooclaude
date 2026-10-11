@@ -116,7 +116,7 @@ object Fa {
     fun fromJalali(year: Int, month: Int, day: Int): BusinessDate = ir.sabou.kernel.JalaliCalendar.date(year, month, day)
 
     /** 0 = Saturday … 6 = Friday (the Persian week). */
-    fun weekdayIndex(date: BusinessDate): Int = Math.floorMod(date.epochDay + 5, 7L).toInt()
+    fun weekdayIndex(date: BusinessDate): Int = ir.sabou.kernel.JalaliCalendar.weekdayIndex(date)
 
     fun weekday(date: BusinessDate): String = weekdayNames[weekdayIndex(date)]
 
@@ -136,11 +136,7 @@ object Fa {
         return fromJalali(y, m, d)
     }
 
-    fun monthLength(year: Int, month: Int): Int = when {
-        month <= 6 -> 31
-        month <= 11 -> 30
-        else -> if (ir.sabou.kernel.JalaliCalendar.isLeap(year)) 30 else 29
-    }
+    fun monthLength(year: Int, month: Int): Int = ir.sabou.kernel.JalaliCalendar.monthLength(year, month)
 
     private val ones = listOf("", "یک", "دو", "سه", "چهار", "پنج", "شش", "هفت", "هشت", "نه", "ده", "یازده", "دوازده", "سیزده", "چهارده",
         "پانزده", "شانزده", "هفده", "هجده", "نوزده")

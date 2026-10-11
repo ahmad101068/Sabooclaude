@@ -89,11 +89,6 @@ class Dashboards internal constructor(private val core: SabouCore) {
             return Triple(from, previousFrom, previousTo)
         }
 
-        fun monthLength(year: Int, month: Int): Int = when {
-            month <= 6 -> 31
-            month <= 11 -> 30
-            JalaliCalendar.isLeap(year) -> 30
-            else -> 29
-        }
+        fun monthLength(year: Int, month: Int): Int = JalaliCalendar.monthLength(year, month)
     }
 }

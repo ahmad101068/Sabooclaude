@@ -111,3 +111,9 @@ class InMemoryLotStore : ir.sabou.platform.memory.Table<GlobalId, ir.sabou.inven
     override fun openAt(locationIds: Set<GlobalId>) = values().filter { it.locationId in locationIds && !it.remaining.isZero }.sortedWith(ir.sabou.inventory.FEFO)
     override fun save(lot: ir.sabou.inventory.StockLot) = put(lot.id, lot)
 }
+
+class InMemoryCountPlanStore : ir.sabou.platform.memory.Table<GlobalId, ir.sabou.inventory.CountPlan>(), ir.sabou.inventory.CountPlanStore {
+    override fun byId(id: GlobalId) = get(id)
+    override fun all() = values()
+    override fun save(plan: ir.sabou.inventory.CountPlan) = put(plan.id, plan)
+}

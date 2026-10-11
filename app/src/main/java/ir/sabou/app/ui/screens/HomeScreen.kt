@@ -124,6 +124,9 @@ fun HomeScreen(nav: Nav) {
                 add(Todo(R.drawable.ic_alert, "${Fa.number(list.size.toLong())} کسری مصرف باز",
                     list.take(2).joinToString("، ") { it.item.name } + " — فروش بیش از موجودی دفتری؛ با ثبت خرید یا انبارگردانی بسته می‌شود", Route.Stock, true))
             }
+            if (branch != null && session.can(Permission.INVENTORY_COUNT)) safe { overview.countsDue(branch, session.today).filter { it.due } }?.takeIf { it.isNotEmpty() }?.let { list ->
+                add(Todo(R.drawable.ic_count, "${Fa.number(list.size.toLong())} شمارش در موعد", list.joinToString("، ") { it.plan.name }, Route.Count, false))
+            }
             if (branch != null && session.can(Permission.INVENTORY_VIEW)) safe { overview.lots(branch, session.today, 0) }?.takeIf { it.isNotEmpty() }?.let { list ->
                 val expired = list.count { it.lot.daysLeft(session.today) < 0 }
                 add(Todo(R.drawable.ic_alert, if (expired > 0) "${Fa.number(expired.toLong())} کالای تاریخ‌گذشته در انبار" else "${Fa.number(list.size.toLong())} کالا امروز منقضی می‌شود",

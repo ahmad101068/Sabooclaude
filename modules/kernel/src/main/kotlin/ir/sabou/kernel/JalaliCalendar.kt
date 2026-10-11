@@ -13,6 +13,10 @@ object JalaliCalendar {
     fun date(year: Int, month: Int, day: Int): BusinessDate = BusinessDate(Algorithm.toJdn(year, month, day) - EPOCH_JDN)
     fun isLeap(year: Int): Boolean = Algorithm.isLeap(year)
     fun yearOf(date: BusinessDate): Int = of(date).year
+    /** 0 = Saturday … 6 = Friday (the Persian week). */
+    fun weekdayIndex(date: BusinessDate): Int = Math.floorMod(date.epochDay + 5, 7L).toInt()
+    /** Days in a Jalali month (Esfand has 30 in a leap year). */
+    fun monthLength(year: Int, month: Int): Int = when { month <= 6 -> 31; month <= 11 -> 30; isLeap(year) -> 30; else -> 29 }
 
 
     /** Borkowski's algorithm as published in jalaali-js (MIT); valid for 1–3177 AP. */
