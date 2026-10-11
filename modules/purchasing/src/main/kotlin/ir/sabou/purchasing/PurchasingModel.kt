@@ -106,6 +106,46 @@ interface ApprovalRuleStore {
     fun saveSelfApproval(policy: SelfApprovalPolicy)
 }
 
+/**
+ * A difference between an invoice and its purchase order, or a sign that it repeats another invoice. Quantities
+ * in micro-units, prices in Rial per unit.
+ */
+data class Discrepancy(val kind: Kind, val itemId: GlobalId?, val ordered: Long?, val invoiced: Long?) {
+    enum class Kind { QUANTITY, PRICE, NOT_ORDERED, NOT_DELIVERED, POSSIBLE_DUPLICATE }
+}
+
+/** Who looked at the differences and accepted the invoice as it is, and why. */
+data class MatchReview(val userId: GlobalId, val name: String, val atEpochMillis: Long, val note: String)
+
+/** Order ↔ invoice comparison (ADR-0029). */
+object InvoiceMatching {
+    /** A price within this share of the ordered price is the same price (rounding, small changes). */
+    const val PRICE_TOLERANCE_BP = 200L
+    /** The invoice number without spaces, dashes, slashes or leading zeros, Persian digits as Latin: «۰۰۱۲-ب» ≈ «12ب». */
+    fun numberKey(number: String): String {
+        val latin = number.map { c -> if (c in '۰'..'۹') ('0' + (c - '۰')) else if (c in '٠'..'٩') ('0' + (c - '٠')) else c }.joinToString("")
+        return latin.filter { it.isLetterOrDigit() }.trimStart('0').lowercase()
+    }
+
+    fun compare(order: PurchaseOrder, lines: List<InvoiceLine>): List<Discrepancy> {
+        val invoiced = lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } to l.sumOf { it.value.rial } }
+        val ordered = order.lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } to l.first().unitPrice.rial }
+        val out = ArrayList<Discrepancy>()
+        ordered.forEach { (item, o) ->
+            val got = invoiced[item]
+            if (got == null) { out += Discrepancy(Discrepancy.Kind.NOT_DELIVERED, item, o.first, 0); return@forEach }
+            if (got.first != o.first) out += Discrepancy(Discrepancy.Kind.QUANTITY, item, o.first, got.first)
+            if (got.first > 0) {
+                val price = Ratio.mulDiv(got.second, Quantity.SCALE, got.first)
+                val change = Ratio.changeBp(o.second, price)
+                if (change != null && kotlin.math.abs(change) > PRICE_TOLERANCE_BP) out += Discrepancy(Discrepancy.Kind.PRICE, item, o.second, price)
+            }
+        }
+        (invoiced.keys - ordered.keys).forEach { item -> out += Discrepancy(Discrepancy.Kind.NOT_ORDERED, item, 0, invoiced.getValue(item).first) }
+        return out
+    }
+}
+
 data class PurchaseInvoice(
     val id: GlobalId,
     val supplierId: GlobalId,
@@ -128,7 +168,13 @@ data class PurchaseInvoice(
     /** Approvals needed before it may be paid, fixed when it is recorded (the rules then in force). */
     val requiredApprovals: Int = 0,
     val approvals: List<Approval> = emptyList(),
+    /** Differences from its order and signs of a duplicate, found when it was recorded (ADR-0029). */
+    val discrepancies: List<Discrepancy> = emptyList(),
+    val matchReview: MatchReview? = null,
 ) {
+    /** Not payable until someone reviews the differences. */
+    val needsMatchReview: Boolean get() = discrepancies.isNotEmpty() && matchReview == null
+
     val category: InvoiceCategory get() = when {
         accountLines.isEmpty() -> InvoiceCategory.GOODS
         lines.isEmpty() && reviewLines.isEmpty() -> InvoiceCategory.EXPENSES

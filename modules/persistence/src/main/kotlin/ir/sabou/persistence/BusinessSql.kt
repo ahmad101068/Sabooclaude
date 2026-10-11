@@ -22,6 +22,8 @@ import ir.sabou.platform.AttachmentStore
 import ir.sabou.purchasing.AccountLine
 import ir.sabou.purchasing.Approval
 import ir.sabou.purchasing.ApprovalRule
+import ir.sabou.purchasing.Discrepancy
+import ir.sabou.purchasing.MatchReview
 import ir.sabou.purchasing.ApprovalRuleStore
 import ir.sabou.purchasing.InvoiceCategory
 import ir.sabou.purchasing.CreditAllocation
@@ -98,6 +100,10 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
         note = d.strOr("note", ""), orderId = Codec.idOrNull(d.strOrNull("order")), journalIds = d.strsOr("journals").map(Codec::id),
         recordedBy = Codec.idOrNull(d.strOrNull("recordedBy")), requiredApprovals = d.intOr("requiredApprovals", 0),
         approvals = d.docsOr("approvals").map { Approval(Codec.id(it.str("user")), it.str("name"), it.long("at"), it.boolOr("self", false), it.strOrNull("reason")) },
+        discrepancies = d.docsOr("discrepancies").map {
+            Discrepancy(Discrepancy.Kind.valueOf(it.str("kind")), Codec.idOrNull(it.strOrNull("item")), it.longOrNull("ordered"), it.longOrNull("invoiced"))
+        },
+        matchReview = d.docOrNull("matchReview")?.let { MatchReview(Codec.id(it.str("user")), it.str("name"), it.long("at"), it.str("note")) },
     )
 
     override fun invoice(id: GlobalId) = doc("SELECT doc FROM purchase_invoices WHERE id = ?", id.value)?.let(::invoiceOf)
@@ -127,6 +133,8 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
                     "note" to invoice.note, "order" to invoice.orderId?.value, "journals" to invoice.journalIds.map { it.value },
                     "recordedBy" to invoice.recordedBy?.value, "requiredApprovals" to invoice.requiredApprovals.toLong(),
                     "approvals" to invoice.approvals.map { mapOf("user" to it.userId.value, "name" to it.name, "at" to it.atEpochMillis, "self" to it.self, "reason" to it.reason) },
+                    "discrepancies" to invoice.discrepancies.map { mapOf("kind" to it.kind.name, "item" to it.itemId?.value, "ordered" to it.ordered, "invoiced" to it.invoiced) },
+                    "matchReview" to invoice.matchReview?.let { mapOf("user" to it.userId.value, "name" to it.name, "at" to it.atEpochMillis, "note" to it.note) },
                 ),
             ),
         ),

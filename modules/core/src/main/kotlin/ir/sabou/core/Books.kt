@@ -104,6 +104,15 @@ class Books internal constructor(private val core: SabouCore) {
             .map { ApprovalItem(InvoiceRow(it, names[it.supplierId].orEmpty(), core.purchasing.outstanding(it.id)), it.approvals.map { ap -> ap.name }) }
     }
 
+    /** Invoices whose differences from their order (or a possible duplicate) nobody has reviewed yet (ADR-0029). */
+    fun matchReviews(): List<InvoiceRow> {
+        val a = actor(Permission.PURCHASE_APPROVE, Permission.PURCHASE_VIEW)
+        val names = core.suppliers.all().associate { it.id to it.name }
+        return core.purchases.invoices().filter { it.status == InvoiceStatus.POSTED && it.needsMatchReview && a.canAccess(it.scope) }
+            .sortedBy { it.dueDate }
+            .map { InvoiceRow(it, names[it.supplierId].orEmpty(), core.purchasing.outstanding(it.id)) }
+    }
+
     // ------------------------------------------------------------ Budgets
 
     fun budgetEntries(scope: Scope): List<BudgetEntry> {
