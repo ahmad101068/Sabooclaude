@@ -126,6 +126,7 @@ object PhoneAlerts {
         Alert.Kind.SHORTAGE -> "کسری مصرف"
         Alert.Kind.APPROVAL -> "فاکتور در انتظار تأیید"
         Alert.Kind.FOOD_COST -> "بهای مواد غذاها"
+        Alert.Kind.INVOICE_MATCH -> "مغایرت فاکتور با سفارش"
     }
 }
 

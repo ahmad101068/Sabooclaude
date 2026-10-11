@@ -12,7 +12,7 @@ import ir.sabou.platform.Permission
  * only if it comes back.
  */
 data class Alert(val key: String, val kind: Kind, val title: String, val text: String) {
-    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST }
+    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH }
 }
 
 /**
@@ -70,6 +70,12 @@ class Alerts internal constructor(private val core: SabouCore) {
                     safe { core.books.pendingApprovals() }.filter { it.approvedBy.none { n -> n == actor.displayName } }.forEach { a ->
                         add(Alert("APPROVE:${a.invoice.invoice.id.value}", Alert.Kind.APPROVAL, "فاکتور در انتظار تأیید",
                             "${a.invoice.supplier} · ${Fa.rial(a.invoice.invoice.total)} ریال"))
+                    }
+                    safe { core.books.matchReviews() }.filter { it.invoice.recordedBy != actor.userId || actor.role == ir.sabou.platform.Role.OWNER }.forEach { r ->
+                        val duplicate = r.invoice.discrepancies.any { it.kind == ir.sabou.purchasing.Discrepancy.Kind.POSSIBLE_DUPLICATE }
+                        add(Alert("MATCH:${r.invoice.id.value}", Alert.Kind.INVOICE_MATCH,
+                            if (duplicate) "فاکتور شاید تکراری است" else "فاکتور با سفارش جور نیست",
+                            "${r.supplier} · ${Fa.rial(r.invoice.total)} ریال · تا بررسی، پرداخت نمی‌شود"))
                     }
                 }
             }

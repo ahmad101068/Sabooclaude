@@ -65,6 +65,8 @@ object Messages {
         "PURCHASE_INVOICE:ALREADY_APPROVED" to "این فاکتور تأییدهای لازم را گرفته است.",
         "PURCHASE_INVOICE:SAME_APPROVER" to "هر مرحله‌ی تأیید باید با فرد دیگری باشد.",
         "PURCHASE_INVOICE:RECORDER_CANNOT_APPROVE" to "کسی که فاکتور را ثبت کرده نمی‌تواند آن را تأیید کند.",
+        "PURCHASE_INVOICE:NEEDS_MATCH_REVIEW" to "این فاکتور با سفارشش جور نیست یا شاید تکراری است؛ پیش از پرداخت، فرد دیگری باید مغایرت را بررسی کند.",
+        "PURCHASE_INVOICE:NO_MATCH_REVIEW_NEEDED" to "این فاکتور مغایرتی برای بررسی ندارد یا قبلاً بررسی شده است.",
         "CHEQUE:MOVED_ON" to "وضعیت این چک بعد از این سند تغییر کرده است (مثلاً واگذار به بانک، وصول یا پاس شده). ابتدا آن مرحله را برگردانید.",
         "CHEQUE:IN_HAND" to "این چک در صندوق است و این عملیات برایش ممکن نیست.",
         "CHEQUE:DEPOSITED" to "این چک به بانک واگذار شده است؛ ابتدا آن را پس بگیرید یا وصول کنید.",

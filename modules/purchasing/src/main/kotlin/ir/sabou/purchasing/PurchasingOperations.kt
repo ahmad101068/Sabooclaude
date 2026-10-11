@@ -106,6 +106,13 @@ data class PostPurchaseInvoice(
         attachments.joinToString(";") { it.fingerprint() }
 }
 
+/** Accepts an invoice's differences from its order (or a possible duplicate) after looking at them (ADR-0029). */
+@NoDocument
+data class ReviewInvoiceMatch(override val commandId: GlobalId, override val scope: Scope.Branch, val invoiceId: GlobalId, val note: String) : Command {
+    override val requiredPermission = Permission.PURCHASE_APPROVE
+    override fun fingerprint() = "$scope|$invoiceId|${note.trim()}"
+}
+
 /** Adds photos or PDFs to an invoice after it was recorded. */
 @NoDocument
 data class AttachToInvoice(
@@ -366,6 +373,7 @@ class PurchasingOperations(
             total, InvoiceStatus.POSTED, cmd.accountLines.map { it.copy(memo = it.memo.trim()) },
             cmd.reviewLines.map { it.copy(supplierItemName = it.supplierItemName.trim(), quantityNote = it.quantityNote.trim()) },
             cmd.note.trim(), order?.id, journals, recordedBy = ctx.actor.userId,
+            discrepancies = order?.let { InvoiceMatching.compare(it, cmd.lines) }.orEmpty() + possibleDuplicates(supplier.id, cmd.supplierInvoiceNo, total, cmd.date),
         ).let { inv -> inv.copy(requiredApprovals = approvalRules.all().filter { it.matches(inv.scope, inv.supplierId, inv.category, inv.total) }.maxOfOrNull { it.steps } ?: 0) }
         purchases.saveInvoice(invoice)
         cmd.lines.filter { it.supplierItemName.isNotBlank() }.forEach { suppliers.saveAlias(supplier.id, SupplierNames.normalize(it.supplierItemName), it.itemId) }
@@ -563,7 +571,35 @@ class PurchasingOperations(
         refund.id
     }
 
+    /**
+     * Another posted invoice of the supplier with the same total, on the same day or under the same number written
+     * differently («00125» and «۱۲۵»). Same total on different days is normal (daily bread) and is not flagged.
+     */
+    private fun possibleDuplicates(supplierId: GlobalId, number: String, total: Money, date: BusinessDate): List<Discrepancy> {
+        val key = InvoiceMatching.numberKey(number)
+        return purchases.invoices().filter {
+            it.supplierId == supplierId && it.status == InvoiceStatus.POSTED && it.total == total &&
+                (it.date == date || (key.isNotEmpty() && InvoiceMatching.numberKey(it.supplierInvoiceNo) == key))
+        }.map { Discrepancy(Discrepancy.Kind.POSSIBLE_DUPLICATE, null, null, it.date.epochDay) }.take(1)
+    }
+
+    /**
+     * Someone other than the recorder (the owner within the self-approval policy) looks at the differences and
+     * accepts the invoice as it is; what is wrong in it is corrected with a return or a reversal instead.
+     */
+    fun reviewMatch(c: ReviewInvoiceMatch): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
+        val invoice = requireInvoice(cmd.invoiceId, cmd.scope)
+        ensure(invoice.needsMatchReview) { DomainError.InvalidState("PURCHASE_INVOICE", "NO_MATCH_REVIEW_NEEDED") }
+        ensure(invoice.recordedBy != ctx.actor.userId || ctx.actor.role == ir.sabou.platform.Role.OWNER) { DomainError.InvalidState("PURCHASE_INVOICE", "RECORDER_CANNOT_APPROVE") }
+        val note = cmd.note.trim()
+        ensure(note.length in 3..300) { DomainError.InvalidInput("note", "توضیح بررسی مغایرت الزامی است.") }
+        purchases.saveInvoice(invoice.copy(matchReview = MatchReview(ctx.actor.userId, ctx.actor.displayName, ctx.nowEpochMillis, note)))
+        ctx.audit(AuditDraft("PURCHASE_MATCH_REVIEW", "PURCHASE_INVOICE", invoice.id.value, "discrepancies=${invoice.discrepancies.size};note=$note"))
+        invoice.id
+    }
+
     private fun pay(ctx: CommandContext, invoice: PurchaseInvoice, accountId: GlobalId, amount: Money, date: BusinessDate, cheque: ChequeInstruction?): SupplierPayment {
+        ensure(!invoice.needsMatchReview) { DomainError.InvalidState("PURCHASE_INVOICE", "NEEDS_MATCH_REVIEW") }
         ensure(invoice.approved) { DomainError.InvalidState("PURCHASE_INVOICE", "NOT_APPROVED:${invoice.approvals.size}/${invoice.requiredApprovals}") }
         ensure(!amount.isZero) { DomainError.InvalidInput("amount", "مبلغ پرداخت باید بیشتر از صفر باشد.") }
         ensure(amount <= outstanding(invoice.id)) { DomainError.InvalidState("PURCHASE_INVOICE", "PAYMENT_EXCEEDS_OUTSTANDING") }

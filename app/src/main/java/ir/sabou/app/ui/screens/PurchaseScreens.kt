@@ -532,12 +532,14 @@ object PurchaseScreens {
                             }, enabled = creditAmount != null, busy = action.busy)
                         }
                     }
+                    if (inv.discrepancies.isNotEmpty()) MatchCard(inv, { d.items[it]?.name ?: "" }, action)
                     if (inv.requiredApprovals > 0 || inv.approvals.isNotEmpty()) {
                         ApprovalCard(inv, action)
                     }
                     if (inv.status == InvoiceStatus.POSTED && !v.outstanding.isZero && session.can(Permission.PURCHASE_PAY)) {
                         FormCard("پرداخت به تأمین‌کننده") {
-                            if (!inv.approved) Banner("پرداخت پس از تأیید فاکتور ممکن است.", ChipKind.ACCENT)
+                            if (inv.needsMatchReview) Banner("پرداخت پس از بررسی مغایرت فاکتور ممکن است.", ChipKind.ACCENT)
+                            else if (!inv.approved) Banner("پرداخت پس از تأیید فاکتور ممکن است.", ChipKind.ACCENT)
                             val account = d.accounts.firstOrNull { it.id == payAccount }
                             val ourCheque = account?.kind == ir.sabou.treasury.TreasuryKind.ISSUED_CHEQUES
                             val passOn = account?.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES
@@ -683,6 +685,50 @@ object PurchaseScreens {
 
     // ------------------------------------------------------------ Approvals
 
+    /**
+     * What differs from the order, or the possible duplicate, found when the invoice was recorded (ADR-0029); someone
+     * other than the recorder accepts it with a note before it can be paid. A wrong invoice is reversed or returned.
+     */
+    @Composable
+    private fun MatchCard(inv: ir.sabou.purchasing.PurchaseInvoice, itemName: (GlobalId) -> String, action: ir.sabou.app.ui.Action) {
+        val session = LocalSession.current
+        var note by rememberSaveable(inv.id) { mutableStateOf("") }
+        val commandId = rememberCommandId()
+        SCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("مغایرت فاکتور", style = SabouType.section, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                Chip(if (inv.matchReview != null) "بررسی شد" else "بررسی نشده", if (inv.matchReview != null) ChipKind.PRIMARY else ChipKind.DANGER)
+            }
+            inv.discrepancies.forEach { d -> Text("• " + discrepancyText(d, itemName), style = SabouType.caption, color = Sabou.colors.ink) }
+            inv.matchReview?.let { r -> Text("بررسی: ${r.name} · ${r.note}", style = SabouType.caption, color = Sabou.colors.muted) }
+            val canReview = inv.status == InvoiceStatus.POSTED && inv.needsMatchReview && session.can(Permission.PURCHASE_APPROVE) &&
+                (inv.recordedBy != session.actor.userId || session.actor.role == ir.sabou.platform.Role.OWNER)
+            if (canReview) {
+                Text("اگر فاکتور درست است (مثلاً تأمین‌کننده کمتر یا بیشتر فرستاده و پذیرفته‌اید)، با توضیح بپذیرید. اگر اشتباه است، فاکتور را برگشت بزنید یا مرجوعی ثبت کنید.",
+                    style = SabouType.caption, color = Sabou.colors.muted)
+                TextInput("توضیح بررسی", note, { note = it })
+                PrimaryButton("بررسی کردم، فاکتور درست است", {
+                    action.run({ purchasing.reviewMatch(ir.sabou.purchasing.ReviewInvoiceMatch(commandId.value, inv.scope, inv.id, note)) }) { note = ""; commandId.value = GlobalId.new() }
+                }, enabled = note.trim().length >= 3 && !action.busy, busy = action.busy)
+            } else if (inv.needsMatchReview) {
+                Text("فرد دیگری با اجازه‌ی تأیید فاکتور باید این مغایرت را بررسی کند.", style = SabouType.caption, color = Sabou.colors.muted)
+            }
+        }
+    }
+
+    private fun discrepancyText(d: ir.sabou.purchasing.Discrepancy, itemName: (GlobalId) -> String): String {
+        val name = d.itemId?.let(itemName).orEmpty()
+        fun qty(v: Long?) = Fa.quantity(Quantity.of(v ?: 0))
+        return when (d.kind) {
+            ir.sabou.purchasing.Discrepancy.Kind.QUANTITY -> "$name: سفارش ${qty(d.ordered)}، فاکتور ${qty(d.invoiced)}"
+            ir.sabou.purchasing.Discrepancy.Kind.PRICE -> "$name: فی سفارش ${Fa.rial(d.ordered ?: 0)}، فی فاکتور ${Fa.rial(d.invoiced ?: 0)} ریال"
+            ir.sabou.purchasing.Discrepancy.Kind.NOT_ORDERED -> "$name سفارش داده نشده بود (${qty(d.invoiced)})"
+            ir.sabou.purchasing.Discrepancy.Kind.NOT_DELIVERED -> "$name سفارش شده بود (${qty(d.ordered)}) ولی در فاکتور نیست"
+            ir.sabou.purchasing.Discrepancy.Kind.POSSIBLE_DUPLICATE ->
+                "فاکتور دیگری از همین تأمین‌کننده با همین مبلغ" + (d.invoiced?.let { " در ${Fa.date(ir.sabou.kernel.BusinessDate(it))}" } ?: "") + " ثبت شده است؛ شاید تکراری باشد"
+        }
+    }
+
     @Composable
     private fun ApprovalCard(inv: ir.sabou.purchasing.PurchaseInvoice, action: ir.sabou.app.ui.Action) {
         val session = LocalSession.current
@@ -720,10 +766,19 @@ object PurchaseScreens {
     fun PendingApprovals(nav: Nav) {
         val session = LocalSession.current
         val data by load(session) { books.pendingApprovals() }
+        val matches by load(session) { books.matchReviews() }
         Column(Modifier.fillMaxSize()) {
             Header("در انتظار تأیید", "فاکتورهایی که پیش از پرداخت تأیید لازم دارند", onBack = nav.back)
             Page {
                 if (session.can(Permission.APPROVAL_RULES)) NavRow(R.drawable.ic_settings, "قانون‌های تأیید", "بر اساس شعبه، تأمین‌کننده، نوع و مبلغ", onClick = { nav.go(Route.ApprovalRules) })
+                matches.orNull()?.takeIf { it.isNotEmpty() }?.let { list ->
+                    Text("مغایرت با سفارش یا شاید تکراری", style = SabouType.section, color = Sabou.colors.ink)
+                    list.forEach { r ->
+                        NavRow(R.drawable.ic_alert, r.supplier, "${Fa.digits(r.invoice.supplierInvoiceNo)} · ${Fa.number(r.invoice.discrepancies.size.toLong())} مغایرت · ${Fa.date(r.invoice.date)}",
+                            Fa.rialShort(r.invoice.total.rial), tint = Sabou.colors.danger, onClick = { nav.go(Route.PurchaseDetail(r.invoice.id)) })
+                    }
+                    Text("تأیید پرداخت", style = SabouType.section, color = Sabou.colors.ink)
+                }
                 Loaded(data) { list ->
                     if (list.isEmpty()) EmptyState("فاکتوری در انتظار تأیید نیست.")
                     list.forEach { item ->

@@ -340,6 +340,57 @@ class PurchasingTest {
         assertEquals("INVALID_STATE:PURCHASE_ORDER:CANCELLED", code { orders.cancel(CancelPurchaseOrder(GlobalId.new(), branchA, order, "دوباره")) })
     }
 
+    // ------------------------------------------------------------ Order ↔ invoice matching (ADR-0029)
+
+    @Test fun anInvoiceThatDiffersFromItsOrderIsNotPaidUntilSomeoneElseReviewsIt() {
+        fund(cashA, branchA, 10_000_000)
+        val bread = inventoryOps.createItem(CreateItem(GlobalId.new(), "نان", StockUnit.PIECE, Quantity.ZERO)).resultId
+        val milk = inventoryOps.createItem(CreateItem(GlobalId.new(), "شیر", StockUnit.PIECE, Quantity.ZERO)).resultId
+        val butter = inventoryOps.createItem(CreateItem(GlobalId.new(), "کره", StockUnit.PIECE, Quantity.ZERO)).resultId
+        val order = orders.create(CreatePurchaseOrder(GlobalId.new(), branchA, supplier, storeA, day, day, listOf(
+            OrderLine(cheese, kg(3), rial(200_000)), OrderLine(bread, kg(10), rial(10_000)), OrderLine(milk, kg(5), rial(50_000))))).resultId
+        val storekeeper = Actor(GlobalId.new(), "store", Role.STOREKEEPER, setOf(branchA.branchId))
+        session.actor = storekeeper
+        // Cheese: 2 kg instead of 3, at 203,000 (within 2 %). Bread at 12,000 (20 % up). Milk missing. Butter not ordered.
+        val inv = ops.postInvoice(PostPurchaseInvoice(GlobalId.new(), branchA, supplier, "M-1", storeA, day, day, listOf(
+            InvoiceLine(cheese, kg(2), rial(406_000)), InvoiceLine(bread, kg(10), rial(120_000)), InvoiceLine(butter, kg(1), rial(90_000))), orderId = order)).resultId
+        val found = purchases.invoice(inv)!!.discrepancies.map { it.kind to it.itemId }.toSet()
+        assertEquals(setOf(Discrepancy.Kind.QUANTITY to cheese, Discrepancy.Kind.PRICE to bread, Discrepancy.Kind.NOT_DELIVERED to milk,
+            Discrepancy.Kind.NOT_ORDERED to butter), found)
+        assertEquals(12_000L, purchases.invoice(inv)!!.discrepancies.single { it.kind == Discrepancy.Kind.PRICE }.invoiced)
+
+        val manager = Actor(GlobalId.new(), "manager", Role.MANAGER, setOf(branchA.branchId))
+        session.actor = manager
+        assertEquals("INVALID_STATE:PURCHASE_INVOICE:NEEDS_MATCH_REVIEW", code { ops.payInvoice(PaySupplierInvoice(GlobalId.new(), branchA, inv, cashA, rial(1), day)) })
+        assertEquals("INVALID_INPUT:note", code { ops.reviewMatch(ReviewInvoiceMatch(GlobalId.new(), branchA, inv, " ")) })
+        session.actor = storekeeper
+        assertEquals("PERMISSION_DENIED:PURCHASE_APPROVE", code { ops.reviewMatch(ReviewInvoiceMatch(GlobalId.new(), branchA, inv, "درست است")) })
+        session.actor = manager
+        ops.reviewMatch(ReviewInvoiceMatch(GlobalId.new(), branchA, inv, "شیر فردا می‌آید؛ نان گران شده"))
+        assertEquals("manager", purchases.invoice(inv)!!.matchReview!!.name)
+        assertEquals("INVALID_STATE:PURCHASE_INVOICE:NO_MATCH_REVIEW_NEEDED", code { ops.reviewMatch(ReviewInvoiceMatch(GlobalId.new(), branchA, inv, "دوباره")) })
+        ops.payInvoice(PaySupplierInvoice(GlobalId.new(), branchA, inv, cashA, rial(616_000), day))
+    }
+
+    @Test fun theSameTotalOnTheSameDayOrUnderTheSameNumberIsAPossibleDuplicate() {
+        val first = invoice(no = "00125", value = 2_000_000)
+        assertEquals(emptyList(), purchases.invoice(first)!!.discrepancies)
+        // A number written differently, a week later: flagged.
+        val again = ops.postInvoice(PostPurchaseInvoice(GlobalId.new(), branchA, supplier, "۱۲۵", storeA, day.plusDays(7), day.plusDays(30),
+            listOf(InvoiceLine(cheese, kg(10), rial(2_000_000))))).resultId
+        assertEquals(Discrepancy.Kind.POSSIBLE_DUPLICATE, purchases.invoice(again)!!.discrepancies.single().kind)
+        // The same total on another day under another number (daily bread): normal.
+        val next = ops.postInvoice(PostPurchaseInvoice(GlobalId.new(), branchA, supplier, "126", storeA, day.plusDays(1), day.plusDays(30),
+            listOf(InvoiceLine(cheese, kg(10), rial(2_000_000))))).resultId
+        assertTrue(purchases.invoice(next)!!.discrepancies.isEmpty())
+        // The recorder (not the owner) cannot clear their own; the owner can.
+        assertTrue(purchases.invoice(again)!!.needsMatchReview)
+        ops.reviewMatch(ReviewInvoiceMatch(GlobalId.new(), branchA, again, "فاکتور جدا است"))
+        assertTrue(!purchases.invoice(again)!!.needsMatchReview)
+        assertEquals("125", InvoiceMatching.numberKey("۰۰۱۲۵"))
+        assertEquals("12ب", InvoiceMatching.numberKey("0012-ب"))
+    }
+
     @Test fun storekeeperMayOrderButNotForAnotherBranch() {
         session.actor = Actor(GlobalId.new(), "store", Role.STOREKEEPER, setOf(branchA.branchId))
         orders.create(CreatePurchaseOrder(GlobalId.new(), branchA, supplier, storeA, day, day, listOf(OrderLine(cheese, kg(1), rial(1)))))
@@ -389,13 +440,13 @@ class PurchasingTest {
         val m1 = Actor(GlobalId.new(), "manager-1", Role.MANAGER, setOf(branchA.branchId))
         val m2 = Actor(GlobalId.new(), "manager-2", Role.MANAGER, setOf(branchA.branchId))
         session.actor = clerk
-        val clerkInvoice = invoice(no = "K", value = 2_000_000)
+        val clerkInvoice = invoice(no = "K", value = 2_100_000)
         assertEquals("PERMISSION_DENIED:PURCHASE_APPROVE", code { approvals.approve(ApproveInvoice(GlobalId.new(), branchA, clerkInvoice)) })
         session.actor = m1
         approvals.approve(ApproveInvoice(GlobalId.new(), branchA, clerkInvoice))
         assertEquals("INVALID_STATE:PURCHASE_INVOICE:SAME_APPROVER", code { approvals.approve(ApproveInvoice(GlobalId.new(), branchA, clerkInvoice)) })
         assertEquals("PERMISSION_DENIED:PURCHASE_UNAPPROVE", code { approvals.unapprove(UnapproveInvoice(GlobalId.new(), branchA, clerkInvoice, "اشتباه")) })
-        val own = invoice(no = "M", value = 2_000_000)
+        val own = invoice(no = "M", value = 2_200_000)
         assertEquals("INVALID_STATE:PURCHASE_INVOICE:RECORDER_CANNOT_APPROVE", code { approvals.approve(ApproveInvoice(GlobalId.new(), branchA, own)) })
         session.actor = m2
         approvals.approve(ApproveInvoice(GlobalId.new(), branchA, clerkInvoice))
