@@ -47,6 +47,8 @@ sealed interface AppState {
  */
 class AppContainer(private val context: Context) {
     private val keys = DeviceKeys(context)
+    /** Fingerprint sign-in; forgotten whenever the database is replaced (its users may differ). */
+    val biometric = BiometricVault(context)
     private val deviceTime = AndroidDeviceTime(context)
     private val anchors = FileAnchorStore(File(context.noBackupFilesDir, "integrity.anchors"), keys)
     private val quarantine = File(context.noBackupFilesDir, QUARANTINE_DIR)
@@ -363,7 +365,7 @@ class AppContainer(private val context: Context) {
         // 4. From here on the app always re-opens, and whichever file is in place opens normally.
         try {
             faultPoint("announced")
-            clearDrafts()   // drafts belong to the replaced database
+            clearDrafts(); biometric.disable()   // drafts belong to the replaced database
             close()
             keepInQuarantine("RESTORE", move = false, withKey = !keyReplaced)
             faultPoint("quarantined")
@@ -387,7 +389,7 @@ class AppContainer(private val context: Context) {
         announceReplacement(epoch, "FACTORY_RESET")
         try {
             faultPoint("announced")
-            clearDrafts()
+            clearDrafts(); biometric.disable()
             close()
             keepInQuarantine("FACTORY_RESET", move = true)
             faultPoint("quarantined")

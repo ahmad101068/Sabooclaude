@@ -96,6 +96,9 @@ fun HomeScreen(nav: Nav) {
         }
 
         val todos = buildList {
+            if (session.actor.role == ir.sabou.platform.Role.OWNER && !identity.hasRecoveryCode()) {
+                add(Todo(R.drawable.ic_lock, "کد بازیابی رمز مالک را بسازید", "بدون آن، رمز فراموش‌شده فقط با بازیابی پشتیبان برمی‌گردد", Route.Security, true))
+            }
             today?.draft?.let {
                 add(Todo(R.drawable.ic_sales, "پیش‌نویس فروش امروز هنوز ثبت نهایی نشده", "جمع ${Fa.rial(it)} ریال؛ تا ثبت نهایی، موجودی و دفاتر تغییر نمی‌کنند", Route.Sales, true))
             }

@@ -86,6 +86,8 @@ sealed interface Route : java.io.Serializable {
     data object Customers : Route
     data object Policies : Route
     data object Backup : Route
+    /** Change PIN, the owner's recovery code, fingerprint sign-in. */
+    data object Security : Route
 }
 
 /** One line of a prefilled order: item, quantity in micro-units, expected price per unit in rial. */

@@ -43,6 +43,7 @@ import ir.sabou.app.R
 import ir.sabou.app.data.AppContainer
 import ir.sabou.app.data.AppState
 import ir.sabou.app.ui.components.Banner
+import ir.sabou.app.ui.components.ChipKind
 import ir.sabou.app.ui.components.Confirm
 import ir.sabou.app.ui.components.FormCard
 import ir.sabou.app.ui.components.Loading
@@ -284,7 +285,7 @@ private fun Gate(core: SabouCore, container: AppContainer, onSignedIn: (ir.sabou
     when (needsBootstrap) {
         null -> Splash()
         true -> Bootstrap(core, container, onSignedIn)
-        false -> Login(core, onSignedIn)
+        false -> Login(core, container.biometric, onSignedIn)
     }
 }
 
@@ -334,18 +335,49 @@ private fun Bootstrap(core: SabouCore, container: AppContainer, onSignedIn: (ir.
 }
 
 @Composable
-private fun Login(core: SabouCore, onSignedIn: (ir.sabou.platform.Actor) -> Unit) {
+private fun Login(core: SabouCore, vault: ir.sabou.app.data.BiometricVault, onSignedIn: (ir.sabou.platform.Actor) -> Unit) {
     val scope = rememberCoroutineScope()
     var username by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var recovering by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    if (recovering) {
+        OwnerRecovery(core, onDone = { recovering = false; notice = it }, onCancel = { recovering = false })
+        return
+    }
     Page {
         Spacer(Modifier.height(48.dp))
         Box(Modifier.size(64.dp).clip(RoundedCornerShape(20.dp)).background(Sabou.colors.primary), contentAlignment = Alignment.Center) {
             Icon(painterResource(R.drawable.ic_lock), contentDescription = null, tint = Sabou.colors.accent, modifier = Modifier.size(30.dp))
         }
         Text("ورود", style = SabouType.title, color = Sabou.colors.ink)
+        notice?.let { Banner(it, ChipKind.PRIMARY, R.drawable.ic_check) }
+        // Fingerprint: unseals the PIN of the enrolled user and signs in with it (the PIN is still checked).
+        val enrolled = remember { vault.enrolledUser() }
+        if (enrolled != null) FormCard {
+            PrimaryButton("ورود با اثر انگشت · $enrolled", {
+                error = null
+                vault.unlock(enrolled, "ورود به سابو") { unsealed ->
+                    unsealed.onSuccess { sealedPin ->
+                        busy = true
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) { runCatching { core.identity.login(enrolled, sealedPin) } }
+                            sealedPin.fill(' ')
+                            busy = false
+                            result.onSuccess { onSignedIn(it) }.onFailure {
+                                // The PIN changed since it was sealed: forget it, type the PIN once and enable again.
+                                vault.disable()
+                                error = "اثر انگشت دیگر معتبر نیست (رمز عوض شده است). با رمز وارد شوید و از «امنیت ورود» دوباره فعالش کنید."
+                            }
+                        }
+                    }.onFailure { e ->
+                        if (e !is ir.sabou.app.data.BiometricVault.CancelledException) error = "اثر انگشت در دسترس نیست؛ با رمز وارد شوید."
+                    }
+                }
+            }, busy = busy)
+        }
         FormCard {
             TextInput("نام کاربری", username, { username = it })
             TextInput("رمز", pin, { pin = it }, keyboard = KeyboardType.NumberPassword, secret = true)
@@ -361,7 +393,46 @@ private fun Login(core: SabouCore, onSignedIn: (ir.sabou.platform.Actor) -> Unit
                     }
                 }
             }, enabled = username.isNotBlank() && pin.length >= 6, busy = busy)
+            Text("مالک هستم و رمز را فراموش کرده‌ام", style = SabouType.label, color = Sabou.colors.primary,
+                modifier = Modifier.clickable { recovering = true }.padding(vertical = 8.dp))
         }
+    }
+}
+
+/** The owner sets a new PIN with the one-time recovery code written down when it was issued (ADR-0023). */
+@Composable
+private fun OwnerRecovery(core: SabouCore, onDone: (String) -> Unit, onCancel: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var username by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
+    var pin by remember { mutableStateOf("") }
+    var again by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    Page {
+        Spacer(Modifier.height(32.dp))
+        Text("بازیابی رمز مالک", style = SabouType.title, color = Sabou.colors.ink)
+        Text("کد بازیابی ۱۶ رقمی همان است که هنگام ساختنش روی کاغذ نوشتید. هر کد یک بار کار می‌کند؛ بعد از ورود، کد تازه بسازید.",
+            style = SabouType.body, color = Sabou.colors.muted)
+        FormCard {
+            TextInput("نام کاربری مالک", username, { username = it })
+            TextInput("کد بازیابی", code, { code = it }, keyboard = KeyboardType.Number, placeholder = "۱۲۳۴-۵۶۷۸-۹۰۱۲-۳۴۵۶")
+            TextInput("رمز جدید (۶ تا ۱۲ رقم)", pin, { pin = it }, keyboard = KeyboardType.NumberPassword, secret = true)
+            TextInput("تکرار رمز جدید", again, { again = it }, keyboard = KeyboardType.NumberPassword, secret = true,
+                error = if (again.isNotEmpty() && again != pin) "با رمز جدید یکی نیست" else null)
+            error?.let { Banner(it) }
+            PrimaryButton("تعیین رمز جدید", {
+                busy = true; error = null
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) { runCatching { core.identity.recoverOwner(username, code, Fa.latinDigits(pin).toCharArray()) } }
+                    busy = false
+                    result.onSuccess { onDone("رمز تازه ثبت شد. وارد شوید و از «من ← کد بازیابی» کد تازه بسازید.") }.onFailure { error = Messages.of(it) }
+                }
+            }, enabled = username.isNotBlank() && code.isNotBlank() && pin.length >= 6 && pin == again, busy = busy)
+            SecondaryButton("بازگشت به ورود", onCancel)
+        }
+        Text("کد ندارید؟ اگر مالک دیگری یا مدیری با اختیار کاربران هست، او رمز شما را عوض می‌کند؛ وگرنه آخرین راه بازیابی از فایل پشتیبان است.",
+            style = SabouType.caption, color = Sabou.colors.muted)
     }
 }
 
@@ -508,6 +579,7 @@ private fun Pages(route: Route, nav: Nav) {
         Route.Customers -> MeScreens.Customers(nav)
         Route.Policies -> MeScreens.Policies(nav)
         Route.Backup -> MeScreens.Backup(nav)
+        Route.Security -> MeScreens.Security(nav)
         Route.Home, Route.Sales, Route.Operations, Route.Finance, Route.Me -> Unit
     }
 }

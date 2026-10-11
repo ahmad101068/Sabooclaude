@@ -81,7 +81,7 @@ class SqlUserStore(db: SqlDatabase) : SqlTable(db), UserStore {
         d.long("lockedUntil").takeIf { it > 0 }?.let { until ->
             ir.sabou.platform.PinLock(d.longOr("lockStart", 0), until, d.strOr("lockBoot", ""), d.longOr("lockUntilElapsed", 0))
         },
-        d.bool("active"), d.boolOr("ownerLocked", false),
+        d.bool("active"), d.boolOr("ownerLocked", false), d.strOrNull("recovery"),
     )
 
     override fun byId(id: GlobalId) = doc("SELECT doc FROM users WHERE id = ?", id.value)?.let(::read)
@@ -97,7 +97,7 @@ class SqlUserStore(db: SqlDatabase) : SqlTable(db), UserStore {
                     "grants" to user.branchGrants.map { it.value.value }.sorted(), "pinHash" to user.pinHash,
                     "failedAttempts" to user.failedAttempts, "lockedUntil" to (user.lock?.untilWall ?: 0L),
                     "lockStart" to (user.lock?.startWall ?: 0L), "lockBoot" to user.lock?.bootId.orEmpty(),
-                    "lockUntilElapsed" to (user.lock?.untilElapsed ?: 0L), "ownerLocked" to user.ownerLocked, "active" to user.isActive,
+                    "lockUntilElapsed" to (user.lock?.untilElapsed ?: 0L), "ownerLocked" to user.ownerLocked, "recovery" to user.recoveryHash, "active" to user.isActive,
                 ),
             ),
         ),

@@ -55,6 +55,7 @@ import ir.sabou.app.ui.components.Segmented
 import ir.sabou.app.ui.components.SectionTitle
 import ir.sabou.app.ui.components.TextInput
 import ir.sabou.app.ui.load
+import ir.sabou.app.ui.orNull
 import ir.sabou.app.ui.rememberAction
 import ir.sabou.app.ui.restoreMessage
 import ir.sabou.app.ui.theme.Sabou
@@ -124,6 +125,7 @@ object MeScreens {
                 if (session.can(Permission.APPROVAL_RULES)) item { NavRow(R.drawable.ic_check, "قانون‌های تأیید فاکتور", "چه فاکتوری پیش از پرداخت چند تأیید بخواهد", onClick = { nav.go(Route.ApprovalRules) }) }
                 if (session.can(Permission.BUDGET_MANAGE)) item { NavRow(R.drawable.ic_finance, "بودجه", "مبلغ ماهانه‌ی هر حساب درآمد و هزینه", onClick = { nav.go(Route.Budget) }) }
                 if (session.can(Permission.BACKUP_CREATE)) item { NavRow(R.drawable.ic_backup, "پشتیبان‌گیری و بازیابی", onClick = { nav.go(Route.Backup) }) }
+                item { NavRow(R.drawable.ic_lock, "امنیت ورود", "تغییر رمز" + if (session.actor.role == ir.sabou.platform.Role.OWNER) "، کد بازیابی" else "", onClick = { nav.go(Route.Security) }) }
                 item { SecondaryButton("خروج از حساب", onSignOut, danger = true) }
             }
         }
@@ -464,6 +466,100 @@ object MeScreens {
                 SecondaryButton("پایان قیمت ویژه این شعبه (از همین تاریخ قیمت همه شعب)", {
                     action.run({ salesOps.setMenuPrice(ir.sabou.sales.SetMenuPrice(id.value, branch, item!!, from, null)) }) { id.value = GlobalId.new() }
                 }, enabled = !action.busy)
+            }
+        }
+    }
+
+    /** Sign-in security: change own PIN; for the owner, the one-time recovery code (ADR-0023). */
+    @Composable
+    fun Security(nav: Nav) {
+        val session = LocalSession.current
+        val owner = session.actor.role == ir.sabou.platform.Role.OWNER
+        val hasCode by load(session) { identity.hasRecoveryCode() }
+        var current by rememberSaveable { mutableStateOf("") }
+        var next by rememberSaveable { mutableStateOf("") }
+        var again by rememberSaveable { mutableStateOf("") }
+        var codePin by rememberSaveable { mutableStateOf("") }
+        // Shown once, never saved with the form state.
+        var issued by remember { mutableStateOf<String?>(null) }
+        val change = rememberAction()
+        val recovery = rememberAction()
+        var changed by rememberSaveable { mutableStateOf(false) }
+        Column(Modifier.fillMaxSize()) {
+            Header("امنیت ورود", onBack = nav.back)
+            Page {
+                FormCard("تغییر رمز") {
+                    TextInput("رمز فعلی", current, { current = it }, keyboard = KeyboardType.NumberPassword, secret = true)
+                    TextInput("رمز جدید (۶ تا ۱۲ رقم)", next, { next = it }, keyboard = KeyboardType.NumberPassword, secret = true)
+                    TextInput("تکرار رمز جدید", again, { again = it }, keyboard = KeyboardType.NumberPassword, secret = true,
+                        error = if (again.isNotEmpty() && again != next) "با رمز جدید یکی نیست" else null)
+                    change.error?.let { Banner(it) }
+                    if (changed) Banner("رمز عوض شد.", ChipKind.PRIMARY, R.drawable.ic_check)
+                    PrimaryButton("تغییر رمز", {
+                        change.run({ identity.changeOwnPin(Fa.latinDigits(current).toCharArray(), Fa.latinDigits(next).toCharArray()) }) { current = ""; next = ""; again = ""; changed = true }
+                    }, enabled = current.length >= 6 && next.length >= 6 && next == again, busy = change.busy)
+                }
+                FingerprintCard()
+                if (owner) FormCard("کد بازیابی رمز مالک") {
+                    Text("اگر رمز مالک فراموش شود، فقط با این کد ۱۶ رقمی می‌شود رمز تازه گذاشت. کد یک بار نمایش داده می‌شود: روی کاغذ بنویسید و جای امنی جدا از گوشی نگه دارید. " +
+                        "برنامه فقط اثر یک‌طرفه‌ی آن را نگه می‌دارد. هر کد یک بار کار می‌کند و ساختن کد تازه، کد قبلی را باطل می‌کند.",
+                        style = SabouType.caption, color = Sabou.colors.muted)
+                    when (hasCode.orNull()) {
+                        true -> Banner("کد بازیابی ساخته شده است.", ChipKind.PRIMARY, R.drawable.ic_check)
+                        false -> Banner("هنوز کد بازیابی ندارید؛ اگر رمز را فراموش کنید راهی جز بازیابی پشتیبان نمی‌ماند.", ChipKind.ACCENT)
+                        null -> Unit
+                    }
+                    issued?.let { code ->
+                        SCard {
+                            Text("کد بازیابی شما", style = SabouType.caption, color = Sabou.colors.muted)
+                            Text(Fa.digits(code), style = SabouType.title, color = Sabou.colors.ink)
+                            Text("همین حالا بنویسید؛ دوباره نمایش داده نمی‌شود.", style = SabouType.caption, color = Sabou.colors.danger)
+                        }
+                        SecondaryButton("نوشتم", { issued = null })
+                    }
+                    if (issued == null) {
+                        TextInput("رمز فعلی برای تأیید", codePin, { codePin = it }, keyboard = KeyboardType.NumberPassword, secret = true)
+                        recovery.error?.let { Banner(it) }
+                        PrimaryButton(if (hasCode.orNull() == true) "ساختن کد تازه (کد قبلی باطل می‌شود)" else "ساختن کد بازیابی", {
+                            recovery.run<String>({ identity.issueRecoveryCode(Fa.latinDigits(codePin).toCharArray()) }) { code -> issued = code; codePin = "" }
+                        }, enabled = codePin.length >= 6, busy = recovery.busy)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Turn fingerprint sign-in on (after proving the PIN) or off, for the signed-in user on this phone. */
+    @Composable
+    private fun FingerprintCard() {
+        val session = LocalSession.current
+        val vault = (LocalContext.current.applicationContext as SabouApplication).container.biometric
+        if (!vault.supported) return
+        val username by load(session) { identity.currentUsername() ?: "" }
+        var enrolled by remember { mutableStateOf(vault.enrolledUser()) }
+        var pin by rememberSaveable { mutableStateOf("") }
+        var message by remember { mutableStateOf<String?>(null) }
+        val action = rememberAction()
+        FormCard("ورود با اثر انگشت") {
+            Text("رمز شما با کلیدی روی همین گوشی قفل می‌شود که فقط با اثر انگشت باز می‌شود؛ ورود همچنان با همان رمز بررسی می‌شود. اگر اثر انگشت تازه‌ای روی گوشی تعریف شود یا رمزتان عوض شود، دوباره باید فعالش کنید.",
+                style = SabouType.caption, color = Sabou.colors.muted)
+            val me = username.orNull()
+            if (enrolled != null && enrolled == me) {
+                Banner("فعال است.", ChipKind.PRIMARY, R.drawable.ic_check)
+                SecondaryButton("غیرفعال کردن", { vault.disable(); enrolled = null })
+            } else if (me != null) {
+                if (enrolled != null) Text("اکنون برای «$enrolled» فعال است؛ فعال کردن برای شما جایگزین آن می‌شود.", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
+                TextInput("رمز فعلی", pin, { pin = it }, keyboard = KeyboardType.NumberPassword, secret = true)
+                (action.error ?: message)?.let { Banner(it) }
+                PrimaryButton("فعال کردن", {
+                    val typed = Fa.latinDigits(pin)
+                    action.run({ identity.confirmPin(typed.toCharArray()) }) {
+                        vault.enable(me, typed.toCharArray(), "تأیید اثر انگشت") { r ->
+                            r.onSuccess { enrolled = me; pin = ""; message = null }
+                                .onFailure { e -> if (e !is ir.sabou.app.data.BiometricVault.CancelledException) message = "اثر انگشتی روی این گوشی تعریف نشده یا قفل صفحه ندارد." }
+                        }
+                    }
+                }, enabled = pin.length >= 6, busy = action.busy)
             }
         }
     }
