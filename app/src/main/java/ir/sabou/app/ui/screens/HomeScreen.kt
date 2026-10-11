@@ -124,6 +124,11 @@ fun HomeScreen(nav: Nav) {
                 add(Todo(R.drawable.ic_alert, "${Fa.number(list.size.toLong())} کسری مصرف باز",
                     list.take(2).joinToString("، ") { it.item.name } + " — فروش بیش از موجودی دفتری؛ با ثبت خرید یا انبارگردانی بسته می‌شود", Route.Stock, true))
             }
+            if (branch != null && session.can(Permission.PERSONNEL_MANAGE)) safe { labor.documentIssues(branch, session.today) }?.takeIf { it.isNotEmpty() }?.let { list ->
+                val urgent = list.count { it.issue.expired || it.issue.missing }
+                add(Todo(R.drawable.ic_person, "${Fa.number(list.size.toLong())} مدرک کارکنان نیاز به رسیدگی", list.take(2).joinToString("، ") { "${ir.sabou.core.Alerts.staffDocName(it.issue.kind)} ${it.employee.name}" },
+                    Route.Personnel, urgent > 0))
+            }
             if (branch != null && session.can(Permission.INVENTORY_COUNT)) safe { overview.countsDue(branch, session.today).filter { it.due } }?.takeIf { it.isNotEmpty() }?.let { list ->
                 add(Todo(R.drawable.ic_count, "${Fa.number(list.size.toLong())} شمارش در موعد", list.joinToString("، ") { it.plan.name }, Route.Count, false))
             }

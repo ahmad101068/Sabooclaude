@@ -146,6 +146,8 @@ class SabouCore private constructor(
     val payroll = PayrollOperations(bus, ledger, registry.issue(ModuleId.PAYROLL), treasuryGateway, personnel, payrollStore, policyRegistry)
     internal val shiftStore = ir.sabou.persistence.SqlShiftStore(db)
     val shifts = ir.sabou.payroll.ShiftOperations(bus, personnel, shiftStore, payroll)
+    internal val staffDocumentStore = ir.sabou.persistence.SqlStaffDocumentStore(db)
+    val staffDocuments = ir.sabou.payroll.StaffDocumentOperations(bus, personnel, staffDocumentStore, attachments)
 
     val overview = Overview(this)
     val numbers = Numbers(this)

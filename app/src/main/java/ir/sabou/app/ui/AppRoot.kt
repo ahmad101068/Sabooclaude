@@ -56,6 +56,7 @@ import ir.sabou.app.ui.screens.BooksScreens
 import ir.sabou.app.ui.screens.ClosingScreens
 import ir.sabou.app.ui.screens.TaxScreens
 import ir.sabou.app.ui.screens.ShiftScreens
+import ir.sabou.app.ui.screens.StaffDocScreens
 import ir.sabou.app.ui.screens.CountPlanScreens
 import ir.sabou.app.ui.screens.PrepScreens
 import ir.sabou.app.ui.screens.FinanceScreens
@@ -540,6 +541,7 @@ private fun Pages(route: Route, nav: Nav) {
         Route.Schedule -> ShiftScreens.Schedule(nav)
         Route.TimeClock -> ShiftScreens.TimeClock(nav)
         Route.DayTime -> ShiftScreens.DayTime(nav)
+        is Route.StaffDocuments -> StaffDocScreens.Documents(nav, route.employeeId)
         is Route.StatementDetail -> BankRecScreens.Detail(nav, route.statementId)
         Route.Receivables -> FinanceScreens.Receivables(nav)
         is Route.Collect -> FinanceScreens.CollectForm(nav, route.receivableId)

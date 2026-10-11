@@ -34,6 +34,12 @@ data class LaborDay(
 
 data class TimeRow(val employee: Employee, val time: DayTime)
 
+/** A staff document with its files. */
+data class StaffDocumentView(val document: ir.sabou.payroll.StaffDocument, val files: List<ir.sabou.platform.Attachment>)
+
+/** An employee's document that needs attention (ADR-0039). */
+data class DocumentIssueView(val employee: Employee, val issue: ir.sabou.payroll.DocumentIssue)
+
 class Labor internal constructor(private val core: SabouCore) {
     private fun actor(vararg anyOf: Permission): Actor {
         val a = core.session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
@@ -81,5 +87,30 @@ class Labor internal constructor(private val core: SabouCore) {
     fun punchesToday(branch: Scope.Branch, date: BusinessDate, employeeId: GlobalId): List<ir.sabou.payroll.Punch> {
         actor(Permission.TIME_CLOCK).require(branch)
         return core.shiftStore.punches(branch, date, date).filter { it.employeeId == employeeId }.sortedBy { it.minute }
+    }
+
+    fun employee(employeeId: GlobalId): Employee {
+        val a = actor(Permission.PERSONNEL_MANAGE, Permission.PERSONNEL_VIEW)
+        val employee = core.personnel.employee(employeeId) ?: throw DomainException(DomainError.NotFound("EMPLOYEE"))
+        a.require(employee.scope)
+        return employee
+    }
+
+    /** An employee's documents, newest first, with their files. */
+    fun documents(employeeId: GlobalId): List<StaffDocumentView> {
+        val a = actor(Permission.PERSONNEL_MANAGE, Permission.PERSONNEL_VIEW)
+        val employee = core.personnel.employee(employeeId) ?: throw DomainException(DomainError.NotFound("EMPLOYEE"))
+        a.require(employee.scope)
+        return core.staffDocumentStore.of(employeeId).sortedByDescending { it.recordedAtEpochMillis }
+            .map { StaffDocumentView(it, core.attachments.of(ir.sabou.payroll.StaffDocumentOperations.OWNER, it.id)) }
+    }
+
+    /** Missing health cards / contracts and documents expired or expiring within 30 days, for the branch's staff. */
+    fun documentIssues(branch: Scope.Branch, today: BusinessDate): List<DocumentIssueView> {
+        actor(Permission.PERSONNEL_MANAGE, Permission.PERSONNEL_VIEW).require(branch)
+        val docs = core.staffDocumentStore.all(branch)
+        return core.personnel.employees(branch).flatMap { e ->
+            ir.sabou.payroll.StaffDocumentRules.issues(e, docs, today).map { DocumentIssueView(e, it) }
+        }.sortedWith(compareBy({ !it.issue.expired && !it.issue.missing }, { it.issue.daysLeft ?: Long.MIN_VALUE }))
     }
 }
