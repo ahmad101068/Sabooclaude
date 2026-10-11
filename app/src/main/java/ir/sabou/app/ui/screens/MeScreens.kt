@@ -123,6 +123,7 @@ object MeScreens {
                 if (session.can(Permission.CUSTOMER_MANAGE)) item { NavRow(R.drawable.ic_person, "مشتریان اعتباری", onClick = { nav.go(Route.Customers) }) }
                 if (session.can(Permission.PAYROLL_APPROVE)) item { NavRow(R.drawable.ic_payroll, "پارامترهای قانونی حقوق", "بیمه و مالیات هر سال", onClick = { nav.go(Route.Policies) }) }
                 if (session.can(Permission.APPROVAL_RULES)) item { NavRow(R.drawable.ic_check, "قانون‌های تأیید فاکتور", "چه فاکتوری پیش از پرداخت چند تأیید بخواهد", onClick = { nav.go(Route.ApprovalRules) }) }
+                if (session.can(Permission.TAX_SETTINGS)) item { NavRow(R.drawable.ic_finance, "اطلاعات مالیاتی", "شناسه‌ها و نرخ ارزش افزوده؛ آمادگی سامانه‌ی مودیان", onClick = { nav.go(Route.TaxSettings) }) }
                 if (session.can(Permission.BUDGET_MANAGE)) item { NavRow(R.drawable.ic_finance, "بودجه", "مبلغ ماهانه‌ی هر حساب درآمد و هزینه", onClick = { nav.go(Route.Budget) }) }
                 if (session.can(Permission.BACKUP_CREATE)) item { NavRow(R.drawable.ic_backup, "پشتیبان‌گیری و بازیابی", onClick = { nav.go(Route.Backup) }) }
                 item { NavRow(R.drawable.ic_lock, "امنیت و اعلان‌ها", "تغییر رمز، اثر انگشت، اعلان هشدارها" + if (session.actor.role == ir.sabou.platform.Role.OWNER) "، کد بازیابی" else "", onClick = { nav.go(Route.Security) }) }

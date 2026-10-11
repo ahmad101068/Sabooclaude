@@ -26,6 +26,7 @@ sealed interface Route : java.io.Serializable {
     data class Collect(val receivableId: GlobalId) : Route
     data object TrialBalance : Route
     data object MonthClose : Route
+    data object TaxSettings : Route
     data class AccountHistory(val accountId: GlobalId) : Route
 
     // Reports

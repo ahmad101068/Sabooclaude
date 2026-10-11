@@ -16,6 +16,9 @@ data class Customer(
     val creditLimit: Money,
     val registeredIn: Scope.Branch,
     val isActive: Boolean = true,
+    /** National ID, legal-entity ID or economic code, for invoices with the buyer's details (ADR-0037). */
+    val taxId: String = "",
+    val postalCode: String = "",
 )
 
 /**
