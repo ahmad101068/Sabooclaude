@@ -190,6 +190,14 @@ object Schema {
                 "CREATE INDEX stock_shortages_source ON stock_shortages(source_type, source_id)",
             ),
         ),
+        Migration(
+            10,
+            listOf(
+                // Imported point-of-sale days and the POS item names matched to the menu (ADR-0026).
+                "CREATE TABLE pos_imports (id TEXT PRIMARY KEY, pos TEXT NOT NULL, scope TEXT NOT NULL, date INTEGER NOT NULL, sale_id TEXT NOT NULL UNIQUE, active INTEGER NOT NULL, doc TEXT NOT NULL)",
+                "CREATE TABLE pos_aliases (pos TEXT NOT NULL, name_key TEXT NOT NULL, menu_item_id TEXT NOT NULL REFERENCES menu_items(id), PRIMARY KEY(pos, name_key))",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

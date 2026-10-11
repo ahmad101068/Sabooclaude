@@ -8,7 +8,14 @@ import java.math.BigDecimal
  * The money unit a file is written in. A point-of-sale export may be in Toman; the product keeps Rial (ADR-0018),
  * so this is the one edge where Toman is converted — and only when the file says so or the person confirms it.
  */
-enum class FileCurrency(val rialPerUnit: Long) { RIAL(1), TOMAN(10) }
+enum class FileCurrency(val rialPerUnit: Long, val label: String) {
+    RIAL(1, "ریال"), TOMAN(10, "تومان");
+
+    companion object {
+        /** Asked when a file does not say its money unit. */
+        const val UNKNOWN = "فایل نمی‌گوید مبالغ به ریال است یا تومان؛ واحد را انتخاب کنید."
+    }
+}
 
 /** A problem that stops the import until it is fixed (row numbers are as the person sees them in Excel). */
 data class Problem(val row: Int?, val text: String) {

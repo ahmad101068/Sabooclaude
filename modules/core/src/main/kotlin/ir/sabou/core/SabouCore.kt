@@ -96,6 +96,7 @@ class SabouCore private constructor(
     internal val customers = SqlCustomerStore(db)
     internal val sales = SqlSalesStore(db)
     internal val menuPrices = ir.sabou.persistence.SqlMenuPriceStore(db)
+    internal val posImportStore = ir.sabou.persistence.SqlPosImportStore(db)
     internal val personnel = SqlPersonnelStore(db)
     internal val payrollStore = SqlPayrollStore(db)
 
@@ -131,7 +132,7 @@ class SabouCore private constructor(
     val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases, attachments, approvalRules)
     val approvals = ir.sabou.purchasing.ApprovalOperations(bus, approvalRules, purchases)
     val orders = OrderOperations(bus, inventoryGateway, suppliers, purchases)
-    val salesOps = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventoryGateway, recipeBook, treasuryGateway, customers, sales, menuPrices)
+    val salesOps = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventoryGateway, recipeBook, treasuryGateway, customers, sales, menuPrices, posImportStore)
     /** Stored policies (entered by the owner) plus any supplied by the caller (tests). */
     val payrollPolicies = PolicyAdministration(bus, SqlPolicyStore(db))
     private val policyRegistry = StatutoryPolicyRegistry { payrollPolicies.policies() + policies }
@@ -143,6 +144,7 @@ class SabouCore private constructor(
     val reports = Reports(this)
     val dashboards = Dashboards(this)
     val alerts = Alerts(this)
+    val posImports = PosImports(this)
     val buying = Buying(this)
     val books = Books(this)
 

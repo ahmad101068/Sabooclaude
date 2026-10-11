@@ -615,3 +615,29 @@ class SqlMenuPriceStore(db: SqlDatabase) : SqlTable(db), ir.sabou.sales.MenuPric
         )
     }
 }
+
+class SqlPosImportStore(db: SqlDatabase) : SqlTable(db), ir.sabou.sales.PosImportStore {
+    private fun read(d: Doc) = ir.sabou.sales.PosImport(
+        Codec.id(d.str("id")), d.str("pos"), Codec.branchOf(d.str("scope")), Codec.date(d.long("date")),
+        d.strs("files"), d.strs("hashes"), d.strs("bills"), Codec.id(d.str("sale")), d.bool("active"),
+    )
+    override fun all() = docs("SELECT doc FROM pos_imports ORDER BY rowid").map(::read)
+    override fun ofSale(saleId: GlobalId) = doc("SELECT doc FROM pos_imports WHERE sale_id = ?", saleId.value)?.let(::read)
+    override fun save(import: ir.sabou.sales.PosImport) = upsert(
+        "pos_imports", "id",
+        mapOf(
+            "id" to import.id.value, "pos" to import.pos, "scope" to Codec.scope(import.scope), "date" to import.date.epochDay,
+            "sale_id" to import.saleId.value, "active" to if (import.active) 1L else 0L,
+            "doc" to Json.encode(mapOf(
+                "id" to import.id.value, "pos" to import.pos, "scope" to Codec.scope(import.scope), "date" to import.date.epochDay,
+                "files" to import.fileNames, "hashes" to import.fileHashes, "bills" to import.invoiceKeys, "sale" to import.saleId.value, "active" to import.active,
+            )),
+        ),
+    )
+    override fun aliases(pos: String): Map<String, GlobalId> =
+        db.query("SELECT name_key, menu_item_id FROM pos_aliases WHERE pos = ?", pos).associate { it.str("name_key") to Codec.id(it.str("menu_item_id")) }
+    override fun saveAlias(pos: String, key: String, menuItemId: GlobalId) {
+        db.execute("INSERT INTO pos_aliases (pos, name_key, menu_item_id) VALUES (?, ?, ?) ON CONFLICT(pos, name_key) DO UPDATE SET menu_item_id = excluded.menu_item_id", pos, key, menuItemId.value)
+    }
+}
+
