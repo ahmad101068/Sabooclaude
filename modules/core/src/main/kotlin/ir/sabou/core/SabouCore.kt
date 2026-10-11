@@ -234,6 +234,27 @@ class SabouCore private constructor(
         if (full is StartupVerdict.RollbackDetected) throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.IntegrityViolation(full.detail))
     }
 
+    /**
+     * The nightly backup (ADR-0025) runs with nobody signed in, on behalf of [enabledBy], who switched it on. It
+     * is allowed only while that person is active and may still create backups, and it is audited as theirs
+     * ("BACKUP_SCHEDULED"). Like a manual backup it first verifies the whole audit chain.
+     */
+    fun authorizeScheduledBackup(enabledBy: ir.sabou.kernel.GlobalId) {
+        unitOfWork.transaction {
+            val user = users.byId(enabledBy)?.takeIf { it.isActive } ?: throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.AuthenticationRequired)
+            val actor = user.toActor()
+            if (!actor.role.allows(ir.sabou.platform.Permission.BACKUP_CREATE)) {
+                throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.PermissionDenied(ir.sabou.platform.Permission.BACKUP_CREATE.name))
+            }
+            AuditTrail(auditStore).append(
+                ir.sabou.platform.AuditDraft("BACKUP_SCHEDULED", "DATABASE", epoch, "auto"), actor, ModuleId.PLATFORM, "ORG",
+                ir.sabou.kernel.GlobalId.new().value, clock.nowEpochMillis(), epoch,
+            )
+        }
+        val full = verifyAuditFull()
+        if (full is StartupVerdict.RollbackDetected) throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.IntegrityViolation(full.detail))
+    }
+
     private fun administrative(permission: ir.sabou.platform.Permission, action: String, detail: String) = unitOfWork.transaction {
         val actor = session.currentActor() ?: throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.AuthenticationRequired)
         if (!actor.role.allows(permission)) throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.PermissionDenied(permission.name))

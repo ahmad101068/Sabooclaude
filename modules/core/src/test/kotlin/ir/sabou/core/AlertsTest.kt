@@ -60,4 +60,18 @@ class AlertsTest {
             core.session.readAs(owned) { core.inventory.createItem(CreateItem(GlobalId.new(), "آرد", StockUnit.KILOGRAM, Quantity.ZERO)) }
         }.error.code.contains("COMMAND_IN_READ_ONLY_SESSION"))
     }
+
+    @Test fun theNightlyBackupRunsForWhoeverSwitchedItOnWhileTheyMay() {
+        core.bootstrap("شعبه یک", "مالک", "owner", "123456".toCharArray())
+        val branch = Scope.Branch(core.overview.branches().single().id)
+        val ownerId = core.overview.me().userId
+        core.identity.createUser("cashier", "صندوقدار", Role.CASHIER, setOf(branch.branchId), "654321".toCharArray())
+        val cashierId = core.overview.users().single { it.username == "cashier" }.id
+        core.identity.logout()
+        core.authorizeScheduledBackup(ownerId)                          // nobody signed in
+        assertEquals(1, core.db.query("SELECT 1 AS x FROM audit_events WHERE action = 'BACKUP_SCHEDULED' AND actor_id = ?", ownerId.value).size)
+        assertEquals("PERMISSION_DENIED:BACKUP_CREATE", assertFailsWith<DomainException> { core.authorizeScheduledBackup(cashierId) }.error.code)
+        assertEquals("AUTHENTICATION_REQUIRED", assertFailsWith<DomainException> { core.authorizeScheduledBackup(GlobalId.new()) }.error.code)
+    }
 }
+

@@ -224,8 +224,8 @@ class AppContainer(private val context: Context) {
      * (payload: MAGIC + key + encrypted database).
      */
     @Synchronized
-    fun backup(core: SabouCore, password: CharArray, target: Uri) {
-        core.authorizeBackup()
+    fun backup(core: SabouCore, password: CharArray, target: Uri, authorize: () -> Unit = { core.authorizeBackup() }) {
+        authorize()
         val db = checkNotNull(helper) { "DATABASE_CLOSED" }.writableDatabase
         val sealed = File(context.cacheDir, BACKUP_SEALED).also { it.delete() }
         val exportKey = randomHexKey()
@@ -249,6 +249,10 @@ class AppContainer(private val context: Context) {
             sealed.delete()
         }
     }
+
+    /** Small secrets kept on this phone only (the nightly backup's password), sealed with a Keystore key. */
+    fun seal(plain: ByteArray): ByteArray = keys.seal(plain)
+    fun unseal(sealed: ByteArray): ByteArray = keys.open(sealed)
 
     private fun randomHexKey(): String =
         ByteArray(32).also(java.security.SecureRandom()::nextBytes).joinToString("") { "%02x".format(it) }
@@ -365,7 +369,7 @@ class AppContainer(private val context: Context) {
         // 4. From here on the app always re-opens, and whichever file is in place opens normally.
         try {
             faultPoint("announced")
-            clearDrafts(); biometric.disable(); PhoneAlerts.forget(context)   // drafts belong to the replaced database
+            clearDrafts(); biometric.disable(); PhoneAlerts.forget(context); AutoBackup.forget(context)   // drafts belong to the replaced database
             close()
             keepInQuarantine("RESTORE", move = false, withKey = !keyReplaced)
             faultPoint("quarantined")
@@ -389,7 +393,7 @@ class AppContainer(private val context: Context) {
         announceReplacement(epoch, "FACTORY_RESET")
         try {
             faultPoint("announced")
-            clearDrafts(); biometric.disable(); PhoneAlerts.forget(context)
+            clearDrafts(); biometric.disable(); PhoneAlerts.forget(context); AutoBackup.forget(context)
             close()
             keepInQuarantine("FACTORY_RESET", move = true)
             faultPoint("quarantined")
