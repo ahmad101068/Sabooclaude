@@ -40,6 +40,7 @@ import ir.sabou.platform.memory.InMemoryIdempotencyStore
 import ir.sabou.platform.memory.InMemoryUnitOfWork
 import ir.sabou.platform.memory.MutableSession
 import ir.sabou.sales.memory.InMemoryCustomerStore
+import ir.sabou.sales.memory.InMemoryMenuPriceStore
 import ir.sabou.sales.memory.InMemorySalesStore
 import ir.sabou.treasury.OpenTreasuryAccount
 import ir.sabou.treasury.PaymentPurpose
@@ -75,7 +76,8 @@ class SalesTest {
     private val treasuryCap = registry.issue(ModuleId.TREASURY)
     private val treasury = TreasuryGateway(ledger, treasuryCap, tAccounts, movements)
     private val treasuryOps = TreasuryOperations(bus, treasury, treasuryCap, tAccounts)
-    private val ops = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventory, RecipeBook(recipes), treasury, customers, salesStore)
+    private val prices = InMemoryMenuPriceStore().also { uow.register(it) }
+    private val ops = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventory, RecipeBook(recipes), treasury, customers, salesStore, prices)
     private val day = BusinessDate(20_000)
 
     init { uow.register(journals, items, locations, stock, recipes, tAccounts, movements, customers, salesStore) }
@@ -94,9 +96,9 @@ class SalesTest {
         inventoryOps.openingStock(RecordOpeningStock(GlobalId.new(), branch, kitchen, listOf(ReceiptLine(dough, Quantity.units(10), rial(1_000_000))), day))
     }
 
-    /** 20 pizzas, 1,000,000 gross, 100,000 discount, 50,000 service, 90,000 tax = 1,040,000 payable. */
+    /** 20 pizzas at 50,000 = 1,000,000 gross, 100,000 discount, 50,000 service, 90,000 tax = 1,040,000 payable. */
     private fun draft(settlements: List<Settlement>, portions: Long = 20, date: BusinessDate = day) =
-        ops.saveDraft(SaveSaleDraft(GlobalId.new(), branch, date, kitchen, listOf(SaleLine(pizza, Quantity.units(portions), rial(1_000_000))),
+        ops.saveDraft(SaveSaleDraft(GlobalId.new(), branch, date, kitchen, listOf(SaleLineInput(pizza, Quantity.units(portions), rial(50_000))),
             rial(100_000), rial(50_000), rial(90_000), settlements)).resultId
 
     private fun standardSettlements() = listOf(
@@ -131,7 +133,7 @@ class SalesTest {
     }
 
     @Test fun ingredientShortageRollsBackTheWholeDay() {
-        val sale = draft(listOf(Settlement.Liquid(cash, rial(1_040_000))), portions = 41)   // needs 10.25 kg
+        val sale = draft(listOf(Settlement.Liquid(cash, rial(2_090_000))), portions = 41)   // needs 10.25 kg
         assertTrue(code { post(sale) }.startsWith("INSUFFICIENT_STOCK"))
         assertEquals(0, treasury.balance(cash))
         assertEquals(0, ledger.balance(StandardAccounts.FOOD_SALES).rial)
@@ -195,5 +197,82 @@ class SalesTest {
         session.actor = Actor(GlobalId.new(), "cashier", Role.CASHIER, setOf(branch.branchId))
         val sale = draft(standardSettlements())
         assertEquals("PERMISSION_DENIED:SALES_POST", code { post(sale) })
+    }
+
+    // ------------------------------------------------------------ Menu prices (ADR-0019)
+
+    private fun line(portions: Long, unitPrice: Money? = null, reason: String? = null) =
+        SaleLineInput(pizza, Quantity.units(portions), unitPrice, reason)
+
+    private fun save(vararg lines: SaleLineInput, date: BusinessDate = day) =
+        ops.saveDraft(SaveSaleDraft(GlobalId.new(), branch, date, kitchen, lines.toList(), Money.ZERO, Money.ZERO, Money.ZERO, emptyList())).resultId
+
+    private fun setPrice(price: Long?, from: BusinessDate, scope: Scope = Scope.Organization) =
+        ops.setMenuPrice(SetMenuPrice(GlobalId.new(), scope, pizza, from, price?.let(::rial)))
+
+    @Test fun theMenuPriceInForceOnTheDayPricesTheLineAndTheTotalIsComputed() {
+        setPrice(500_000, day.plusDays(-10))
+        setPrice(600_000, day.plusDays(1))                          // a later price does not reach today
+        val sale = salesStore.sale(save(line(3)))!!
+        val l = sale.lines.single()
+        assertEquals(rial(500_000), l.unitPrice)
+        assertEquals(rial(1_500_000), l.gross)                       // 3 × 500,000, never typed
+        assertEquals(rial(500_000), l.listPrice)
+        assertEquals(false, l.overridden)
+        assertEquals(rial(1_200_000), salesStore.sale(save(line(2), date = day.plusDays(1)))!!.gross)
+    }
+
+    @Test fun aHalfPortionIsRoundedToTheRial() {
+        setPrice(333_333, day)
+        assertEquals(rial(166_667), salesStore.sale(save(SaleLineInput(pizza, Quantity.of(500_000))))!!.gross)
+    }
+
+    @Test fun withoutAMenuPriceTheUnitPriceIsTypedAtTheSale() {
+        assertEquals("INVALID_INPUT:price", code { save(line(2)) })
+        val sale = salesStore.sale(save(line(2, rial(450_000))))!!
+        assertEquals(rial(900_000), sale.gross)
+        assertEquals(null, sale.lines.single().listPrice)
+        assertEquals("INVALID_INPUT:price", code { save(line(2, Money.ZERO)) })
+    }
+
+    @Test fun overridingTheMenuPriceNeedsThePermissionAndAReason() {
+        setPrice(500_000, day)
+        // Typing the menu's own price is not an override.
+        assertEquals(false, salesStore.sale(save(line(1, rial(500_000))))!!.lines.single().overridden)
+        assertEquals("INVALID_INPUT:reason", code { save(line(1, rial(400_000))) })
+        val l = salesStore.sale(save(line(1, rial(400_000), "  مهمان ویژه  ")))!!.lines.single()
+        assertEquals(true, l.overridden)
+        assertEquals("مهمان ویژه", l.overrideReason)
+        assertEquals(rial(500_000), l.listPrice)
+        session.actor = Actor(GlobalId.new(), "cashier", Role.CASHIER, setOf(branch.branchId))
+        assertEquals("PERMISSION_DENIED:SALES_PRICE_OVERRIDE", code { save(line(1, rial(400_000), "تخفیف")) })
+        assertEquals(rial(500_000), salesStore.sale(save(line(1)))!!.gross)    // the menu price needs no permission
+    }
+
+    @Test fun aBranchPriceWinsUntilItIsEndedAndPricesAreVersionedNotChanged() {
+        setPrice(500_000, day.plusDays(-30))
+        setPrice(550_000, day.plusDays(-5), branch)
+        assertEquals(rial(550_000), ops.priceList.unitPriceOn(pizza, branch, day))
+        assertEquals(rial(500_000), ops.priceList.unitPriceOn(pizza, Scope.Branch(BranchId(GlobalId.new())), day))
+        setPrice(null, day, branch)                                 // the branch follows the organization again
+        assertEquals(rial(500_000), ops.priceList.unitPriceOn(pizza, branch, day))
+        assertEquals(rial(550_000), ops.priceList.unitPriceOn(pizza, branch, day.plusDays(-1)))
+        // Two versions on the same date: the later one wins.
+        setPrice(520_000, day); setPrice(530_000, day)
+        assertEquals(rial(530_000), ops.priceList.unitPriceOn(pizza, branch, day))
+        assertEquals(5, prices.versions(pizza).size)
+        // The organization price cannot be "ended", and a price is never zero.
+        assertEquals("INVALID_INPUT:price", code { setPrice(null, day) })
+        assertEquals("INVALID_INPUT:price", code { setPrice(0, day) })
+        session.actor = Actor(GlobalId.new(), "cashier", Role.CASHIER, setOf(branch.branchId))
+        assertEquals("PERMISSION_DENIED:MENU_PRICE_MANAGE", code { setPrice(1, day) })
+    }
+
+    @Test fun aRecordedLineKeepsItsPriceWhenTheMenuPriceChanges() {
+        setPrice(500_000, day)
+        val id = save(line(2))
+        setPrice(700_000, day)                                      // a correction recorded later
+        assertEquals(rial(1_000_000), salesStore.sale(id)!!.gross)   // the draft keeps what was recorded
+        assertEquals(rial(1_400_000), salesStore.sale(save(line(2)))!!.gross)   // saving the draft again re-prices it
     }
 }

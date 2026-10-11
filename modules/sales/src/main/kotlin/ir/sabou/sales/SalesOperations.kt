@@ -49,7 +49,7 @@ data class SaveSaleDraft(
     override val scope: Scope.Branch,
     val date: BusinessDate,
     val kitchenLocationId: GlobalId,
-    val lines: List<SaleLine>,
+    val lines: List<SaleLineInput>,
     val discount: Money,
     val serviceCharge: Money,
     val tax: Money,
@@ -59,11 +59,28 @@ data class SaveSaleDraft(
 ) : Command {
     override val requiredPermission = Permission.SALES_RECORD
     override fun fingerprint() = "$scope|${date.epochDay}|$kitchenLocationId|${discount.rial}|${serviceCharge.rial}|${tax.rial}|$guests|$transactions|" +
-        lines.joinToString(";") { "${it.menuItemId}:${it.portions.micros}:${it.gross.rial}" } + "|" +
+        lines.joinToString(";") { "${it.menuItemId}:${it.portions.micros}:${it.unitPrice?.rial}:${it.overrideReason}" } + "|" +
         settlements.joinToString(";") { s -> when (s) {
             is Settlement.Liquid -> "L:${s.treasuryAccountId}:${s.amount.rial}:${s.cheque?.fingerprint()}"
             is Settlement.Credit -> "C:${s.customerId}:${s.amount.rial}:${s.dueDate.epochDay}"
         } }
+}
+
+/**
+ * Records a new version of a menu item's price from [effectiveFrom]: for every branch ([Scope.Organization]) or for
+ * one branch. A null [unitPrice] is allowed only for a branch and ends its own price (it follows the organization's).
+ */
+@NoDocument
+data class SetMenuPrice(
+    override val commandId: GlobalId,
+    override val scope: Scope,
+    val menuItemId: GlobalId,
+    val effectiveFrom: BusinessDate,
+    val unitPrice: Money?,
+) : Command {
+    override val requiredPermission = Permission.MENU_PRICE_MANAGE
+    override val sharedCatalog = true
+    override fun fingerprint() = "$scope|$menuItemId|${effectiveFrom.epochDay}|${unitPrice?.rial}"
 }
 
 @IssuesDocument(DocumentSeries.DAILY_SALE)
@@ -138,7 +155,10 @@ class SalesOperations(
     private val treasury: TreasuryGateway,
     private val customers: CustomerStore,
     private val sales: SalesStore,
+    private val prices: MenuPriceStore,
 ) {
+    val priceList = PriceList(prices)
+
     init {
         require(capability.module == ModuleId.SALES)
     }
@@ -166,11 +186,12 @@ class SalesOperations(
         ensure(inventory.location(cmd.kitchenLocationId).scope == cmd.scope) { DomainError.InvalidInput("location", "آشپزخانه متعلق به این شعبه نیست.") }
         ensure(cmd.lines.isNotEmpty() && cmd.lines.none { it.portions.isZero }) { DomainError.InvalidInput("lines", "حداقل یک آیتم فروش لازم است.") }
         ensure(cmd.lines.map { it.menuItemId }.distinct().size == cmd.lines.size) { DomainError.InvalidInput("lines", "هر آیتم منو فقط یک‌بار بیاید.") }
+        val lines = cmd.lines.map { price(it, cmd.scope, cmd.date, ctx.actor.role) }
         val existing = sales.activeSale(cmd.scope, cmd.date)
         ensure(existing == null || existing.status == SaleStatus.DRAFT) { DomainError.InvalidState("DAILY_SALE", "ALREADY_POSTED") }
         val sale = DailySale(
             id = existing?.id ?: GlobalId.new(), scope = cmd.scope, date = cmd.date, kitchenLocationId = cmd.kitchenLocationId,
-            lines = cmd.lines, discount = cmd.discount, serviceCharge = cmd.serviceCharge, tax = cmd.tax,
+            lines = lines, discount = cmd.discount, serviceCharge = cmd.serviceCharge, tax = cmd.tax,
             settlements = cmd.settlements, status = SaleStatus.DRAFT, revenueJournalId = null, cost = Money.ZERO,
             guests = cmd.guests, transactions = cmd.transactions,
         )
@@ -187,6 +208,37 @@ class SalesOperations(
         sales.saveSale(sale)
         ctx.audit(AuditDraft("SALE_DRAFT_SAVE", "DAILY_SALE", sale.id.value, "payable=${sale.payable.rial};settled=${sale.settled.rial}"))
         sale.id
+    }
+
+    /**
+     * Prices one line: the menu price in force, or the typed unit price when the menu has none. Typing a price other
+     * than the menu's is an override: it needs [Permission.SALES_PRICE_OVERRIDE] and a reason, both kept on the line
+     * (and in the command's audit record).
+     */
+    private fun price(input: SaleLineInput, branch: Scope.Branch, date: BusinessDate, role: ir.sabou.platform.Role): SaleLine {
+        val item = recipes.menuItem(input.menuItemId) ?: throw DomainException(DomainError.NotFound("MENU_ITEM"))
+        val list = priceList.unitPriceOn(item.id, branch, date)
+        val unit = input.unitPrice ?: list
+            ?: throw DomainException(DomainError.InvalidInput("price", "«${item.name}» در منو قیمت ندارد؛ قیمت واحد را وارد کنید."))
+        val overridden = list != null && unit != list
+        if (overridden) {
+            ensure(role.allows(Permission.SALES_PRICE_OVERRIDE)) { DomainError.PermissionDenied(Permission.SALES_PRICE_OVERRIDE.name) }
+            ensure((input.overrideReason?.trim()?.length ?: 0) in 3..200) { DomainError.InvalidInput("reason", "دلیل تغییر قیمت «${item.name}» الزامی است.") }
+        } else {
+            ensure(!unit.isZero) { DomainError.InvalidInput("price", "قیمت واحد «${item.name}» صفر است.") }
+        }
+        return SaleLine.priced(item.id, input.portions, unit, list, input.overrideReason?.trim()?.takeIf { overridden })
+    }
+
+    fun setMenuPrice(c: SetMenuPrice): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        val item = recipes.menuItem(cmd.menuItemId) ?: throw DomainException(DomainError.NotFound("MENU_ITEM"))
+        ensure(cmd.unitPrice != null || cmd.scope is Scope.Branch) { DomainError.InvalidInput("price", "قیمت منو الزامی است.") }
+        ensure(cmd.unitPrice?.isZero != true) { DomainError.InvalidInput("price", "قیمت منو باید بیشتر از صفر باشد.") }
+        val price = MenuPrice(GlobalId.new(), item.id, cmd.scope, cmd.effectiveFrom, cmd.unitPrice, prices.nextSequence())
+        prices.save(price)
+        ctx.audit(AuditDraft("MENU_PRICE_SET", "MENU_ITEM", item.id.value,
+            "scope=${ir.sabou.platform.CommandContext.scopeLabel(cmd.scope)};from=${cmd.effectiveFrom.epochDay};price=${cmd.unitPrice?.rial ?: "ORG"}"))
+        price.id
     }
 
     /**

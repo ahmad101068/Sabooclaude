@@ -23,7 +23,7 @@ import ir.sabou.purchasing.PostPurchaseInvoice
 import ir.sabou.purchasing.RegisterSupplier
 import ir.sabou.sales.CloseSalesDay
 import ir.sabou.sales.PostDailySale
-import ir.sabou.sales.SaleLine
+import ir.sabou.sales.SaleLineInput
 import ir.sabou.sales.SaveSaleDraft
 import ir.sabou.sales.Settlement
 import java.io.ByteArrayInputStream
@@ -62,7 +62,7 @@ class ReportsTest {
         core.inventory.publishRecipe(PublishRecipe(id(), pizza, BusinessDate(19_000), listOf(RecipeLine(cheese, Quantity.of(200_000)))))
         val supplier = core.purchasing.registerSupplier(RegisterSupplier(id(), "لبنیات", "021")).resultId
         core.purchasing.postInvoice(PostPurchaseInvoice(id(), branch, supplier, "1", kitchen, day, day, listOf(InvoiceLine(cheese, Quantity.units(10), rial(30_000_000)))))
-        val sale = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLine(pizza, Quantity.units(10), rial(50_000_000))),
+        val sale = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLineInput(pizza, Quantity.units(10), rial(5_000_000))),
             rial(0), rial(0), rial(0), listOf(Settlement.Liquid(cash, rial(50_000_000))), guests = 25, transactions = 8)).resultId
         core.salesOps.post(PostDailySale(id(), branch, sale))
         core.inventory.waste(RecordWaste(id(), branch, kitchen, cheese, Quantity.of(500_000), WasteReason.SPOILAGE, "", day))

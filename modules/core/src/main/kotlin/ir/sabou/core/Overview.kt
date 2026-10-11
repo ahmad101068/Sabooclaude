@@ -39,6 +39,12 @@ data class AccountBalance(val account: TreasuryAccount, val balance: Long)
 data class LowStock(val item: Item, val location: Location, val quantity: Quantity)
 data class BranchDay(val branch: Branch, val sale: DailySale?, val closed: Boolean)
 data class MenuEntry(val item: MenuItem, val latest: RecipeVersion?)
+
+/**
+ * A menu item's price in one branch on one day: [price] in force (null: none, typed at the sale), whether it is
+ * the branch's [own] price, the [organization] price, and every version recorded for the item (newest first).
+ */
+data class MenuPriceView(val item: MenuItem, val price: Money?, val own: Boolean, val organization: Money?, val history: List<ir.sabou.sales.MenuPrice>)
 data class SalesDayView(val sale: DailySale?, val day: SalesDay?, val customers: List<Customer>, val accounts: List<TreasuryAccount>, val number: String? = null)
 data class CustomerBalance(val customer: Customer, val owed: Money)
 data class OpenReceivable(val receivable: Receivable, val customer: String, val outstanding: Money)
@@ -171,6 +177,18 @@ class Overview internal constructor(private val core: SabouCore) {
     fun menu(): List<MenuEntry> {
         actor(Permission.SALES_VIEW, Permission.RECIPE_MANAGE, Permission.INVENTORY_VIEW)
         return core.recipes.menuItems().map { m -> MenuEntry(m, core.recipes.versions(m.id).maxByOrNull { it.version }) }
+    }
+
+    /** Prices of the active menu in [branch] on [date] (ADR-0019). */
+    fun menuPrices(branch: Scope.Branch, date: BusinessDate): List<MenuPriceView> {
+        actor(Permission.SALES_VIEW, Permission.MENU_PRICE_MANAGE).require(branch)
+        return core.recipes.menuItems().filter { it.isActive }.map { m ->
+            val versions = core.menuPrices.versions(m.id)
+            val inForce = ir.sabou.sales.PriceList.resolve(versions, branch, date)
+            val organization = ir.sabou.sales.PriceList.resolve(versions.filter { it.scope == Scope.Organization }, branch, date)
+            MenuPriceView(m, inForce?.unitPrice, inForce?.scope == branch, organization?.unitPrice,
+                versions.filter { it.scope == Scope.Organization || it.scope == branch }.sortedWith(compareByDescending<ir.sabou.sales.MenuPrice> { it.effectiveFrom }.thenByDescending { it.sequence }))
+        }
     }
 
     // ------------------------------------------------------------ Inventory
