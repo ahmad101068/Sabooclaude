@@ -135,6 +135,7 @@ class SqlItemStore(db: SqlDatabase) : SqlTable(db), ItemStore {
         approvedSupplierIds = d.strsOr("approvedSuppliers").map(Codec::id).toSet(),
         packs = d.docsOr("packs").map { PackUnit(it.str("name"), Codec.qty(it.long("contains"))) },
         shelfLifeDays = d.longOrNull("shelfLife")?.toInt(),
+        parByWeekday = d.docsOr("parByDay").associate { it.long("day").toInt() to Codec.qty(it.long("par")) },
     )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM items WHERE id = ?", id.value)?.let(::read)
     override fun all() = docs("SELECT doc FROM items ORDER BY rowid").map(::read)
@@ -149,6 +150,7 @@ class SqlItemStore(db: SqlDatabase) : SqlTable(db), ItemStore {
                     "preferredSupplier" to item.preferredSupplierId?.value, "approvedSuppliers" to item.approvedSupplierIds.map { it.value }.sorted(),
                     "packs" to item.packs.map { mapOf("name" to it.name, "contains" to it.contains.micros) },
                     "shelfLife" to item.shelfLifeDays?.toLong(),
+                    "parByDay" to item.parByWeekday.entries.sortedBy { it.key }.map { mapOf("day" to it.key.toLong(), "par" to it.value.micros) },
                 ),
             ),
         ),
