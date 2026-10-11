@@ -66,6 +66,7 @@ object ReportsScreens {
             Page {
                 if (session.can(Permission.LEDGER_VIEW)) {
                     SectionTitle("مالی")
+                    NavRow(R.drawable.ic_finance, "سود و زیان امروز در برابر بودجه", "با برآورد حقوق و اجاره‌ی روزانه؛ و ماه تا امروز", onClick = { nav.go(Route.DailyPnl) })
                     NavRow(R.drawable.ic_finance, "سود و زیان", "روزانه، به تفکیک شعبه، درصد بهای غذا و نیروی کار", onClick = { nav.go(Route.ProfitLoss) })
                     NavRow(R.drawable.ic_finance, "تراز آزمایشی", "مانده‌ی همه‌ی حساب‌ها", onClick = { nav.go(Route.TrialBalance) })
                     NavRow(R.drawable.ic_finance, "بودجه در برابر عملکرد", "ماهانه یا سالانه، به تفکیک حساب", onClick = { nav.go(Route.BudgetReport) })
@@ -330,6 +331,66 @@ object ReportsScreens {
     }
 
     /** Menu engineering (ADR-0028): each dish by popularity and margin, with what to do about it. */
+    @Composable
+    fun DailyPnl(nav: Nav) {
+        val session = LocalSession.current
+        var date by rememberSaveable { mutableStateOf(session.today) }
+        Column(Modifier.fillMaxSize()) {
+            Header("سود و زیان روزانه", "در برابر بودجه", onBack = nav.back) { BranchSwitcher() }
+            WithBranch { branch ->
+                val data by load(session, branch, date) { reports.dailyPnl(branch, date) }
+                Page {
+                    DateInput("روز", date, { date = it }, session.today)
+                    Loaded(data) { p ->
+                        val salesDay = p.line(ir.sabou.core.DailyPnl.Group.SALES).day
+                        val salesMtd = p.line(ir.sabou.core.DailyPnl.Group.SALES).mtd
+                        SCard {
+                            PnlRow("", "امروز", "بودجه", "ماه تا امروز", "بودجه", header = true)
+                            Divider()
+                            p.lines.forEach { l ->
+                                val name = when (l.group) {
+                                    ir.sabou.core.DailyPnl.Group.SALES -> "فروش"
+                                    ir.sabou.core.DailyPnl.Group.FOOD_COST -> "بهای غذا"
+                                    ir.sabou.core.DailyPnl.Group.LABOR -> "نیروی کار"
+                                    ir.sabou.core.DailyPnl.Group.OTHER -> "سایر هزینه‌ها"
+                                }
+                                PnlRow(name, Fa.rialShort(l.day) + if (l.dayEstimated) "*" else "", Fa.rialShort(l.dayBudget),
+                                    Fa.rialShort(l.mtd) + if (l.mtdEstimated) "*" else "", Fa.rialShort(l.mtdBudget))
+                                if (l.group != ir.sabou.core.DailyPnl.Group.SALES) {
+                                    val d = p.bp(l.day, salesDay); val m = p.bp(l.mtd, salesMtd)
+                                    if (d != null || m != null) PnlRow("", d?.let(Fa::percent) ?: "", "", m?.let(Fa::percent) ?: "", "", muted = true)
+                                }
+                            }
+                            Divider()
+                            PnlRow("سود", Fa.rialShort(p.dayProfit), Fa.rialShort(p.dayProfitBudget), Fa.rialShort(p.mtdProfit), Fa.rialShort(p.mtdProfitBudget), header = true,
+                                warn = p.mtdProfit < p.mtdProfitBudget)
+                        }
+                        SCard {
+                            KeyValue("فروش ماه با همین روند", Fa.rial(p.salesRunRate) + " ریال")
+                            if (p.monthSalesBudget > 0) KeyValue("بودجه‌ی فروش ماه", Fa.rial(p.monthSalesBudget) + " ریال",
+                                if (p.salesRunRate < p.monthSalesBudget) Sabou.colors.danger else Sabou.colors.ink)
+                        }
+                        Text("* برآورد: حقوق، اجاره و هزینه‌هایی که ماهانه ثبت می‌شوند، تا ثبت شدن به اندازه‌ی بودجه‌ی روزانه‌شان حساب می‌شوند تا سود روز بیش از واقع نشان داده نشود. " +
+                            "هزینه‌ای که بودجه ندارد همان مبلغ ثبت‌شده است.", style = SabouType.caption, color = Sabou.colors.muted)
+                        if (session.can(Permission.BUDGET_MANAGE)) SecondaryButton("تنظیم بودجه", { nav.go(Route.BudgetReport) })
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun PnlRow(name: String, day: String, dayBudget: String, mtd: String, mtdBudget: String, header: Boolean = false, muted: Boolean = false, warn: Boolean = false) {
+        val style = if (header) SabouType.bodyStrong else if (muted) SabouType.caption else SabouType.body
+        val color = if (warn) Sabou.colors.danger else if (muted) Sabou.colors.muted else Sabou.colors.ink
+        Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+            Text(name, style = style, color = color, modifier = Modifier.weight(1.3f))
+            listOf(day, dayBudget, mtd, mtdBudget).forEachIndexed { i, v ->
+                Text(v, style = style, color = if (i % 2 == 1) Sabou.colors.muted else color, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+
     @Composable
     fun MenuEngineering(nav: Nav) {
         val session = LocalSession.current

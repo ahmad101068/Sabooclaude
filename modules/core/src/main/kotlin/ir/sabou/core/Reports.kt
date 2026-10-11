@@ -39,6 +39,36 @@ data class PnlTotals(val revenue: Long, val cogs: Long, val expenses: Long) {
 data class PnlLine(val account: Account, val amount: Long)
 
 /**
+ * One day's P&L and the month so far against budget (ADR-0034). Expenses are positive; [Line.dayEstimated] /
+ * [Line.mtdEstimated] say the figure includes budget accruals for costs not booked daily.
+ */
+data class DailyPnl(
+    val branch: String,
+    val date: BusinessDate,
+    val monthStart: BusinessDate,
+    val lines: List<Line>,
+    /** Sales so far scaled to the whole month. */
+    val salesRunRate: Long,
+    val monthSalesBudget: Long,
+) {
+    enum class Group { SALES, FOOD_COST, LABOR, OTHER }
+
+    data class Line(val group: Group, val day: Long, val dayBudget: Long, val mtd: Long, val mtdBudget: Long, val dayEstimated: Boolean, val mtdEstimated: Boolean)
+
+    fun line(g: Group) = lines.single { it.group == g }
+    val dayProfit: Long get() = line(Group.SALES).day - line(Group.FOOD_COST).day - line(Group.LABOR).day - line(Group.OTHER).day
+    val dayProfitBudget: Long get() = line(Group.SALES).dayBudget - line(Group.FOOD_COST).dayBudget - line(Group.LABOR).dayBudget - line(Group.OTHER).dayBudget
+    val mtdProfit: Long get() = line(Group.SALES).mtd - line(Group.FOOD_COST).mtd - line(Group.LABOR).mtd - line(Group.OTHER).mtd
+    val mtdProfitBudget: Long get() = line(Group.SALES).mtdBudget - line(Group.FOOD_COST).mtdBudget - line(Group.LABOR).mtdBudget - line(Group.OTHER).mtdBudget
+    /** Share of sales, basis points; null without sales. */
+    fun bp(part: Long, sales: Long): Long? = if (sales <= 0) null else Ratio.mulDiv(part, 10_000, sales)
+}
+
+/** Food cost = cost of sales, waste, comps and stock variance (as in [CostRatios]). */
+val FOOD_COST_ACCOUNTS = setOf(StandardAccounts.COGS, StandardAccounts.WASTE, StandardAccounts.COMPS, StandardAccounts.INVENTORY_VARIANCE)
+val LABOR_ACCOUNTS = setOf(StandardAccounts.SALARIES, StandardAccounts.EMPLOYER_INSURANCE)
+
+/**
  * Restaurant cost ratios on food and beverage sales (4101): food cost = cost of sales + waste + comps + stock
  * variance; labour = salaries + employer insurance; prime cost = both. Basis points (1/100 of a percent).
  * Labour is booked when a payroll month is approved, so short periods show it in the month's last days.
@@ -283,6 +313,74 @@ class Reports internal constructor(private val core: SabouCore) {
                 labor = sumOf(listOf(StandardAccounts.SALARIES, StandardAccounts.EMPLOYER_INSURANCE)),
             ),
         )
+    }
+
+    /**
+     * The day's P&L and the month so far, against budget (ADR-0034). Sales and food cost are the books. Labour and
+     * other expenses are booked monthly (payroll, rent), so a day would look too good: where an expense account has a
+     * budget, the day carries its budget per day as an **estimate**, and the month so far carries the actual once it
+     * is booked, else the budget so far (also an estimate). Accounts without a budget always show their actual.
+     */
+    fun dailyPnl(branch: Scope.Branch, date: BusinessDate): DailyPnl {
+        actor(Permission.LEDGER_VIEW).require(branch)
+        val ymd = ir.sabou.kernel.JalaliCalendar.of(date)
+        val monthStart = ir.sabou.kernel.JalaliCalendar.date(ymd.year, ymd.month, 1)
+        val monthEnd = ir.sabou.kernel.JalaliCalendar.date(ymd.year, ymd.month, ir.sabou.kernel.JalaliCalendar.monthLength(ymd.year, ymd.month))
+        val accounts = core.accounts.all().associateBy { it.code }
+        fun actual(from: BusinessDate, to: BusinessDate): Map<AccountCode, Long> {
+            val out = HashMap<AccountCode, Long>()
+            core.journals.dailyTotals(from, to).filter { it.scope == branch }.forEach { t ->
+                val amount = when (accounts[t.account]?.type) {
+                    AccountType.REVENUE -> t.credit - t.debit
+                    AccountType.EXPENSE -> t.debit - t.credit
+                    else -> return@forEach
+                }
+                out[t.account] = (out[t.account] ?: 0) + amount
+            }
+            return out
+        }
+        fun budget(from: BusinessDate, to: BusinessDate): Map<AccountCode, Long> {
+            val out = HashMap<AccountCode, Long>()
+            core.budgetStore.entries().filter { it.scope == branch }.forEach { e ->
+                val start = maxOf(e.from.epochDay, from.epochDay); val end = minOf(e.to.epochDay, to.epochDay)
+                if (end < start) return@forEach
+                out[e.account] = (out[e.account] ?: 0) + Ratio.mulDiv(e.amount.rial, end - start + 1, e.to.epochDay - e.from.epochDay + 1)
+            }
+            return out
+        }
+        val dayActual = actual(date, date); val dayBudget = budget(date, date)
+        val mtdActual = actual(monthStart, date); val mtdBudget = budget(monthStart, date)
+        val monthBudget = budget(monthStart, monthEnd)
+        val codes = (dayActual.keys + dayBudget.keys + mtdActual.keys + mtdBudget.keys).filter { accounts[it] != null }.toSet()
+        fun group(code: AccountCode): DailyPnl.Group = when {
+            accounts.getValue(code).type == AccountType.REVENUE -> DailyPnl.Group.SALES
+            code in FOOD_COST_ACCOUNTS -> DailyPnl.Group.FOOD_COST
+            code in LABOR_ACCOUNTS -> DailyPnl.Group.LABOR
+            else -> DailyPnl.Group.OTHER
+        }
+        val lines = DailyPnl.Group.entries.map { g ->
+            val mine = codes.filter { group(it) == g }
+            var dayEstimated = false; var mtdEstimated = false
+            var day = 0L; var mtd = 0L
+            mine.forEach { c ->
+                val accrued = g == DailyPnl.Group.LABOR || g == DailyPnl.Group.OTHER
+                val hasBudget = (monthBudget[c] ?: 0L) != 0L
+                if (accrued && hasBudget) {
+                    day += dayBudget[c] ?: 0L; dayEstimated = true
+                    val booked = mtdActual[c] ?: 0L
+                    if (booked != 0L) mtd += booked else { mtd += mtdBudget[c] ?: 0L; mtdEstimated = true }
+                } else {
+                    day += dayActual[c] ?: 0L; mtd += mtdActual[c] ?: 0L
+                }
+            }
+            DailyPnl.Line(g, day, mine.sumOf { dayBudget[it] ?: 0L }, mtd, mine.sumOf { mtdBudget[it] ?: 0L }, dayEstimated, mtdEstimated)
+        }
+        val elapsed = date.epochDay - monthStart.epochDay + 1
+        val days = monthEnd.epochDay - monthStart.epochDay + 1
+        val sales = lines.single { it.group == DailyPnl.Group.SALES }
+        return DailyPnl(scopeName(branch), date, monthStart, lines,
+            salesRunRate = if (elapsed > 0) Ratio.mulDiv(sales.mtd, days, elapsed) else 0L,
+            monthSalesBudget = codes.filter { group(it) == DailyPnl.Group.SALES }.sumOf { monthBudget[it] ?: 0L })
     }
 
     /** The journal lines behind one P&L figure: every posting to [account] in the period. */
