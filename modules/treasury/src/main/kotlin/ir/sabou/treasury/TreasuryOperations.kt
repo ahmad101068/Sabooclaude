@@ -37,6 +37,7 @@ enum class PaymentPurpose(val counterAccount: AccountCode) {
     UTILITIES(StandardAccounts.UTILITIES),
     OTHER_EXPENSE(StandardAccounts.OTHER_EXPENSE),
     OWNER_WITHDRAWAL(StandardAccounts.CAPITAL),
+    BANK_FEES(StandardAccounts.BANK_CHARGES),
 }
 
 @NoDocument

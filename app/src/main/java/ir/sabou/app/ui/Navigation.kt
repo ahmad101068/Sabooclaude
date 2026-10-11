@@ -20,6 +20,8 @@ sealed interface Route : java.io.Serializable {
     data object Payment : Route
     data object Transfer : Route
     data object Reconcile : Route
+    data object BankStatements : Route
+    data class StatementDetail(val statementId: GlobalId) : Route
     data object Receivables : Route
     data class Collect(val receivableId: GlobalId) : Route
     data object TrialBalance : Route

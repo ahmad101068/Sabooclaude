@@ -64,4 +64,6 @@ interface MovementStore {
     fun bySource(type: String, id: GlobalId): List<TreasuryMovement>
     /** Receipts minus payments. */
     fun balance(accountId: GlobalId): Long
+    /** Every movement of the account, in recording order. */
+    fun byAccount(accountId: GlobalId): List<TreasuryMovement>
 }

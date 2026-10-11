@@ -120,6 +120,8 @@ class SabouCore private constructor(
     val accounting = ManualAccounting(bus, ledger, registry.issue(ModuleId.LEDGER_MANUAL), periods)
     internal val treasuryGateway = TreasuryGateway(ledger, treasuryCapability, treasuryAccounts, treasuryMovements, cheques)
     val treasury = TreasuryOperations(bus, treasuryGateway, treasuryCapability, treasuryAccounts)
+    internal val bankStatementStore = ir.sabou.persistence.SqlBankStatementStore(db)
+    val bankStatements = ir.sabou.treasury.BankStatementOperations(bus, treasuryAccounts, treasuryMovements, bankStatementStore)
     val chequeOps = ir.sabou.treasury.ChequeOperations(bus, treasuryGateway, treasuryCapability)
     val budgets = ir.sabou.ledger.BudgetOperations(bus, accounts, budgetStore)
     internal val shortages = ir.sabou.persistence.SqlShortageStore(db)
@@ -150,6 +152,7 @@ class SabouCore private constructor(
     val posImports = PosImports(this)
     val buying = Buying(this)
     val prep = Prep(this)
+    val bankRec = BankRec(this)
     val books = Books(this)
 
     /**
