@@ -55,6 +55,7 @@ import ir.sabou.app.ui.components.Segmented
 import ir.sabou.app.ui.components.SectionTitle
 import ir.sabou.app.ui.components.TextInput
 import ir.sabou.app.ui.load
+import ir.sabou.app.ui.orNull
 import ir.sabou.app.ui.rememberAction
 import ir.sabou.app.ui.restoreMessage
 import ir.sabou.app.ui.theme.Sabou
@@ -521,7 +522,7 @@ object MeScreens {
                         TextInput("رمز فعلی برای تأیید", codePin, { codePin = it }, keyboard = KeyboardType.NumberPassword, secret = true)
                         recovery.error?.let { Banner(it) }
                         PrimaryButton(if (hasCode.orNull() == true) "ساختن کد تازه (کد قبلی باطل می‌شود)" else "ساختن کد بازیابی", {
-                            recovery.run({ identity.issueRecoveryCode(Fa.latinDigits(codePin).toCharArray()) }) { code -> issued = code; codePin = "" }
+                            recovery.run<String>({ identity.issueRecoveryCode(Fa.latinDigits(codePin).toCharArray()) }) { code -> issued = code; codePin = "" }
                         }, enabled = codePin.length >= 6, busy = recovery.busy)
                     }
                 }
