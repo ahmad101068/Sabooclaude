@@ -554,6 +554,7 @@ object OperationsScreens {
             Header("کارکنان", onBack = nav.back) { BranchSwitcher() }
             WithBranch { branch ->
                 val data by load(session, branch) { overview.employees(branch) }
+                val issues by load(session, branch) { labor.documentIssues(branch, session.today) }
                 var name by rememberSaveable { mutableStateOf("") }
                 var nationalId by rememberSaveable { mutableStateOf("") }
                 var salary by rememberSaveable { mutableStateOf<Money?>(null) }
@@ -574,6 +575,10 @@ object OperationsScreens {
                                     if (e.endDate != null) Chip("پایان همکاری ${Fa.date(e.endDate!!)}", ChipKind.NEUTRAL)
                                 }
                                 KeyValue("حقوق ماهانه", Fa.rial(e.monthlySalary))
+                                val docIssues = issues.orNull().orEmpty().filter { it.employee.id == e.id }
+                                Text("مدارک" + if (docIssues.isNotEmpty()) " (${Fa.number(docIssues.size.toLong())} مورد نیاز به رسیدگی)" else "", style = SabouType.label,
+                                    color = if (docIssues.isNotEmpty()) Sabou.colors.danger else Sabou.colors.primary,
+                                    modifier = Modifier.clickable { nav.go(Route.StaffDocuments(e.id)) }.padding(vertical = 4.dp))
                                 Text("کد ملی ${Fa.digits(e.nationalId)}" + (e.startDate?.let { " · شروع کار ${Fa.date(it)}" } ?: ""),
                                     style = SabouType.caption, color = Sabou.colors.muted)
                                 if (e.endDate == null && e.isActive && session.can(Permission.PERSONNEL_MANAGE)) {

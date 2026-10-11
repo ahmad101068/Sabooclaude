@@ -75,3 +75,10 @@ class InMemoryShiftStore : ir.sabou.payroll.ShiftStore {
     override fun clockPin(employeeId: GlobalId) = pins[employeeId]
     override fun saveClockPin(employeeId: GlobalId, hash: String?) { if (hash == null) pins.remove(employeeId) else pins[employeeId] = hash }
 }
+
+class InMemoryStaffDocumentStore : ir.sabou.payroll.StaffDocumentStore {
+    private val rows = ArrayList<ir.sabou.payroll.StaffDocument>()
+    override fun of(employeeId: GlobalId) = rows.filter { it.employeeId == employeeId }
+    override fun all(scope: ir.sabou.kernel.Scope.Branch) = rows.filter { it.scope == scope }
+    override fun save(document: ir.sabou.payroll.StaffDocument) { rows += document }
+}

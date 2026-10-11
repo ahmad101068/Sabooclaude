@@ -12,7 +12,7 @@ import ir.sabou.platform.Permission
  * only if it comes back.
  */
 data class Alert(val key: String, val kind: Kind, val title: String, val text: String) {
-    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH, EXPIRY, COUNT_DUE }
+    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH, EXPIRY, COUNT_DUE, STAFF_DOCUMENT }
 }
 
 /**
@@ -26,6 +26,15 @@ class Alerts internal constructor(private val core: SabouCore) {
         val actor = user.toActor()
         return core.session.readAs(actor) {
             buildList {
+                if (actor.role.allows(Permission.PERSONNEL_MANAGE)) {
+                    core.branches.all().filter { actor.canAccess(Scope.Branch(it.id)) }.forEach { b ->
+                        safe { core.labor.documentIssues(Scope.Branch(b.id), today) }.filter { it.issue.expired || (it.issue.daysLeft ?: 99) <= STAFF_DOC_DAYS }.forEach { v ->
+                            add(Alert("STAFFDOC:${v.issue.document?.id?.value ?: v.employee.id.value}:${if (v.issue.expired) "expired" else "soon"}", Alert.Kind.STAFF_DOCUMENT,
+                                "${staffDocName(v.issue.kind)} ${v.employee.name} " + if (v.issue.expired) "منقضی شده" else "رو به پایان است",
+                                "اعتبار تا ${v.issue.document?.expiresOn?.let(Fa::date) ?: "—"}؛ مدرک تازه را در «کارکنان» ثبت کنید."))
+                        }
+                    }
+                }
                 if (actor.role.allows(Permission.INVENTORY_COUNT)) {
                     core.branches.all().filter { actor.canAccess(Scope.Branch(it.id)) }.forEach { b ->
                         safe { core.overview.countsDue(Scope.Branch(b.id), today) }.filter { it.due }.forEach { d ->
@@ -110,5 +119,16 @@ class Alerts internal constructor(private val core: SabouCore) {
         const val CHEQUE_DAYS = 2L
         /** Goods expiring by tomorrow (and those past their date) are alerted. */
         const val EXPIRY_DAYS = 1L
+        /** Staff documents are alerted two weeks ahead (renewing a health card takes days). */
+        const val STAFF_DOC_DAYS = 14L
+
+        fun staffDocName(kind: ir.sabou.payroll.StaffDocument.Kind) = when (kind) {
+            ir.sabou.payroll.StaffDocument.Kind.HEALTH_CARD -> "کارت بهداشت"
+            ir.sabou.payroll.StaffDocument.Kind.CONTRACT -> "قرارداد"
+            ir.sabou.payroll.StaffDocument.Kind.ID_CARD -> "کارت شناسایی"
+            ir.sabou.payroll.StaffDocument.Kind.INSURANCE -> "سابقه‌ی بیمه"
+            ir.sabou.payroll.StaffDocument.Kind.GUARANTEE -> "ضمانت"
+            ir.sabou.payroll.StaffDocument.Kind.OTHER -> "مدرک"
+        }
     }
 }

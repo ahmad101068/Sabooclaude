@@ -241,6 +241,14 @@ object Schema {
                 "CREATE TABLE clock_pins (employee_id TEXT PRIMARY KEY REFERENCES employees(id), hash TEXT NOT NULL)",
             ) + immutable("punches"),
         ),
+        Migration(
+            16,
+            listOf(
+                // Staff documents (health card, contract…); files are attachments (ADR-0039).
+                "CREATE TABLE staff_documents (id TEXT PRIMARY KEY, scope TEXT NOT NULL, employee_id TEXT NOT NULL REFERENCES employees(id), doc TEXT NOT NULL)",
+                "CREATE INDEX staff_documents_employee ON staff_documents(employee_id)",
+            ) + immutable("staff_documents"),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

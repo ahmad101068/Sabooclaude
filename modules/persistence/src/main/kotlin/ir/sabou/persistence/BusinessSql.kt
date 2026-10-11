@@ -705,3 +705,17 @@ class SqlShiftStore(db: SqlDatabase) : SqlTable(db), ir.sabou.payroll.ShiftStore
         else db.execute("INSERT INTO clock_pins (employee_id, hash) VALUES (?, ?) ON CONFLICT(employee_id) DO UPDATE SET hash = excluded.hash", employeeId.value, hash)
     }
 }
+
+/** Staff documents; immutable (a renewal is a new document) (ADR-0039). */
+class SqlStaffDocumentStore(db: SqlDatabase) : SqlTable(db), ir.sabou.payroll.StaffDocumentStore {
+    private fun read(d: Doc) = ir.sabou.payroll.StaffDocument(Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.id(d.str("employee")),
+        ir.sabou.payroll.StaffDocument.Kind.valueOf(d.str("kind")), d.strOr("title", ""), d.longOrNull("expires")?.let(Codec::date), d.strOr("note", ""), d.long("at"))
+    override fun of(employeeId: GlobalId) = docs("SELECT doc FROM staff_documents WHERE employee_id = ? ORDER BY rowid", employeeId.value).map(::read)
+    override fun all(scope: Scope.Branch) = docs("SELECT doc FROM staff_documents WHERE scope = ? ORDER BY rowid", Codec.scope(scope)).map(::read)
+    override fun save(document: ir.sabou.payroll.StaffDocument) = db.execute(
+        "INSERT INTO staff_documents (id, scope, employee_id, doc) VALUES (?, ?, ?, ?)",
+        document.id.value, Codec.scope(document.scope), document.employeeId.value,
+        Json.encode(mapOf("id" to document.id.value, "scope" to Codec.scope(document.scope), "employee" to document.employeeId.value, "kind" to document.kind.name,
+            "title" to document.title, "expires" to document.expiresOn?.epochDay, "note" to document.note, "at" to document.recordedAtEpochMillis)),
+    )
+}
