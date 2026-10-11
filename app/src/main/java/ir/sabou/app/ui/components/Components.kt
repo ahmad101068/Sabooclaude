@@ -435,6 +435,23 @@ fun DateInput(label: String, date: BusinessDate, onChange: (BusinessDate) -> Uni
     if (open) JalaliCalendarDialog(date, today, onPick = { onChange(it); open = false }, onDismiss = { open = false })
 }
 
+/** A date that may be left empty (e.g. an expiry date): a link to add it, then the date with a way to clear it. */
+@Composable
+fun OptionalDateInput(label: String, date: BusinessDate?, onChange: (BusinessDate?) -> Unit, today: BusinessDate) {
+    var open by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (date == null) {
+            Text("+ $label", style = SabouType.label, color = Sabou.colors.primary,
+                modifier = Modifier.clickable(role = Role.Button) { open = true }.padding(vertical = 6.dp))
+        } else {
+            Text("$label: ${Fa.date(date)}", style = SabouType.body, color = Sabou.colors.ink,
+                modifier = Modifier.weight(1f).clickable(role = Role.Button, onClickLabel = "تغییر تاریخ") { open = true }.padding(vertical = 6.dp))
+            Text("حذف", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable(role = Role.Button) { onChange(null) }.padding(6.dp))
+        }
+    }
+    if (open) JalaliCalendarDialog(date ?: today, today, onPick = { onChange(it); open = false }, onDismiss = { open = false })
+}
+
 private val weekdayInitials = listOf("ش", "ی", "د", "س", "چ", "پ", "ج")
 
 /** A Persian month view (weeks start on Saturday); arrows move by month, the title row by year. */

@@ -123,7 +123,8 @@ class SabouCore private constructor(
     val chequeOps = ir.sabou.treasury.ChequeOperations(bus, treasuryGateway, treasuryCapability)
     val budgets = ir.sabou.ledger.BudgetOperations(bus, accounts, budgetStore)
     internal val shortages = ir.sabou.persistence.SqlShortageStore(db)
-    internal val inventoryGateway = InventoryGateway(ledger, registry.issue(ModuleId.INVENTORY), items, locations, stock, shortages)
+    internal val lots = ir.sabou.persistence.SqlLotStore(db)
+    internal val inventoryGateway = InventoryGateway(ledger, registry.issue(ModuleId.INVENTORY), items, locations, stock, shortages, lots)
     val inventory = InventoryOperations(bus, inventoryGateway, items, locations, recipes) { id ->
         menuPrices.versions(id).isNotEmpty() || sales.usesMenuItem(id)
     }

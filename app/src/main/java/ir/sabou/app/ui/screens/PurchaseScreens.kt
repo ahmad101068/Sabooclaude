@@ -167,11 +167,13 @@ object PurchaseScreens {
         }
     }
 
-    private class GoodsRow(item: GlobalId?, qty: Quantity?, value: Money?, supplierName: String) {
+    private class GoodsRow(item: GlobalId?, qty: Quantity?, value: Money?, supplierName: String, expiresDay: Long? = null) {
         var item by mutableStateOf(item)
         var qty by mutableStateOf(qty)
         var value by mutableStateOf(value)
         var supplierName by mutableStateOf(supplierName)
+        /** Expiry as an epoch day (kept as a plain number across process death). */
+        var expiresDay by mutableStateOf(expiresDay)
         val complete: Boolean get() = item != null && qty != null && value != null
     }
 
@@ -238,8 +240,8 @@ object PurchaseScreens {
         var date by rememberSaveable { mutableStateOf(session.today) }
         var due by rememberSaveable { mutableStateOf(session.today.plusDays(30)) }
         var note by rememberSaveable { mutableStateOf("") }
-        val goods = rememberRows<GoodsRow>({ listOf(it.item, it.qty, it.value, it.supplierName) },
-            { GoodsRow(it[0] as GlobalId?, it[1] as Quantity?, it[2] as Money?, it[3] as String) }) {
+        val goods = rememberRows<GoodsRow>({ listOf(it.item, it.qty, it.value, it.supplierName, it.expiresDay) },
+            { GoodsRow(it[0] as GlobalId?, it[1] as Quantity?, it[2] as Money?, it[3] as String, it.getOrNull(4) as Long?) }) {
             order?.lines?.map { GoodsRow(it.itemId, it.quantity, it.value, "") } ?: listOf(GoodsRow(null, null, null, ""))
         }
         val expenseRows = rememberRows<AccountRow>({ listOf(it.account, it.amount, it.branch, it.memo) },
@@ -291,6 +293,10 @@ object PurchaseScreens {
                         val item = l.item?.let { itemsById[it] }
                         ItemQuantityInput("مقدار", item, { l.qty = it }, value = l.qty)
                         MoneyInput("مبلغ کل ردیف", l.value, { l.value = it })
+                        ir.sabou.app.ui.components.OptionalDateInput("تاریخ انقضا", l.expiresDay?.let(::BusinessDate), { l.expiresDay = it?.epochDay }, session.today)
+                        if (l.expiresDay == null && item?.shelfLifeDays != null) {
+                            Text("بدون تاریخ، انقضا ${Fa.number(item.shelfLifeDays!!.toLong())} روز پس از تاریخ فاکتور حساب می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
+                        }
                         val price = unitPrice(l.qty, l.value)
                         val previous = l.item?.let { lastPrices[it] }
                         val last = previous?.price
@@ -373,7 +379,7 @@ object PurchaseScreens {
         PrimaryButton("ثبت فاکتور", {
             val cmd = PostPurchaseInvoice(
                 id.value, branch, supplier!!, number, loc.takeIf { goods.isNotEmpty() }, date, due,
-                goods.map { InvoiceLine(it.item!!, it.qty!!, it.value!!, it.supplierName) },
+                goods.map { InvoiceLine(it.item!!, it.qty!!, it.value!!, it.supplierName, it.expiresDay?.let(::BusinessDate)) },
                 if (payNow) ImmediatePayment(payAccount!!, payAmount!!) else null,
                 expenseRows.map { r ->
                     AccountLine(AccountCode.of(r.account!!), r.amount!!, r.branch?.takeIf { it != branch.branchId.value }?.let { Scope.Branch(BranchId(it)) }, r.memo)

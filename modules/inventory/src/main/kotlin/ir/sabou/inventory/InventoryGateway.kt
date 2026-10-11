@@ -20,7 +20,8 @@ import ir.sabou.platform.AuditDraft
 import ir.sabou.platform.CommandContext
 import ir.sabou.platform.ModuleId
 
-data class ReceiptLine(val itemId: GlobalId, val quantity: Quantity, val value: Money)
+/** [expiresOn]: the date printed on the goods, if any; without it the item's shelf life applies (ADR-0030). */
+data class ReceiptLine(val itemId: GlobalId, val quantity: Quantity, val value: Money, val expiresOn: BusinessDate? = null)
 data class IssueLine(val itemId: GlobalId, val quantity: Quantity)
 data class IssuedCost(val itemId: GlobalId, val quantity: Quantity, val cost: Money)
 /** What a consumption took from stock at cost, and what it could not (left as open shortages, ADR-0022). */
@@ -39,6 +40,7 @@ class InventoryGateway(
     private val locations: LocationStore,
     private val stock: StockStore,
     private val shortages: ShortageStore = ir.sabou.inventory.memory.InMemoryShortageStore(),
+    private val lots: LotStore = ir.sabou.inventory.memory.InMemoryLotStore(),
 ) {
     init {
         require(capability.module == ModuleId.INVENTORY)
@@ -97,8 +99,11 @@ class InventoryGateway(
                 listOf(LineDraft(StandardAccounts.INVENTORY, debit = total, memo = location.name, by = capability)) + counterLines),
         )
         lines.forEach { line ->
-            item(line.itemId)
-            stockIn(context, line.itemId, location, line.quantity, line.value, MovementKind.RECEIPT, date, journal.id, SourceDocument(owner.module, sourceType, sourceId), null)
+            val item = item(line.itemId)
+            ensure(line.expiresOn == null || line.expiresOn >= date) { DomainError.InvalidInput("expiresOn", "تاریخ انقضای «${item.name}» پیش از تاریخ دریافت است.") }
+            val expiry = line.expiresOn ?: shelfLifeEnd(item, date)
+            stockIn(context, line.itemId, location, line.quantity, line.value, MovementKind.RECEIPT, date, journal.id, SourceDocument(owner.module, sourceType, sourceId), null,
+                listOfNotNull(expiry?.let { LotPart(it, line.quantity) }))
         }
         // What was consumed before these goods were booked is taken from them now, at their cost.
         lines.forEach { settleShortages(context, owner, location, it.itemId, date) }
@@ -261,34 +266,48 @@ class InventoryGateway(
         originals.mapNotNull { it.journalId }.distinct().forEach { journalId ->
             reversedJournals[journalId] = ledger.reverse(context, owner, setOf(capability), journalId, date, reason).id
         }
-        originals.forEach { m ->
+        // Undo the ins first: the lots they take out go back with the outs (a reversed transfer returns its expiry dates).
+        val back = HashMap<GlobalId, ArrayList<LotPart>>()
+        val (ins, outs) = originals.partition { it.quantityDelta > 0 || (it.quantityDelta == 0L && it.valueDelta > 0) }
+        (ins + outs).forEach { m ->
             val location = location(m.locationId)
             context.requireScope(location.scope)
             val qty = Quantity.of(kotlin.math.abs(m.quantityDelta))
             val value = Money.of(kotlin.math.abs(m.valueDelta))
             val journalId = m.journalId?.let { reversedJournals.getValue(it) }
-            if (m.quantityDelta > 0 || (m.quantityDelta == 0L && m.valueDelta > 0)) {
-                stockOut(context, m.itemId, location, qty, value, m.kind, date, journalId, m.source, m.id)
+            if (m in ins) {
+                back.getOrPut(m.itemId) { ArrayList() } += stockOut(context, m.itemId, location, qty, value, m.kind, date, journalId, m.source, m.id)
             } else {
-                stockIn(context, m.itemId, location, qty, value, m.kind, date, journalId, m.source, m.id)
+                stockIn(context, m.itemId, location, qty, value, m.kind, date, journalId, m.source, m.id, takeParts(back[m.itemId], qty))
             }
         }
     }
 
+    /** Goods in; [inLots] are the parts of [quantity] with a known expiry (the rest has none). */
     internal fun stockIn(
         context: CommandContext, itemId: GlobalId, location: Location, quantity: Quantity, value: Money,
         kind: MovementKind, date: BusinessDate, journalId: GlobalId?, source: SourceDocument, reversalOf: GlobalId?,
+        inLots: List<LotPart> = emptyList(),
     ) {
         ledger.requireOpenPeriod(date)   // also for moves without a journal (same-branch transfer, zero value)
         val before = stock.balance(itemId, location.id)
         stock.replace(before, before.copy(quantity = before.quantity + quantity, value = before.value + value))
         record(context, itemId, location, kind, quantity.micros, value.rial, date, journalId, source, reversalOf)
+        check(inLots.fold(Quantity.ZERO) { a, p -> a + p.quantity } <= quantity) { "lots_exceed_quantity" }
+        inLots.filter { !it.quantity.isZero }.groupBy { it.expiresOn }.forEach { (expiry, parts) ->
+            val q = parts.fold(Quantity.ZERO) { a, p -> a + p.quantity }
+            lots.save(StockLot(GlobalId.new(), itemId, location.id, expiry, date, q, q, source.type, source.id))
+        }
     }
 
+    /**
+     * Goods out. Returns the lots they were taken from: earliest expiry first; a reversed receipt takes back its own
+     * lot first. Goods with no known expiry are used only when the lots run out.
+     */
     internal fun stockOut(
         context: CommandContext, itemId: GlobalId, location: Location, quantity: Quantity, value: Money,
         kind: MovementKind, date: BusinessDate, journalId: GlobalId?, source: SourceDocument, reversalOf: GlobalId?,
-    ) {
+    ): List<LotPart> {
         ledger.requireOpenPeriod(date)
         val before = stock.balance(itemId, location.id)
         ensure(quantity <= before.quantity) { DomainError.InsufficientStock(itemId.value, before.quantity.micros, quantity.micros, nameOf(itemId)) }
@@ -298,7 +317,30 @@ class InventoryGateway(
         ensure(!nextQuantity.isZero || value == before.value) { DomainError.IntegrityViolation("STOCK_VALUE_RESIDUE") }
         stock.replace(before, before.copy(quantity = nextQuantity, value = before.value - value))
         record(context, itemId, location, kind, -quantity.micros, -value.rial, date, journalId, source, reversalOf)
+        return takeFromLots(itemId, location.id, quantity, if (reversalOf != null) source else null)
     }
+
+    private fun takeFromLots(itemId: GlobalId, locationId: GlobalId, quantity: Quantity, ownSource: SourceDocument?): List<LotPart> {
+        val open = lots.open(itemId, locationId)
+        val ordered = if (ownSource == null) open else open.filter { it.sourceType == ownSource.type && it.sourceId == ownSource.id } +
+            open.filterNot { it.sourceType == ownSource.type && it.sourceId == ownSource.id }
+        var left = quantity
+        val taken = ArrayList<LotPart>()
+        for (lot in ordered) {
+            if (left.isZero) break
+            val take = if (lot.remaining < left) lot.remaining else left
+            lots.save(lot.copy(remaining = lot.remaining - take))
+            taken += LotPart(lot.expiresOn, take)
+            left -= take
+        }
+        return taken
+    }
+
+    /** The day goods received on [date] expire by the item's shelf life, or null when it has none. */
+    fun shelfLifeEnd(item: Item, date: BusinessDate): BusinessDate? = item.shelfLifeDays?.let { date.plusDays(it.toLong()) }
+
+    /** Lots with something left at [locationIds], earliest expiry first. */
+    fun openLots(locationIds: Set<GlobalId>): List<StockLot> = lots.openAt(locationIds)
 
     private fun record(
         context: CommandContext, itemId: GlobalId, location: Location, kind: MovementKind, qty: Long, value: Long,
@@ -307,6 +349,22 @@ class InventoryGateway(
         val movement = StockMovement(GlobalId.new(), itemId, location.id, kind, qty, value, date, journalId, source, reversalOf, context.nowEpochMillis)
         stock.insertMovement(movement)
         context.audit(AuditDraft("STOCK_${kind.name}", "STOCK_MOVEMENT", movement.id.value, "item=$itemId;loc=${location.id};qty=$qty;value=$value"))
+    }
+
+    /** Removes up to [quantity] from [parts] (earliest first) and returns what was removed. */
+    private fun takeParts(parts: ArrayList<LotPart>?, quantity: Quantity): List<LotPart> {
+        if (parts == null) return emptyList()
+        var left = quantity
+        val out = ArrayList<LotPart>()
+        val it = parts.listIterator()
+        while (it.hasNext() && !left.isZero) {
+            val p = it.next()
+            val take = if (p.quantity < left) p.quantity else left
+            out += LotPart(p.expiresOn, take)
+            left -= take
+            if (take == p.quantity) it.remove() else it.set(p.copy(quantity = p.quantity - take))
+        }
+        return out
     }
 
     internal fun postOwn(context: CommandContext, draft: JournalDraft): JournalEntry = ledger.post(context, capability, draft)

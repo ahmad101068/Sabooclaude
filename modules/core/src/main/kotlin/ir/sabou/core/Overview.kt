@@ -44,6 +44,8 @@ data class BranchDay(val branch: Branch, val sales: List<DailySale>, val closed:
 }
 data class MenuEntry(val item: MenuItem, val latest: RecipeVersion?)
 data class ShortageView(val item: Item, val location: Location, val shortage: ir.sabou.inventory.StockShortage)
+/** Goods with an expiry date still in stock (ADR-0030). */
+data class LotView(val item: Item, val location: Location, val lot: ir.sabou.inventory.StockLot)
 
 /**
  * A menu item's price in one branch on one day: [price] in force (null: none, typed at the sale), whether it is
@@ -278,6 +280,15 @@ class Overview internal constructor(private val core: SabouCore) {
         val locations = core.locations.all().filter { it.scope == branch }.associateBy { it.id }
         return core.inventoryGateway.openShortages(locations.keys).mapNotNull { sh ->
             ShortageView(core.items.byId(sh.itemId) ?: return@mapNotNull null, locations.getValue(sh.locationId), sh)
+        }
+    }
+
+    /** Goods with an expiry date still in stock in [branch], earliest expiry first; [withinDays] limits it to those expiring by then. */
+    fun lots(branch: Scope.Branch, today: ir.sabou.kernel.BusinessDate, withinDays: Long? = null): List<LotView> {
+        actor(Permission.INVENTORY_VIEW).require(branch)
+        val locations = core.locations.all().filter { it.scope == branch }.associateBy { it.id }
+        return core.inventoryGateway.openLots(locations.keys).filter { withinDays == null || it.daysLeft(today) <= withinDays }.mapNotNull { lot ->
+            LotView(core.items.byId(lot.itemId) ?: return@mapNotNull null, locations.getValue(lot.locationId), lot)
         }
     }
 

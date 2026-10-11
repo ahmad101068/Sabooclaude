@@ -75,6 +75,7 @@ object KitchenScreens {
                     var shelf by rememberSaveable { mutableStateOf(item.shelf) }
                     var allergens by rememberSaveable { mutableStateOf(item.allergens) }
                     var active by rememberSaveable { mutableStateOf(item.isActive) }
+                    var shelfLife by rememberSaveable { mutableStateOf(item.shelfLifeDays?.let { Fa.number(it.toLong()) }.orEmpty()) }
                     val packs = ir.sabou.app.ui.rememberRows<PackRow>({ listOf(it.name, it.contains) },
                         { PackRow(it[0] as String, it[1] as Quantity?) }) { item.packs.map { PackRow(it.name, it.contains) } }
                     val id = ir.sabou.app.ui.rememberCommandId(itemId)
@@ -87,6 +88,12 @@ object KitchenScreens {
                         QuantityInput("سطح مطلوب (سفارش تا این مقدار)", unit, { par = it }, blankAs = Quantity.ZERO, value = item.parLevel)
                         TextInput("محل نگهداری (قفسه)", shelf, { shelf = it }, placeholder = "مثلاً یخچال ۱ · طبقه ۲")
                         TextInput("آلرژن‌ها", allergens, { allergens = it }, placeholder = "مثلاً گلوتن، لبنیات، بادام‌زمینی")
+                        val shelfDays = Fa.latinDigits(shelfLife.trim()).toIntOrNull()
+                        val shelfBad = shelfLife.isNotBlank() && (shelfDays == null || shelfDays !in 1..3650)
+                        TextInput("ماندگاری (روز)", shelfLife, { shelfLife = it }, placeholder = "خالی: بدون تاریخ انقضا",
+                            keyboard = androidx.compose.ui.text.input.KeyboardType.Number, error = if (shelfBad) "عددی بین ۱ و ۳۶۵۰" else null)
+                        Text(if (item.prepared) "هر تولید از روز تولید تا این تعداد روز مصرف شود؛ نزدیک انقضا هشدار داده می‌شود."
+                            else "اگر در فاکتور تاریخ انقضا وارد نشود، از تاریخ خرید تا این تعداد روز حساب می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
                         Row(Modifier.clickable { active = !active }, verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = active, onCheckedChange = { active = it })
                             Text("فعال (در فهرست‌ها نمایش داده شود)", style = SabouType.body, color = Sabou.colors.ink)
@@ -132,9 +139,9 @@ object KitchenScreens {
                         PrimaryButton("ذخیره", {
                             action.run({
                                 inventory.updateItem(UpdateItem(id.value, item.id, name, minimum!!, par!!, shelf, allergens, preferred, approved.toSet(), active,
-                                    packs = packs.map { PackUnit(it.name.trim(), it.contains!!) }))
+                                    packs = packs.map { PackUnit(it.name.trim(), it.contains!!) }, shelfLifeDays = shelfDays))
                             }) { nav.back() }
-                        }, enabled = session.can(Permission.INVENTORY_ITEM_MANAGE) && name.trim().length >= 2 && minimum != null && par != null && !parBad && !preferredBad && !packsBad, busy = action.busy)
+                        }, enabled = session.can(Permission.INVENTORY_ITEM_MANAGE) && name.trim().length >= 2 && minimum != null && par != null && !parBad && !preferredBad && !packsBad && !shelfBad, busy = action.busy)
                     }
                 }
             }

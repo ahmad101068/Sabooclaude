@@ -134,6 +134,7 @@ class SqlItemStore(db: SqlDatabase) : SqlTable(db), ItemStore {
         prepared = d.boolOr("prepared", false), preferredSupplierId = Codec.idOrNull(d.strOrNull("preferredSupplier")),
         approvedSupplierIds = d.strsOr("approvedSuppliers").map(Codec::id).toSet(),
         packs = d.docsOr("packs").map { PackUnit(it.str("name"), Codec.qty(it.long("contains"))) },
+        shelfLifeDays = d.longOrNull("shelfLife")?.toInt(),
     )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM items WHERE id = ?", id.value)?.let(::read)
     override fun all() = docs("SELECT doc FROM items ORDER BY rowid").map(::read)
@@ -147,6 +148,7 @@ class SqlItemStore(db: SqlDatabase) : SqlTable(db), ItemStore {
                     "par" to item.parLevel.micros, "shelf" to item.shelf, "allergens" to item.allergens, "prepared" to item.prepared,
                     "preferredSupplier" to item.preferredSupplierId?.value, "approvedSuppliers" to item.approvedSupplierIds.map { it.value }.sorted(),
                     "packs" to item.packs.map { mapOf("name" to it.name, "contains" to it.contains.micros) },
+                    "shelfLife" to item.shelfLifeDays?.toLong(),
                 ),
             ),
         ),
@@ -342,6 +344,31 @@ class SqlShortageStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.Short
                 "sourceType" to shortage.sourceType, "sourceId" to shortage.sourceId.value, "qty" to shortage.quantity.micros,
                 "settled" to shortage.settled.micros, "settledCost" to shortage.settledCost.rial, "taken" to shortage.takenFromStock.micros,
                 "takenCost" to shortage.takenCost.rial, "status" to shortage.status.name,
+            )),
+        ),
+    )
+}
+
+/** Expiry lots (ADR-0030). */
+class SqlLotStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.LotStore {
+    private fun read(d: Doc) = ir.sabou.inventory.StockLot(
+        Codec.id(d.str("id")), Codec.id(d.str("item")), Codec.id(d.str("location")), Codec.date(d.long("expires")), Codec.date(d.long("received")),
+        Codec.qty(d.long("qty")), Codec.qty(d.long("remaining")), d.str("sourceType"), Codec.id(d.str("sourceId")),
+    )
+    override fun open(itemId: GlobalId, locationId: GlobalId) =
+        docs("SELECT doc FROM stock_lots WHERE item_id = ? AND location_id = ? AND open = 1 ORDER BY expires_on, rowid", itemId.value, locationId.value)
+            .map(::read).sortedWith(ir.sabou.inventory.FEFO)
+    override fun openAt(locationIds: Set<GlobalId>) =
+        docs("SELECT doc FROM stock_lots WHERE open = 1 ORDER BY expires_on, rowid").map(::read).filter { it.locationId in locationIds }.sortedWith(ir.sabou.inventory.FEFO)
+    override fun save(lot: ir.sabou.inventory.StockLot) = upsert(
+        "stock_lots", "id",
+        mapOf(
+            "id" to lot.id.value, "item_id" to lot.itemId.value, "location_id" to lot.locationId.value, "expires_on" to lot.expiresOn.epochDay,
+            "open" to if (lot.remaining.isZero) 0L else 1L,
+            "doc" to Json.encode(mapOf(
+                "id" to lot.id.value, "item" to lot.itemId.value, "location" to lot.locationId.value, "expires" to lot.expiresOn.epochDay,
+                "received" to lot.receivedOn.epochDay, "qty" to lot.quantity.micros, "remaining" to lot.remaining.micros,
+                "sourceType" to lot.sourceType, "sourceId" to lot.sourceId.value,
             )),
         ),
     )
