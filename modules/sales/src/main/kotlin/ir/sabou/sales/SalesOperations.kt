@@ -94,6 +94,27 @@ data class DiscardSaleDraft(override val commandId: GlobalId, override val scope
     override fun fingerprint() = "$scope|$saleId"
 }
 
+/** A day imported from a point-of-sale export, posted at once (ADR-0026). */
+@IssuesDocument(DocumentSeries.DAILY_SALE)
+data class ImportPosSale(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    /** Which point-of-sale system («SEPAND»). */
+    val pos: String,
+    val fileNames: List<String>,
+    /** SHA-256 of each file's bytes. */
+    val fileHashes: List<String>,
+    /** «number|date» of each bill counted. */
+    val invoiceKeys: List<String>,
+    val sale: SaveSaleDraft,
+    /** POS item name (normalized key) → menu item, remembered for the next import. */
+    val aliases: Map<String, GlobalId> = emptyMap(),
+) : Command {
+    override val requiredPermission = Permission.SALES_POST
+    override fun fingerprint() = "$scope|$pos|${fileHashes.joinToString(",")}|${invoiceKeys.size}|${sale.fingerprint()}|" +
+        aliases.entries.sortedBy { it.key }.joinToString(";") { "${it.key}=${it.value}" }
+}
+
 @IssuesDocument(DocumentSeries.DAILY_SALE)
 data class PostDailySale(override val commandId: GlobalId, override val scope: Scope.Branch, val saleId: GlobalId) : Command {
     override val requiredPermission = Permission.SALES_POST
@@ -171,6 +192,7 @@ class SalesOperations(
     private val customers: CustomerStore,
     private val sales: SalesStore,
     private val prices: MenuPriceStore,
+    private val imports: PosImportStore = ir.sabou.sales.memory.InMemoryPosImportStore(),
 ) {
     val priceList = PriceList(prices)
 
@@ -196,7 +218,10 @@ class SalesOperations(
         customer.id
     }
 
-    fun saveDraft(c: SaveSaleDraft): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+    fun saveDraft(c: SaveSaleDraft): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx -> draftOf(cmd, ctx).id }
+
+    /** Validates, prices and stores a draft (new, or replacing [SaveSaleDraft.saleId]). */
+    private fun draftOf(cmd: SaveSaleDraft, ctx: ir.sabou.platform.CommandContext): DailySale {
         requireDayOpen(cmd.scope, cmd.date)
         ensure(inventory.location(cmd.kitchenLocationId).scope == cmd.scope) { DomainError.InvalidInput("location", "آشپزخانه متعلق به این شعبه نیست.") }
         ensure(cmd.lines.isNotEmpty() && cmd.lines.none { it.portions.isZero }) { DomainError.InvalidInput("lines", "حداقل یک آیتم فروش لازم است.") }
@@ -223,7 +248,7 @@ class SalesOperations(
         }
         sales.saveSale(sale)
         ctx.audit(AuditDraft("SALE_DRAFT_SAVE", "DAILY_SALE", sale.id.value, "payable=${sale.payable.rial};settled=${sale.settled.rial}"))
-        sale.id
+        return sale
     }
 
     fun discardDraft(c: DiscardSaleDraft): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
@@ -271,8 +296,9 @@ class SalesOperations(
      * Posts the day atomically: ingredient consumption at cost, revenue, every treasury receipt
      * and every receivable — or nothing at all.
      */
-    fun post(c: PostDailySale): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
-        val sale = requireSale(cmd.saleId, cmd.scope)
+    fun post(c: PostDailySale): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx -> postSale(requireSale(cmd.saleId, cmd.scope), ctx) }
+
+    private fun postSale(sale: DailySale, ctx: ir.sabou.platform.CommandContext): GlobalId {
         ensure(sale.status == SaleStatus.DRAFT) { DomainError.InvalidState("DAILY_SALE", sale.status.name) }
         requireDayOpen(sale.scope, sale.date)
         ensure(sale.remaining == 0L) { DomainError.InvalidState("DAILY_SALE", "SETTLEMENT_MISMATCH:${sale.remaining}") }
@@ -319,6 +345,27 @@ class SalesOperations(
         sales.saveSale(sale.copy(status = SaleStatus.POSTED, revenueJournalId = revenue.id, cost = consumption.totalCost, consumed = consumption.lines.isNotEmpty()))
         ctx.audit(AuditDraft("SALE_POST", "DAILY_SALE", sale.id.value, "payable=${sale.payable.rial};cost=${consumption.totalCost.rial}"))
         ctx.emit("DailySalePosted", mapOf("saleId" to sale.id.value, "payable" to sale.payable.rial.toString()))
+        return sale.id
+    }
+
+    /**
+     * A day of a point-of-sale system in one step (ADR-0026): the sale is drafted and posted as usual, together
+     * with the import record that makes the same file, the same bills or the same POS day impossible to import
+     * twice while it stands. Reversing the sale releases them.
+     */
+    fun importPosDay(c: ImportPosSale): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        val pos = cmd.pos.trim()
+        ensure(pos.isNotEmpty() && cmd.fileHashes.isNotEmpty()) { DomainError.InvalidInput("file", "فایل صندوق لازم است.") }
+        val active = imports.all().filter { it.active && it.pos == pos }
+        ensure(active.none { it.scope == cmd.scope && it.date == cmd.sale.date }) { DomainError.InvalidState("POS_IMPORT", "DAY_ALREADY_IMPORTED") }
+        ensure(active.none { i -> i.fileHashes.any { it in cmd.fileHashes } }) { DomainError.InvalidState("POS_IMPORT", "FILE_ALREADY_IMPORTED") }
+        ensure(active.none { i -> i.invoiceKeys.any { it in cmd.invoiceKeys } }) { DomainError.InvalidState("POS_IMPORT", "INVOICE_ALREADY_IMPORTED") }
+        ensure(cmd.sale.scope == cmd.scope && cmd.sale.saleId == null) { DomainError.InvalidInput("scope", "فروش ورودی متعلق به این شعبه نیست.") }
+        val sale = draftOf(cmd.sale, ctx)
+        postSale(sale, ctx)
+        imports.save(PosImport(GlobalId.new(), pos, cmd.scope, cmd.sale.date, cmd.fileNames, cmd.fileHashes, cmd.invoiceKeys, sale.id, active = true))
+        cmd.aliases.forEach { (key, menuItem) -> imports.saveAlias(pos, key, menuItem) }
+        ctx.audit(AuditDraft("POS_IMPORT", "DAILY_SALE", sale.id.value, "pos=$pos;files=${cmd.fileNames.joinToString(",")};bills=${cmd.invoiceKeys.size}"))
         sale.id
     }
 
@@ -334,6 +381,8 @@ class SalesOperations(
         inventory.cancelShortages(ctx, capability, CONSUMPTION, sale.id, cmd.date)
         receivables.forEach { sales.saveReceivable(it.copy(voided = true)) }
         sales.saveSale(sale.copy(status = SaleStatus.REVERSED))
+        // An imported POS day can be imported again (corrected) once its sale is reversed.
+        imports.ofSale(sale.id)?.let { imports.save(it.copy(active = false)) }
         ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.DAILY_SALE to sale.id)
         ctx.audit(AuditDraft("SALE_REVERSE", "DAILY_SALE", sale.id.value, cmd.reason.trim()))
         sale.id

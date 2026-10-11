@@ -149,3 +149,26 @@ interface SalesStore {
     fun day(scope: Scope.Branch, date: BusinessDate): SalesDay?
     fun saveDay(day: SalesDay)
 }
+
+/** One imported point-of-sale day (ADR-0026). [active] until its sale is reversed. */
+data class PosImport(
+    val id: GlobalId,
+    val pos: String,
+    val scope: Scope.Branch,
+    val date: BusinessDate,
+    val fileNames: List<String>,
+    val fileHashes: List<String>,
+    val invoiceKeys: List<String>,
+    val saleId: GlobalId,
+    val active: Boolean,
+)
+
+interface PosImportStore {
+    fun all(): List<PosImport>
+    fun ofSale(saleId: GlobalId): PosImport?
+    fun save(import: PosImport)
+    /** POS item names already matched to the menu: normalized name → menu item. */
+    fun aliases(pos: String): Map<String, GlobalId>
+    fun saveAlias(pos: String, key: String, menuItemId: GlobalId)
+}
+

@@ -60,3 +60,20 @@ class InMemoryMenuPriceStore : ir.sabou.sales.MenuPriceStore, Transactional {
     @Suppress("UNCHECKED_CAST")
     override fun restore(snapshot: Any) { prices.clear(); prices.addAll(snapshot as List<ir.sabou.sales.MenuPrice>) }
 }
+
+class InMemoryPosImportStore : ir.sabou.sales.PosImportStore, Transactional {
+    private val imports = LinkedHashMap<GlobalId, ir.sabou.sales.PosImport>()
+    private val aliases = LinkedHashMap<Pair<String, String>, GlobalId>()
+    override fun all() = imports.values.toList()
+    override fun ofSale(saleId: GlobalId) = imports.values.firstOrNull { it.saleId == saleId }
+    override fun save(import: ir.sabou.sales.PosImport) { imports[import.id] = import }
+    override fun aliases(pos: String) = aliases.filterKeys { it.first == pos }.mapKeys { it.key.second }
+    override fun saveAlias(pos: String, key: String, menuItemId: GlobalId) { aliases[pos to key] = menuItemId }
+    override fun snapshot(): Any = LinkedHashMap(imports) to LinkedHashMap(aliases)
+    @Suppress("UNCHECKED_CAST")
+    override fun restore(snapshot: Any) {
+        val (i, a) = snapshot as Pair<Map<GlobalId, ir.sabou.sales.PosImport>, Map<Pair<String, String>, GlobalId>>
+        imports.clear(); imports.putAll(i); aliases.clear(); aliases.putAll(a)
+    }
+}
+

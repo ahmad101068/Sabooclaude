@@ -54,6 +54,7 @@ import ir.sabou.app.ui.components.TextInput
 import ir.sabou.app.ui.screens.BooksScreens
 import ir.sabou.app.ui.screens.FinanceScreens
 import ir.sabou.app.ui.screens.HomeScreen
+import ir.sabou.app.ui.screens.PosImportScreen
 import ir.sabou.app.ui.screens.KitchenScreens
 import ir.sabou.app.ui.screens.MeScreens
 import ir.sabou.app.ui.screens.OperationsScreens
@@ -583,6 +584,7 @@ private fun Pages(route: Route, nav: Nav) {
         Route.Policies -> MeScreens.Policies(nav)
         Route.Backup -> MeScreens.Backup(nav)
         Route.Security -> MeScreens.Security(nav)
+        Route.PosImport -> PosImportScreen(nav)
         Route.Home, Route.Sales, Route.Operations, Route.Finance, Route.Me -> Unit
     }
 }

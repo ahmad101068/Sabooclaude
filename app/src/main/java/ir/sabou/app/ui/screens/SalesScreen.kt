@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import ir.sabou.app.R
 import ir.sabou.app.ui.LocalSession
 import ir.sabou.app.ui.Nav
+import ir.sabou.app.ui.Route
 import ir.sabou.app.ui.components.Banner
 import ir.sabou.app.ui.components.Chip
 import ir.sabou.app.ui.components.ChipKind
@@ -136,7 +137,7 @@ fun SalesScreen(nav: Nav) {
                         when {
                             data.menu.isEmpty() -> EmptyState("هنوز منویی تعریف نشده است. از «من ← منو و رسپی» آیتم‌های منو را تعریف کنید.")
                             data.kitchens.isEmpty() -> EmptyState("برای این شعبه آشپزخانه یا انباری تعریف نشده است.")
-                            selected == null -> DayView(branch, date, data) { selected = it }
+                            selected == null -> DayView(branch, date, data, { nav.go(Route.PosImport) }) { selected = it }
                             selected == NEW_SALE || open?.status == SaleStatus.DRAFT -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 BackToDay { selected = null }
                                 if (data.day?.closed == true) Banner("این روز بسته شده است.", ChipKind.ACCENT)
@@ -147,7 +148,7 @@ fun SalesScreen(nav: Nav) {
                                 BackToDay { selected = null }
                                 SaleDetail(branch, date, data, open)
                             }
-                            else -> DayView(branch, date, data) { selected = it }
+                            else -> DayView(branch, date, data, { nav.go(Route.PosImport) }) { selected = it }
                         }
                     }
                 }
@@ -164,7 +165,7 @@ private fun BackToDay(onClick: () -> Unit) {
 // ---------------------------------------------------------------- The day: its sales and its close
 
 @Composable
-private fun DayView(branch: Scope.Branch, date: BusinessDate, data: SalesData, open: (String) -> Unit) {
+private fun DayView(branch: Scope.Branch, date: BusinessDate, data: SalesData, onImport: () -> Unit, open: (String) -> Unit) {
     val session = LocalSession.current
     val closed = data.day?.closed == true
     val posted = data.sales.filter { it.status == SaleStatus.POSTED }
@@ -177,6 +178,7 @@ private fun DayView(branch: Scope.Branch, date: BusinessDate, data: SalesData, o
                 style = SabouType.caption, color = Sabou.colors.onAccentSoft)
         }
         if (!closed && session.can(Permission.SALES_RECORD)) PrimaryButton("فروش جدید", { open(NEW_SALE) })
+        if (!closed && session.can(Permission.SALES_POST)) SecondaryButton("ورود فروش از صندوق (اکسل سپند)", onImport)
         if (data.sales.isEmpty()) EmptyState("برای این روز هنوز فروشی ثبت نشده است.")
         data.sales.reversed().forEach { sale ->
             val (title, kind, chip) = when (sale.status) {
