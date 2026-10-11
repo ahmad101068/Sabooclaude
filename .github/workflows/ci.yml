@@ -26,6 +26,9 @@ jobs:
           validate-wrappers: true
       - name: Build and test domain modules
         shell: bash
+        env:
+          # Volume guard (ADR-0027): 90 days of a busy restaurant, then the reads people wait for.
+          SABOU_BENCH: "90"
         run: |
           set -o pipefail
           ./gradlew --no-daemon --stacktrace domainBuild 2>&1 | tee domain-build.log
