@@ -28,6 +28,8 @@ data class User(
     val isActive: Boolean,
     /** Locked until the owner resets the PIN (too many wrong PINs for a non-owner). */
     val ownerLocked: Boolean = false,
+    /** Hash of the owner's one-time recovery code (ADR-0023), or null when none is issued. */
+    val recoveryHash: String? = null,
 ) {
     fun toActor() = Actor(id, displayName, role, branchGrants)
 }
@@ -209,6 +211,91 @@ class IdentityService(
         id
     }
 
+    /**
+     * Issues a new one-time recovery code for the signed-in owner, after proving the current PIN (an unlocked
+     * phone is not enough), and returns it to be shown once and written down. Only its hash is kept; a new code
+     * replaces the old one.
+     */
+    fun issueRecoveryCode(pin: CharArray): String {
+        val code = RecoveryCode.generate()
+        val (ok, error) = unitOfWork.transaction {
+            val actor = session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
+            ensure(actor.role == Role.OWNER) { DomainError.PermissionDenied("OWNER_RECOVERY") }
+            val user = users.byId(actor.userId)!!
+            val now = clock.nowEpochMillis()
+            lockError(user, now)?.let { return@transaction false to it }
+            if (!PinHasher.verify(pin, user.pinHash)) {
+                val failed = failedAttempt(user, now)
+                users.save(failed)
+                trail.append(AuditDraft("RECOVERY_ISSUE_FAILURE", "USER", user.id.value, "attempts=${failed.failedAttempts}"), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
+                return@transaction false to (lockError(failed, now) ?: DomainError.InvalidInput("pin", "رمز فعلی درست نیست."))
+            }
+            users.save(user.copy(failedAttempts = 0, lock = null, recoveryHash = PinHasher.hash(code.toCharArray())))
+            trail.append(AuditDraft("RECOVERY_CODE_ISSUE", "USER", user.id.value, user.username), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
+            true to null
+        }
+        if (!ok) throw DomainException(error!!)
+        return RecoveryCode.format(code)
+    }
+
+    /**
+     * Proves the signed-in user's PIN without changing anything (before enabling fingerprint sign-in, which
+     * keeps the PIN sealed on the device). Wrong PINs count like failed logins.
+     */
+    fun confirmPin(pin: CharArray) {
+        val error = unitOfWork.transaction {
+            val actor = session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
+            val user = users.byId(actor.userId)!!
+            val now = clock.nowEpochMillis()
+            lockError(user, now)?.let { return@transaction it }
+            if (!PinHasher.verify(pin, user.pinHash)) {
+                val failed = failedAttempt(user, now)
+                users.save(failed)
+                trail.append(AuditDraft("PIN_CONFIRM_FAILURE", "USER", user.id.value, "attempts=${failed.failedAttempts}"), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
+                return@transaction lockError(failed, now) ?: DomainError.InvalidInput("pin", "رمز فعلی درست نیست.")
+            }
+            if (user.failedAttempts != 0) users.save(user.copy(failedAttempts = 0, lock = null))
+            null
+        }
+        if (error != null) {
+            if (error is DomainError.InvalidState) session.end()
+            throw DomainException(error)
+        }
+    }
+
+    /** The signed-in user's username (for signing in again on this phone), or null. */
+    fun currentUsername(): String? = session.currentActor()?.let { users.byId(it.userId)?.username }
+
+    /** Whether the signed-in user (an owner) has a recovery code. */
+    fun hasRecoveryCode(): Boolean {
+        val actor = session.currentActor() ?: return false
+        return users.byId(actor.userId)?.recoveryHash != null
+    }
+
+    /**
+     * An owner who forgot the PIN sets a new one with the recovery code. Wrong codes count like wrong PINs (the
+     * same growing lock). The code works once: a successful recovery clears it, and a new one should be issued.
+     */
+    fun recoverOwner(username: String, code: String, newPin: CharArray) {
+        val error = unitOfWork.transaction {
+            val user = users.byUsername(username.trim().lowercase())
+            if (user == null || !user.isActive || user.role != Role.OWNER || user.recoveryHash == null) return@transaction DomainError.InvalidInput("recovery", "کد بازیابی یا نام کاربری درست نیست.")
+            val now = clock.nowEpochMillis()
+            lockError(user, now)?.let { return@transaction it }
+            val digits = RecoveryCode.normalize(code)
+            if (digits == null || !PinHasher.verify(digits.toCharArray(), user.recoveryHash)) {
+                val failed = failedAttempt(user, now)
+                users.save(failed)
+                trail.append(AuditDraft("RECOVERY_FAILURE", "USER", user.id.value, "attempts=${failed.failedAttempts}"), user.toActor(), ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
+                return@transaction lockError(failed, now) ?: DomainError.InvalidInput("recovery", "کد بازیابی یا نام کاربری درست نیست.")
+            }
+            users.save(user.copy(pinHash = hashValidPin(newPin), failedAttempts = 0, lock = null, ownerLocked = false, recoveryHash = null))
+            trail.append(AuditDraft("OWNER_RECOVERED", "USER", user.id.value, user.username), user.toActor(), ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
+            null
+        }
+        if (error != null) throw DomainException(error)
+    }
+
     /** Any signed-in user changes their own PIN by proving the current one. */
     fun changeOwnPin(current: CharArray, next: CharArray): GlobalId {
         // Wrong guesses count like failed logins (and survive the failure), so an unlocked phone
@@ -308,5 +395,30 @@ class IdentityService(
     companion object {
         /** Wrong PINs after which a non-owner account waits for the owner. */
         const val OWNER_RESET_AFTER = 10
+    }
+}
+
+/** The owner's recovery code: 16 random digits, shown in four groups («1234-5678-9012-3456»). */
+object RecoveryCode {
+    private const val DIGITS = 16
+
+    fun generate(): String {
+        val random = SecureRandom()
+        return buildString { repeat(DIGITS) { append('0' + random.nextInt(10)) } }
+    }
+
+    fun format(code: String): String = code.chunked(4).joinToString("-")
+
+    /** Latin, Persian or Arabic digits with any separators → the 16 digits, or null. */
+    fun normalize(text: String): String? {
+        val digits = text.mapNotNull { c ->
+            when (c) {
+                in '0'..'9' -> c
+                in '۰'..'۹' -> '0' + (c - '۰')
+                in '٠'..'٩' -> '0' + (c - '٠')
+                else -> null
+            }
+        }.joinToString("")
+        return digits.takeIf { it.length == DIGITS }
     }
 }

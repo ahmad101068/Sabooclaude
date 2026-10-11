@@ -130,5 +130,54 @@ class IdentityTest {
         identity.login("owner", "123456".toCharArray())
     }
 
+    @Test fun theOwnerRecoversAForgottenPinWithTheOneTimeCode() {
+        identity.bootstrapOwner("owner", "مالک", "123456".toCharArray())
+        assertFalse(identity.hasRecoveryCode())
+        assertEquals("INVALID_INPUT:pin", code { identity.issueRecoveryCode("000000".toCharArray()) })   // the PIN is proven first
+        val recovery = identity.issueRecoveryCode("123456".toCharArray())
+        assertTrue(recovery.matches(Regex("\\d{4}-\\d{4}-\\d{4}-\\d{4}")), recovery)
+        assertTrue(identity.hasRecoveryCode())
+        assertTrue(users.all().single().recoveryHash!!.isNotBlank() && !users.all().single().recoveryHash!!.contains(recovery.replace("-", "")))
+        identity.logout()
+
+        assertEquals("INVALID_INPUT:recovery", code { identity.recoverOwner("owner", "1111-2222-3333-4444", "987654".toCharArray()) })
+        // Persian digits and spaces are fine.
+        val persian = recovery.map { if (it in '0'..'9') '۰' + (it - '0') else ' ' }.joinToString("")
+        identity.recoverOwner("OWNER", persian, "987654".toCharArray())
+        identity.login("owner", "987654".toCharArray())
+        assertFalse(identity.hasRecoveryCode())                                          // used once
+        identity.logout()
+        assertEquals("INVALID_INPUT:recovery", code { identity.recoverOwner("owner", recovery, "111111".toCharArray()) })
+    }
+
+    @Test fun recoveryGuessesLockLikeWrongPins() {
+        identity.bootstrapOwner("owner", "مالک", "123456".toCharArray())
+        val recovery = identity.issueRecoveryCode("123456".toCharArray())
+        identity.logout()
+        repeat(4) { code { identity.recoverOwner("owner", "0000-0000-0000-000$it", "987654".toCharArray()) } }
+        code { identity.recoverOwner("owner", "0000-0000-0000-0009", "987654".toCharArray()) }
+        assertLocked(code { identity.recoverOwner("owner", recovery, "987654".toCharArray()) })   // even the right code waits
+        now += 31_000; elapsed += 31_000
+        identity.recoverOwner("owner", recovery, "987654".toCharArray())
+    }
+
+    @Test fun onlyAnOwnerHasARecoveryCode() {
+        identity.bootstrapOwner("owner", "مالک", "123456".toCharArray())
+        val branch = identity.createBranch("ونک")
+        identity.createUser("manager", "مدیر", Role.MANAGER, setOf(branch), "654321".toCharArray())
+        identity.logout(); identity.login("manager", "654321".toCharArray())
+        assertEquals("PERMISSION_DENIED:OWNER_RECOVERY", code { identity.issueRecoveryCode("654321".toCharArray()) })
+        assertEquals("INVALID_INPUT:recovery", code { identity.recoverOwner("manager", "1234-1234-1234-1234", "111111".toCharArray()) })
+    }
+
+    @Test fun confirmingThePinChangesNothingAndCountsWrongGuesses() {
+        identity.bootstrapOwner("owner", "مالک", "123456".toCharArray())
+        identity.confirmPin("123456".toCharArray())
+        assertEquals("INVALID_INPUT:pin", code { identity.confirmPin("000000".toCharArray()) })
+        assertEquals(1, users.all().single().failedAttempts)
+        identity.confirmPin("123456".toCharArray())
+        assertEquals(0, users.all().single().failedAttempts)
+    }
+
     private fun assertLocked(code: String) = assertTrue(code.startsWith("INVALID_STATE:USER:LOCKED:"), code)
 }

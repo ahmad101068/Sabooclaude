@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Device-first: no network permission until a server exists (ADR-0001). -->
+    <!-- Fingerprint sign-in (ADR-0023): unlocks the sealed PIN; the PIN is still checked by the login. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <application
         android:name=".SabouApplication"
         android:allowBackup="false"
