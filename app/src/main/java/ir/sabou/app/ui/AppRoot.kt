@@ -53,6 +53,7 @@ import ir.sabou.app.ui.components.SecondaryButton
 import ir.sabou.app.ui.components.TextInput
 import ir.sabou.app.ui.screens.BooksScreens
 import ir.sabou.app.ui.screens.CountPlanScreens
+import ir.sabou.app.ui.screens.PrepScreens
 import ir.sabou.app.ui.screens.FinanceScreens
 import ir.sabou.app.ui.screens.HomeScreen
 import ir.sabou.app.ui.screens.PosImportScreen
@@ -551,6 +552,8 @@ private fun Pages(route: Route, nav: Nav) {
         Route.Recipes -> OperationsScreens.Recipes(nav)
         Route.PrepRecipes -> KitchenScreens.PrepRecipes(nav)
         Route.Production -> KitchenScreens.Production(nav)
+        Route.PrepPlan -> PrepScreens.PrepPlan(nav)
+        Route.Allergens -> PrepScreens.Allergens(nav)
         Route.Purchases -> PurchaseScreens.Purchases(nav)
         Route.NewPurchase -> PurchaseScreens.NewPurchase(nav, null)
         is Route.PurchaseFromOrder -> PurchaseScreens.NewPurchase(nav, route.orderId)

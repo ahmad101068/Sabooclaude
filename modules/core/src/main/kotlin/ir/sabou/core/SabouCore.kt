@@ -149,6 +149,7 @@ class SabouCore private constructor(
     val alerts = Alerts(this)
     val posImports = PosImports(this)
     val buying = Buying(this)
+    val prep = Prep(this)
     val books = Books(this)
 
     /**

@@ -118,6 +118,18 @@ object Fa {
     /** 0 = Saturday … 6 = Friday (the Persian week). */
     fun weekdayIndex(date: BusinessDate): Int = ir.sabou.kernel.JalaliCalendar.weekdayIndex(date)
 
+    private const val ALPHABET = "آاأإءبپتثجچحخدذرزژسشصضطظعغفقکكگلمنوؤهةیيئ"
+
+    /** Persian alphabetical order: letters by the Persian alphabet (Arabic forms beside theirs), then anything else by code point. */
+    fun compareAlphabetical(a: String, b: String): Int {
+        fun rank(c: Char): Int = ALPHABET.indexOf(c).let { if (it >= 0) it else 1_000 + c.code }
+        for (i in 0 until minOf(a.length, b.length)) {
+            val d = rank(a[i]) - rank(b[i])
+            if (d != 0) return d
+        }
+        return a.length - b.length
+    }
+
     fun weekday(date: BusinessDate): String = weekdayNames[weekdayIndex(date)]
 
     /** «پنجشنبه ۱۶ مهر» */
