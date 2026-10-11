@@ -138,6 +138,7 @@ class SabouCore private constructor(
     val overview = Overview(this)
     val numbers = Numbers(this)
     val reports = Reports(this)
+    val dashboards = Dashboards(this)
     val buying = Buying(this)
     val books = Books(this)
 

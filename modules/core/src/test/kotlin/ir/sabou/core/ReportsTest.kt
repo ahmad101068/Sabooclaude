@@ -181,4 +181,43 @@ class ReportsTest {
         assertEquals(50_000_000, flash.payable.rial)
         assertNull(flash.purchases); assertNull(flash.waste)
     }
+
+    @Test fun theHomeDashboardIsTheBooksAtAGlance() {
+        businessDay()
+        val d = core.dashboards.of(day)
+        val p = core.reports.profitAndLoss(d.from, day)
+        assertEquals(p.totals.revenue, d.revenue)
+        assertEquals(50_000_000, d.revenue)
+        assertEquals(9_000_000, d.costs)
+        assertEquals(41_000_000, d.profit)
+        assertEquals(d.costs, d.slices.sumOf { it.amount })             // the donut is the whole cost, nothing lost
+        assertTrue(d.slices.size <= Dashboards.SLICES + 1)
+        assertEquals(d.slices.sortedByDescending { it.amount }.filter { it.code != null }, d.slices.filter { it.code != null })
+        assertEquals(7, d.week.size)
+        assertEquals(day, d.week.last().date)
+        assertEquals(50_000_000, d.week.last().revenue)
+        assertEquals(0, d.previousRevenue)
+        assertEquals(null, d.revenueChangeBp)
+        assertEquals(core.overview.treasury().filter { it.account.kind == ir.sabou.treasury.TreasuryKind.CASH }.sumOf { it.balance }, d.cash)
+    }
+
+    @Test fun theDashboardComparesWithTheSameDaysOfThePreviousMonth() {
+        val (from, prevFrom, prevTo) = Dashboards.periods(ir.sabou.kernel.JalaliCalendar.date(1405, 7, 18))
+        assertEquals(ir.sabou.kernel.JalaliCalendar.date(1405, 7, 1), from)
+        assertEquals(ir.sabou.kernel.JalaliCalendar.date(1405, 6, 1), prevFrom)
+        assertEquals(ir.sabou.kernel.JalaliCalendar.date(1405, 6, 18), prevTo)
+        // Farvardin 31 against Esfand, which has 29 or 30 days.
+        val (_, pf, pt) = Dashboards.periods(ir.sabou.kernel.JalaliCalendar.date(1405, 1, 31))
+        assertEquals(ir.sabou.kernel.JalaliCalendar.date(1404, 12, 1), pf)
+        assertEquals(ir.sabou.kernel.JalaliCalendar.date(1404, 12, Dashboards.monthLength(1404, 12)), pt)
+        assertEquals(30, Dashboards.monthLength(1405, 7))
+        assertEquals(31, Dashboards.monthLength(1405, 6))
+    }
+
+    @Test fun theDashboardIsForThoseWhoSeeTheBooks() {
+        businessDay()
+        core.identity.createUser("cashier", "صندوقدار", ir.sabou.platform.Role.CASHIER, setOf(branch.branchId), "654321".toCharArray())
+        core.identity.logout(); core.identity.login("cashier", "654321".toCharArray())
+        assertEquals("PERMISSION_DENIED:LEDGER_VIEW", assertFailsWith<ir.sabou.kernel.DomainException> { core.dashboards.of(day) }.error.code)
+    }
 }

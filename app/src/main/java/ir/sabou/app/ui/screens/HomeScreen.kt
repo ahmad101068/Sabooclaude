@@ -57,7 +57,7 @@ private data class Today(
 
 private data class Todo(val icon: Int, val title: String, val detail: String, val route: Route, val warn: Boolean)
 
-private data class HomeData(val today: Today?, val todos: List<Todo>, val setupMissing: List<Pair<String, Route>>)
+private data class HomeData(val today: Today?, val todos: List<Todo>, val setupMissing: List<Pair<String, Route>>, val dashboard: ir.sabou.core.Dashboard? = null)
 
 @Composable
 fun HomeScreen(nav: Nav) {
@@ -137,7 +137,9 @@ fun HomeScreen(nav: Nav) {
             if (session.actor.role.allows(Permission.INVENTORY_ITEM_MANAGE) && !setup.hasItems) add("تعریف کالاهای انبار" to Route.Items)
             if (session.actor.role.allows(Permission.RECIPE_MANAGE) && !setup.hasMenu) add("تعریف منو و رسپی" to Route.Menu)
         }
-        HomeData(today, todos, missing)
+        // Owner, manager and accountant see the month at a glance; others the day only.
+        val dashboard = if (session.actor.role.allows(Permission.LEDGER_VIEW)) safe { dashboards.of(date, branch) } else null
+        HomeData(today, todos, missing, dashboard)
     }
 
     LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -152,6 +154,12 @@ fun HomeScreen(nav: Nav) {
         val d = data.orNull()
         item { Hero(d?.today, onClick = { nav.go(Route.Sales) }) }
         item { QuickActions(nav) }
+        d?.dashboard?.let { dash ->
+            item { SectionTitle("این ماه", "از ${Fa.dayTitle(dash.from)}") }
+            item { Kpis(dash, onClick = { nav.go(Route.Reports) }) }
+            item { CostDonut(dash, onClick = { nav.go(Route.Reports) }) }
+            item { WeekBars(dash) }
+        }
         if (d != null && d.setupMissing.isNotEmpty()) {
             item { SectionTitle("راه‌اندازی", "${Fa.number(d.setupMissing.size.toLong())} مرحله") }
             d.setupMissing.forEach { (title, route) ->
@@ -229,3 +237,90 @@ private fun QuickActions(nav: Nav) {
         }
     }
 }
+
+// ---------------------------------------------------------------- Month at a glance
+
+@Composable
+private fun Kpis(d: ir.sabou.core.Dashboard, onClick: () -> Unit) {
+    val c = Sabou.colors
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val change = d.revenueChangeBp
+            Kpi("فروش", Fa.rialShort(d.revenue), Modifier.weight(1f), onClick,
+                note = change?.let { (if (it >= 0) "▲ " else "▼ ") + Fa.percent(kotlin.math.abs(it)) + " نسبت به ماه قبل" } ?: "ماه قبل: ${Fa.rialShort(d.previousRevenue)}",
+                noteColor = when { change == null -> c.muted; change >= 0 -> c.primary; else -> c.danger })
+            Kpi(if (d.profit >= 0) "سود" else "زیان", Fa.rialShort(kotlin.math.abs(d.profit)), Modifier.weight(1f), onClick,
+                valueColor = if (d.profit >= 0) c.ink else c.danger,
+                note = "هزینه‌ها: ${Fa.rialShort(d.costs)}")
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Kpi("بهای غذا", d.ratios.foodBp?.let(Fa::percent) ?: "—", Modifier.weight(1f), onClick, note = "از فروش غذا")
+            Kpi("دستمزد", d.ratios.laborBp?.let(Fa::percent) ?: "—", Modifier.weight(1f), onClick, note = "پس از تأیید حقوق ماه")
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Kpi("نقد صندوق", Fa.rialShort(d.cash), Modifier.weight(1f), onClick)
+            Kpi("بانک و کارت‌خوان", Fa.rialShort(d.bank), Modifier.weight(1f), onClick)
+        }
+    }
+}
+
+@Composable
+private fun Kpi(label: String, value: String, modifier: Modifier, onClick: () -> Unit, note: String? = null,
+                valueColor: androidx.compose.ui.graphics.Color = Sabou.colors.ink, noteColor: androidx.compose.ui.graphics.Color = Sabou.colors.muted) {
+    Column(
+        modifier.heightIn(min = 84.dp).clip(SabouShapes.card).background(Sabou.colors.surface).border(1.dp, Sabou.colors.border, SabouShapes.card)
+            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(label, style = SabouType.caption, color = Sabou.colors.muted)
+        Text(value, style = SabouType.section, color = valueColor)
+        if (note != null) Text(note, style = SabouType.caption, color = noteColor)
+    }
+}
+
+@Composable
+private fun CostDonut(d: ir.sabou.core.Dashboard, onClick: () -> Unit) {
+    val colors = ir.sabou.app.ui.components.chartColors()
+    // «سایر» always takes the last (neutral) colour.
+    fun colorOf(i: Int, code: String?) = if (code == null) colors.last() else colors[i % (colors.size - 1)]
+    ir.sabou.app.ui.components.SCard(onClick = onClick) {
+        Text("هزینه‌ها و سود این ماه", style = SabouType.section, color = Sabou.colors.ink)
+        if (d.costs <= 0 && d.revenue <= 0) {
+            Text("هنوز سندی در این ماه ثبت نشده است.", style = SabouType.body, color = Sabou.colors.muted)
+            return@SCard
+        }
+        val ring = d.slices.map { it.amount } + listOf(d.profit.coerceAtLeast(0))
+        val ringColors = d.slices.mapIndexed { i, s -> colorOf(i, s.code) } + Sabou.colors.track
+        val total = ring.sum().takeIf { it > 0 } ?: 1L
+        fun share(amount: Long) = Fa.percent(ir.sabou.kernel.Ratio.mulDiv(amount, 10_000, total))
+        val summary = d.slices.joinToString("، ") { "${it.label} ${share(it.amount)}" }
+        Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+            ir.sabou.app.ui.components.Donut(ring, ringColors, "هزینه‌ها: $summary؛ ${if (d.profit >= 0) "سود" else "زیان"} ${Fa.rial(kotlin.math.abs(d.profit))} ریال") {
+                Text(if (d.profit >= 0) "سود" else "زیان", style = SabouType.caption, color = Sabou.colors.muted)
+                Text(Fa.rialShort(kotlin.math.abs(d.profit)), style = SabouType.section, color = if (d.profit >= 0) Sabou.colors.primary else Sabou.colors.danger)
+                Text("ریال", style = SabouType.caption, color = Sabou.colors.muted)
+            }
+        }
+        d.slices.forEachIndexed { i, s ->
+            ir.sabou.app.ui.components.LegendRow(colorOf(i, s.code), s.label, share(s.amount), Fa.rialShort(s.amount))
+        }
+        if (d.profit > 0) ir.sabou.app.ui.components.LegendRow(Sabou.colors.track, "سود", share(d.profit), Fa.rialShort(d.profit))
+        Text("سهم‌ها از جمع هزینه‌ها و سود (= فروش)؛ مبالغ به ریال.", style = SabouType.caption, color = Sabou.colors.muted)
+    }
+}
+
+@Composable
+private fun WeekBars(d: ir.sabou.core.Dashboard) {
+    ir.sabou.app.ui.components.SCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("فروش ۷ روز اخیر", style = SabouType.section, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+            Text("امروز ${Fa.rialShort(d.week.last().revenue)}", style = SabouType.caption, color = Sabou.colors.muted)
+        }
+        ir.sabou.app.ui.components.Bars(
+            d.week.map { it.revenue }, d.week.map { Fa.weekday(it.date).take(1) },
+            "فروش هفت روز اخیر: " + d.week.joinToString("، ") { "${Fa.weekday(it.date)} ${Fa.rial(it.revenue)} ریال" },
+            Modifier.padding(top = 12.dp),
+        )
+    }
+}
+

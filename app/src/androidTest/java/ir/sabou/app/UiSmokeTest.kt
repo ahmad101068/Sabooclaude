@@ -68,6 +68,9 @@ class UiSmokeTest {
             ir.sabou.kernel.BusinessDate(today), "آورده"))
         val asset = core.fixedAssets.acquire(ir.sabou.assets.AcquireAsset(GlobalId.new(), scope, "فر", "تجهیزات", ir.sabou.kernel.Money.of(50_000_000), ir.sabou.kernel.Money.ZERO,
             ir.sabou.kernel.BusinessDate(today), ir.sabou.assets.DepreciationMethod.STRAIGHT_LINE, 120, null, ir.sabou.assets.Funding.Paid(bank))).resultId
+        // A priced menu item, so the sale form, the menu and the home charts render with data.
+        val pizza = core.inventory.defineMenuItem(ir.sabou.inventory.DefineMenuItem(GlobalId.new(), "پیتزا")).resultId
+        core.salesOps.setMenuPrice(ir.sabou.sales.SetMenuPrice(GlobalId.new(), ir.sabou.kernel.Scope.Organization, pizza, ir.sabou.kernel.BusinessDate(today), ir.sabou.kernel.Money.of(4_500_000)))
         val allPages = pages + listOf(
             Route.ChequeDetail(cheque), Route.AssetDetail(asset), Route.SupplierAccount(supplier),
             Route.CountDetail(core.counts.submit(ir.sabou.inventory.SubmitStockCount(GlobalId.new(), scope, location, ir.sabou.kernel.BusinessDate(today),
