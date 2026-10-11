@@ -40,6 +40,7 @@ sealed interface Route : java.io.Serializable {
     data object Waste : Route
     data object Count : Route
     data object CountHistory : Route
+    data object CountPlans : Route
     data class CountDetail(val countId: GlobalId) : Route
     data object StockTransfer : Route
     data object Recipes : Route

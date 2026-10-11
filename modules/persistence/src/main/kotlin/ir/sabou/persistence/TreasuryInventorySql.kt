@@ -299,6 +299,7 @@ class SqlStockCountStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.Sto
         },
         d.strOr("note", ""), ir.sabou.inventory.CountStatus.valueOf(d.str("status")), Codec.id(d.str("countedBy")), d.str("countedByName"), d.long("countedAt"),
         Codec.idOrNull(d.strOrNull("reviewedBy")), d.strOrNull("reviewedByName"), d.longOrNull("reviewedAt"), d.strOrNull("rejectReason"),
+        Codec.idOrNull(d.strOrNull("plan")),
     )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM stock_counts WHERE id = ?", id.value)?.let(::read)
     override fun all() = docs("SELECT doc FROM stock_counts ORDER BY rowid DESC").map(::read)
@@ -314,7 +315,7 @@ class SqlStockCountStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.Sto
                 },
                 "note" to count.note, "status" to count.status.name, "countedBy" to count.countedBy.value, "countedByName" to count.countedByName,
                 "countedAt" to count.countedAt, "reviewedBy" to count.reviewedBy?.value, "reviewedByName" to count.reviewedByName,
-                "reviewedAt" to count.reviewedAt, "rejectReason" to count.rejectReason,
+                "reviewedAt" to count.reviewedAt, "rejectReason" to count.rejectReason, "plan" to count.planId?.value,
             )),
         ),
     )
@@ -369,6 +370,26 @@ class SqlLotStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.LotStore {
                 "id" to lot.id.value, "item" to lot.itemId.value, "location" to lot.locationId.value, "expires" to lot.expiresOn.epochDay,
                 "received" to lot.receivedOn.epochDay, "qty" to lot.quantity.micros, "remaining" to lot.remaining.micros,
                 "sourceType" to lot.sourceType, "sourceId" to lot.sourceId.value,
+            )),
+        ),
+    )
+}
+
+/** Count plans (ADR-0031). */
+class SqlCountPlanStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.CountPlanStore {
+    private fun read(d: Doc) = ir.sabou.inventory.CountPlan(
+        Codec.id(d.str("id")), d.str("name"), Codec.branchOf(d.str("scope")), Codec.id(d.str("location")), d.strsOr("items").map(Codec::id),
+        ir.sabou.inventory.CountFrequency(ir.sabou.inventory.CountFrequency.Kind.valueOf(d.str("frequency")), d.long("day").toInt()), d.bool("active"),
+    )
+    override fun byId(id: GlobalId) = doc("SELECT doc FROM count_plans WHERE id = ?", id.value)?.let(::read)
+    override fun all() = docs("SELECT doc FROM count_plans ORDER BY rowid").map(::read)
+    override fun save(plan: ir.sabou.inventory.CountPlan) = upsert(
+        "count_plans", "id",
+        mapOf(
+            "id" to plan.id.value, "scope" to Codec.scope(plan.scope),
+            "doc" to Json.encode(mapOf(
+                "id" to plan.id.value, "name" to plan.name, "scope" to Codec.scope(plan.scope), "location" to plan.locationId.value,
+                "items" to plan.itemIds.map { it.value }, "frequency" to plan.frequency.kind.name, "day" to plan.frequency.day.toLong(), "active" to plan.isActive,
             )),
         ),
     )

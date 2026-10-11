@@ -52,6 +52,7 @@ import ir.sabou.app.ui.components.PrimaryButton
 import ir.sabou.app.ui.components.SecondaryButton
 import ir.sabou.app.ui.components.TextInput
 import ir.sabou.app.ui.screens.BooksScreens
+import ir.sabou.app.ui.screens.CountPlanScreens
 import ir.sabou.app.ui.screens.FinanceScreens
 import ir.sabou.app.ui.screens.HomeScreen
 import ir.sabou.app.ui.screens.PosImportScreen
@@ -544,6 +545,7 @@ private fun Pages(route: Route, nav: Nav) {
         Route.Waste -> OperationsScreens.Waste(nav)
         Route.Count -> OperationsScreens.Count(nav)
         Route.CountHistory -> OperationsScreens.CountHistory(nav)
+        Route.CountPlans -> CountPlanScreens.Plans(nav)
         is Route.CountDetail -> OperationsScreens.CountDetail(nav, route.countId)
         Route.StockTransfer -> OperationsScreens.StockTransfer(nav)
         Route.Recipes -> OperationsScreens.Recipes(nav)

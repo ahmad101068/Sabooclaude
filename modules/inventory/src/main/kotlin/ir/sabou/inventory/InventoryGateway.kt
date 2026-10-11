@@ -62,6 +62,8 @@ class InventoryGateway(
 
     fun balance(itemId: GlobalId, locationId: GlobalId): StockBalance = stock.balance(itemId, locationId)
 
+    fun activeItemIds(): List<GlobalId> = items.all().filter { it.isActive }.map { it.id }
+
     /** Weighted-average value of taking [quantity] out of the balance; the last unit takes the remainder. */
     fun valueOf(balance: StockBalance, quantity: Quantity): Money {
         ensure(quantity <= balance.quantity) {

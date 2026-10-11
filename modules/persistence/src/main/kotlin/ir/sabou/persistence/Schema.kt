@@ -208,6 +208,13 @@ object Schema {
                 "CREATE INDEX stock_lots_location ON stock_lots(location_id, open)",
             ),
         ),
+        Migration(
+            12,
+            listOf(
+                // Repeating counts: which items, how often (ADR-0031).
+                "CREATE TABLE count_plans (id TEXT PRIMARY KEY, scope TEXT NOT NULL, doc TEXT NOT NULL)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

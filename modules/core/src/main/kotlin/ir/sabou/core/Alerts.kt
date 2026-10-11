@@ -12,7 +12,7 @@ import ir.sabou.platform.Permission
  * only if it comes back.
  */
 data class Alert(val key: String, val kind: Kind, val title: String, val text: String) {
-    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH, EXPIRY }
+    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH, EXPIRY, COUNT_DUE }
 }
 
 /**
@@ -26,6 +26,14 @@ class Alerts internal constructor(private val core: SabouCore) {
         val actor = user.toActor()
         return core.session.readAs(actor) {
             buildList {
+                if (actor.role.allows(Permission.INVENTORY_COUNT)) {
+                    core.branches.all().filter { actor.canAccess(Scope.Branch(it.id)) }.forEach { b ->
+                        safe { core.overview.countsDue(Scope.Branch(b.id), today) }.filter { it.due }.forEach { d ->
+                            add(Alert("COUNT:${d.plan.id.value}:${d.periodStart.epochDay}", Alert.Kind.COUNT_DUE, "شمارش «${d.plan.name}» مانده است",
+                                (d.lastCount?.let { "آخرین شمارش ${Fa.date(it)}" } ?: "هنوز شمرده نشده") + " · از ${Fa.date(d.periodStart)} موعد شمارش است."))
+                        }
+                    }
+                }
                 if (actor.role.allows(Permission.INVENTORY_VIEW)) {
                     safe { core.overview.lowStock() }.forEach { low ->
                         add(Alert("LOW:${low.item.id.value}:${low.location.id.value}", Alert.Kind.LOW_STOCK, "کمبود «${low.item.name}»",

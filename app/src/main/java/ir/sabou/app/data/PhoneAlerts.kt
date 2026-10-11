@@ -128,6 +128,7 @@ object PhoneAlerts {
         Alert.Kind.FOOD_COST -> "بهای مواد غذاها"
         Alert.Kind.INVOICE_MATCH -> "مغایرت فاکتور با سفارش"
         Alert.Kind.EXPIRY -> "تاریخ انقضا"
+        Alert.Kind.COUNT_DUE -> "موعد انبارگردانی"
     }
 }
 

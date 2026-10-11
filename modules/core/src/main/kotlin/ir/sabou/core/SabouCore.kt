@@ -128,7 +128,9 @@ class SabouCore private constructor(
     val inventory = InventoryOperations(bus, inventoryGateway, items, locations, recipes) { id ->
         menuPrices.versions(id).isNotEmpty() || sales.usesMenuItem(id)
     }
-    val counts = ir.sabou.inventory.StockCountOperations(bus, inventoryGateway, stockCounts)
+    internal val countPlans = ir.sabou.persistence.SqlCountPlanStore(db)
+    val counts = ir.sabou.inventory.StockCountOperations(bus, inventoryGateway, stockCounts, countPlans)
+    val countPlanOps = ir.sabou.inventory.CountPlanOperations(bus, inventoryGateway, countPlans, stockCounts)
     internal val recipeBook = RecipeBook(recipes)
     val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases, attachments, approvalRules)
     val approvals = ir.sabou.purchasing.ApprovalOperations(bus, approvalRules, purchases)

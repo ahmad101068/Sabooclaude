@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
@@ -76,6 +77,15 @@ import ir.sabou.payroll.RemitLiability
 import ir.sabou.payroll.ReversePayroll
 import ir.sabou.payroll.RunStatus
 import ir.sabou.platform.Permission
+
+/** «هر روز» / «هر هفته، شنبه» / «هر ماه، روز ۵» */
+internal fun countFrequencyText(f: ir.sabou.inventory.CountFrequency): String = when (f.kind) {
+    ir.sabou.inventory.CountFrequency.Kind.DAILY -> "هر روز"
+    ir.sabou.inventory.CountFrequency.Kind.WEEKLY -> "هر هفته، ${WEEKDAYS[f.day]}"
+    ir.sabou.inventory.CountFrequency.Kind.MONTHLY -> "هر ماه، روز ${Fa.number(f.day.toLong())}"
+}
+
+internal val WEEKDAYS = listOf("شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه")
 
 /** Goods expiring within this many days are listed on the stock screen. */
 private const val EXPIRY_CARD_DAYS = 3L
@@ -284,14 +294,37 @@ object OperationsScreens {
             WithBranch { branch ->
                 val inv by invData(branch)
                 val pending by load(session, branch) { overview.stockCounts(branch).count { it.count.status == ir.sabou.inventory.CountStatus.PENDING } }
+                val due by load(session, branch) { overview.countsDue(branch, session.today) }
                 var locationId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+                var planId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
                 Page {
                     NavRow(R.drawable.ic_count, "سابقه و تأیید انبارگردانی‌ها", pending.orNull()?.takeIf { it > 0 }?.let { "${Fa.number(it.toLong())} شمارش در انتظار تأیید" }
                         ?: "همه‌ی شمارش‌ها با اختلاف و دلیل", onClick = { nav.go(Route.CountHistory) })
+                    if (session.can(Permission.INVENTORY_ADJUST)) NavRow(R.drawable.ic_calendar, "برنامه‌های شمارش", "روزانه برای کالاهای گران، هفتگی یا ماهانه برای بقیه",
+                        onClick = { nav.go(Route.CountPlans) })
+                    val plans = due.orNull().orEmpty()
+                    val plan = plans.firstOrNull { it.plan.id == planId }?.plan
+                    if (plans.isNotEmpty()) SCard {
+                        Text("کدام شمارش؟", style = SabouType.section, color = Sabou.colors.ink)
+                        Row(Modifier.fillMaxWidth().clickable { planId = null }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("شمارش آزاد (هر کالایی که شمردید)", style = if (plan == null) SabouType.bodyStrong else SabouType.body,
+                                color = if (plan == null) Sabou.colors.primary else Sabou.colors.ink, modifier = Modifier.weight(1f))
+                        }
+                        plans.forEach { p ->
+                            Row(Modifier.fillMaxWidth().clickable { planId = p.plan.id; locationId = p.plan.locationId }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(p.plan.name, style = if (plan?.id == p.plan.id) SabouType.bodyStrong else SabouType.body,
+                                        color = if (plan?.id == p.plan.id) Sabou.colors.primary else Sabou.colors.ink)
+                                    Text(countFrequencyText(p.plan.frequency) + (p.lastCount?.let { " · آخرین ${Fa.date(it)}" } ?: ""), style = SabouType.caption, color = Sabou.colors.muted)
+                                }
+                                Chip(if (p.due) "موعد شمارش" else "شمرده شد", if (p.due) ChipKind.ACCENT else ChipKind.PRIMARY)
+                            }
+                        }
+                    }
                     Loaded(inv) { d ->
-                        val loc = locationId ?: d.locations.firstOrNull()?.id
-                        if (d.locations.size > 1) Picker("انبار", d.locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
-                        if (loc != null && session.can(Permission.INVENTORY_COUNT)) key(loc) { CountSheet(nav, branch, loc) }
+                        val loc = plan?.locationId ?: locationId ?: d.locations.firstOrNull()?.id
+                        if (d.locations.size > 1 && plan == null) Picker("انبار", d.locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
+                        if (loc != null && session.can(Permission.INVENTORY_COUNT)) key(loc, plan?.id) { CountSheet(nav, branch, loc, plan) }
                     }
                 }
             }
@@ -299,9 +332,10 @@ object OperationsScreens {
     }
 
     @Composable
-    private fun CountSheet(nav: Nav, branch: Scope.Branch, locationId: GlobalId) {
+    private fun CountSheet(nav: Nav, branch: Scope.Branch, locationId: GlobalId, plan: ir.sabou.inventory.CountPlan?) {
         val session = LocalSession.current
-        val sheet by load(session, locationId) { overview.countSheet(locationId) }
+        val sheet by load(session, locationId, plan?.id) { overview.countSheet(locationId, plan?.id) }
+        var shelfFilter by rememberSaveable(locationId, plan?.id) { mutableStateOf<String?>(null) }
         val counted = ir.sabou.app.ui.rememberValueMap<GlobalId, Quantity?>()
         var note by rememberSaveable { mutableStateOf("") }
         val id = ir.sabou.app.ui.rememberCommandId(locationId)
@@ -309,15 +343,26 @@ object OperationsScreens {
         val action = rememberAction()
         Loaded(sheet) { list ->
             val blind = list.all { it.book == null }
-            FormCard("مقدار شمارش‌شده") {
+            val shelves = list.map { it.item.shelf }.distinct()
+            val done = list.count { counted[it.item.id] != null }
+            FormCard(plan?.name ?: "مقدار شمارش‌شده") {
                 Text(
-                    "فقط کالاهایی را که شمردید وارد کنید. ترتیب فهرست به محل نگهداری است. " +
+                    (if (plan != null) "همه‌ی کالاهای این برنامه باید شمرده شوند؛ کالای نبوده را صفر بزنید. " else "فقط کالاهایی را که شمردید وارد کنید. ") +
+                        "ترتیب فهرست به محل نگهداری است. " +
                         if (blind) "موجودی دفتری نمایش داده نمی‌شود؛ آنچه را می‌بینید بشمارید." else "",
                     style = SabouType.caption, color = Sabou.colors.muted,
                 )
                 Text("ثبت شمارش موجودی را عوض نمی‌کند؛ اختلاف‌ها پس از بررسی و تأیید مدیر (با دلیل) ثبت می‌شود.", style = SabouType.caption, color = Sabou.colors.primary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("شمرده ${Fa.number(done.toLong())} از ${Fa.number(list.size.toLong())}", style = SabouType.bodyStrong,
+                        color = if (done == list.size) Sabou.colors.primary else Sabou.colors.ink, modifier = Modifier.weight(1f))
+                    if (plan != null && done < list.size) Text("باقی را صفر بزن", style = SabouType.label, color = Sabou.colors.primary,
+                        modifier = Modifier.clickable { list.forEach { if (counted[it.item.id] == null) counted[it.item.id] = Quantity.ZERO } }.padding(6.dp))
+                }
+                if (shelves.size > 1) Picker("فقط این محل", listOf(Choice<String?>(null, "همه‌ی محل‌ها")) + shelves.map { Choice<String?>(it, it.ifBlank { "بدون محل" }) },
+                    shelfFilter, { shelfFilter = it })
                 var lastShelf: String? = null
-                list.forEach { line ->
+                list.filter { shelfFilter == null || it.item.shelf == shelfFilter }.forEach { line ->
                     val item = line.item
                     if (item.shelf != lastShelf) {
                         lastShelf = item.shelf
@@ -329,14 +374,14 @@ object OperationsScreens {
                 }
                 TextInput("توضیح (اختیاری)", note, { note = it }, singleLine = false)
                 action.error?.let { Banner(it) }
-                PrimaryButton("ثبت شمارش برای تأیید", { confirm = true }, enabled = counted.values.any { it != null }, busy = action.busy)
+                PrimaryButton("ثبت شمارش برای تأیید", { confirm = true }, enabled = if (plan != null) done == list.size else counted.values.any { it != null }, busy = action.busy)
             }
         }
         if (confirm) {
             Confirm("ثبت شمارش؟", "شمارش برای بررسی مدیر ثبت می‌شود و تا تأیید، موجودی تغییر نمی‌کند.", "ثبت", onConfirm = {
                 confirm = false
                 val lines = counted.entries.mapNotNull { (k, v) -> v?.let { ir.sabou.inventory.CountEntry(k, it) } }
-                action.run({ counts.submit(ir.sabou.inventory.SubmitStockCount(id.value, branch, locationId, session.today, lines, note)) }) { r ->
+                action.run({ counts.submit(ir.sabou.inventory.SubmitStockCount(id.value, branch, locationId, session.today, lines, note, plan?.id)) }) { r ->
                     nav.back(); nav.go(Route.CountDetail(r.resultId))
                 }
             }, onDismiss = { confirm = false })

@@ -235,13 +235,27 @@ class Overview internal constructor(private val core: SabouCore) {
     }
 
     /** Items to count at a location, in shelf order. The book quantity is shown only to reviewers. */
-    fun countSheet(locationId: GlobalId): List<CountSheetLine> {
+    /** The sheet to count at [locationId], in shelf order; with [planId], only that plan's items. */
+    fun countSheet(locationId: GlobalId, planId: GlobalId? = null): List<CountSheetLine> {
         val a = actor(Permission.INVENTORY_COUNT, Permission.INVENTORY_ADJUST)
         a.require(location(locationId).scope)
         val reviewer = a.role.allows(Permission.INVENTORY_ADJUST)
         val stocked = core.stock.balances(locationId).associateBy { it.itemId }
-        return core.items.all().filter { it.isActive }.sortedWith(compareBy({ it.shelf.ifBlank { "\uFFFF" } }, { it.name }))
+        val only = planId?.let { id -> core.countPlans.byId(id)?.itemIds?.toSet()?.takeIf { it.isNotEmpty() } }
+        return core.items.all().filter { it.isActive && (only == null || it.id in only) }.sortedWith(compareBy({ it.shelf.ifBlank { "\uFFFF" } }, { it.name }))
             .map { CountSheetLine(it, if (reviewer) stocked[it.id]?.quantity ?: Quantity.ZERO else null) }
+    }
+
+    /** The branch's count plans (retired ones too, for the plans screen). */
+    fun countPlans(branch: Scope.Branch): List<ir.sabou.inventory.CountPlan> {
+        actor(Permission.INVENTORY_COUNT, Permission.INVENTORY_ADJUST).require(branch)
+        return core.countPlans.all().filter { it.scope == branch }
+    }
+
+    /** Active plans of the branch and whether their count is due now (ADR-0031). */
+    fun countsDue(branch: Scope.Branch, today: ir.sabou.kernel.BusinessDate): List<ir.sabou.inventory.CountDue> {
+        actor(Permission.INVENTORY_COUNT, Permission.INVENTORY_ADJUST).require(branch)
+        return core.countPlanOps.status(branch, today)
     }
 
     /** Counts of a branch, newest first: pending, approved and rejected. */

@@ -84,6 +84,8 @@ data class StockCount(
     val reviewedByName: String? = null,
     val reviewedAt: Long? = null,
     val rejectReason: String? = null,
+    /** The count plan this count fulfils (ADR-0031), or null for a free count. */
+    val planId: GlobalId? = null,
 ) {
     val differences: List<CountedLine> get() = lines.filter { it.difference != 0L }
 }
@@ -105,9 +107,11 @@ data class SubmitStockCount(
     val date: BusinessDate,
     val lines: List<CountEntry>,
     val note: String = "",
+    /** A plan's count must cover every item of the plan. */
+    val planId: GlobalId? = null,
 ) : Command {
     override val requiredPermission = Permission.INVENTORY_COUNT
-    override fun fingerprint() = "$scope|$locationId|${date.epochDay}|$note|" + lines.joinToString(";") { "${it.itemId}:${it.counted.micros}:${it.note}" }
+    override fun fingerprint() = "$scope|$locationId|${date.epochDay}|$note|$planId|" + lines.joinToString(";") { "${it.itemId}:${it.counted.micros}:${it.note}" }
 }
 
 /** Accepts a count: every difference needs a reason ([reasons] by item); the stock and the books are corrected. */
@@ -138,6 +142,7 @@ class StockCountOperations(
     private val bus: CommandBus,
     private val gateway: InventoryGateway,
     private val counts: StockCountStore,
+    private val plans: CountPlanStore = ir.sabou.inventory.memory.InMemoryCountPlanStore(),
 ) {
     private val cap get() = gateway.ownCapability
 
@@ -150,12 +155,18 @@ class StockCountOperations(
         ensure(cmd.note.length <= 500 && cmd.lines.all { it.note.length <= 200 }) { DomainError.InvalidInput("note", "توضیح طولانی است.") }
         // One open count per location: a second one would measure against a book the first may still change.
         ensure(counts.all().none { it.locationId == location.id && it.status == CountStatus.PENDING }) { DomainError.InvalidState("STOCK_COUNT", "PENDING_EXISTS") }
+        cmd.planId?.let { id ->
+            val plan = plans.byId(id) ?: throw DomainException(DomainError.NotFound("COUNT_PLAN"))
+            ensure(plan.isActive && plan.locationId == location.id) { DomainError.InvalidState("COUNT_PLAN", "NOT_FOR_THIS_LOCATION") }
+            val missing = plan.itemIds.ifEmpty { gateway.activeItemIds() } - cmd.lines.map { it.itemId }.toSet()
+            ensure(missing.isEmpty()) { DomainError.InvalidInput("lines", "${missing.size} کالای این برنامه شمرده نشده است؛ کالای نبوده را صفر بزنید.") }
+        }
         val lines = cmd.lines.map { e ->
             gateway.item(e.itemId)
             CountedLine(e.itemId, e.counted, gateway.balance(e.itemId, location.id).quantity, e.note.trim())
         }
         val count = StockCount(GlobalId.new(), cmd.scope, location.id, cmd.date, lines, cmd.note.trim(), CountStatus.PENDING,
-            ctx.actor.userId, ctx.actor.displayName, ctx.nowEpochMillis)
+            ctx.actor.userId, ctx.actor.displayName, ctx.nowEpochMillis, planId = cmd.planId)
         counts.save(count)
         ctx.audit(AuditDraft("STOCK_COUNT_SUBMIT", "STOCK_COUNT", count.id.value, "location=${location.id};lines=${lines.size};differences=${count.differences.size}"))
         ctx.number(DocumentSeries.STOCK_COUNT, cmd.date, count.id)
