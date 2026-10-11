@@ -93,4 +93,6 @@ data class Actor(
 /** Supplies the currently authenticated actor, or null. Implemented by the session layer. */
 fun interface SessionPort {
     fun currentActor(): Actor?
+    /** True while the current thread only reads on someone's behalf (alerts); commands are refused then. */
+    fun readOnly(): Boolean = false
 }

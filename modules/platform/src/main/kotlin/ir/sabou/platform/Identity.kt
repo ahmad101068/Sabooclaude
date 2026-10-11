@@ -111,8 +111,24 @@ class Session(private val users: UserStore, private val clock: Clock, private va
     @Volatile private var userId: GlobalId? = null
     @Volatile private var lastActivity: Long = 0
 
+    /** A read-only stand-in for this thread (see [readAs]); the signed-in session is untouched. */
+    private val reading = ThreadLocal<Actor?>()
+
+    override fun readOnly(): Boolean = reading.get() != null
+
+    /**
+     * Runs [block] on this thread as [actor], for reads only: every read model applies that person's permissions
+     * and branches, while any command inside is refused. Used for alerts computed in the background.
+     */
+    fun <T> readAs(actor: Actor, block: () -> T): T {
+        val previous = reading.get()
+        reading.set(actor)
+        try { return block() } finally { reading.set(previous) }
+    }
+
     @Synchronized
     override fun currentActor(): Actor? {
+        reading.get()?.let { return it }
         val id = userId ?: return null
         val now = clock.nowEpochMillis()
         if (now - lastActivity > idleTimeoutMillis) { userId = null; return null }

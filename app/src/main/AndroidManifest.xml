@@ -4,6 +4,9 @@
     <!-- Device-first: no network permission until a server exists (ADR-0001). -->
     <!-- Fingerprint sign-in (ADR-0023): unlocks the sealed PIN; the PIN is still checked by the login. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Alerts on the phone (ADR-0024); the periodic check survives a reboot. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application
         android:name=".SabouApplication"
         android:allowBackup="false"
@@ -26,6 +29,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".data.AlertJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false" />
     </application>
 
 </manifest>

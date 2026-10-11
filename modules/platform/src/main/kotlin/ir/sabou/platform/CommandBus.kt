@@ -119,6 +119,7 @@ class CommandBus(
     private val audit = AuditTrail(auditStore)
 
     fun <C : Command> execute(module: ModuleId, command: C, handler: (C, CommandContext) -> GlobalId): CommandOutcome {
+        ensure(!session.readOnly()) { DomainError.IntegrityViolation("COMMAND_IN_READ_ONLY_SESSION") }
         val actor = session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
         (setOf(command.requiredPermission) + command.additionalPermissions).forEach { p ->
             ensure(actor.role.allows(p)) { DomainError.PermissionDenied(p.name) }

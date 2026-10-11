@@ -365,7 +365,7 @@ class AppContainer(private val context: Context) {
         // 4. From here on the app always re-opens, and whichever file is in place opens normally.
         try {
             faultPoint("announced")
-            clearDrafts(); biometric.disable()   // drafts belong to the replaced database
+            clearDrafts(); biometric.disable(); PhoneAlerts.forget(context)   // drafts belong to the replaced database
             close()
             keepInQuarantine("RESTORE", move = false, withKey = !keyReplaced)
             faultPoint("quarantined")
@@ -389,7 +389,7 @@ class AppContainer(private val context: Context) {
         announceReplacement(epoch, "FACTORY_RESET")
         try {
             faultPoint("announced")
-            clearDrafts(); biometric.disable()
+            clearDrafts(); biometric.disable(); PhoneAlerts.forget(context)
             close()
             keepInQuarantine("FACTORY_RESET", move = true)
             faultPoint("quarantined")

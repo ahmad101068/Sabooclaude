@@ -110,6 +110,7 @@ class Action internal constructor(private val session: AppSession) {
             busy = false
             result.onSuccess { value ->
                 session.changed()
+                ir.sabou.app.data.PhoneAlerts.soon()
                 if (attached) onSuccess(value)
             }.onFailure { e ->
                 if (e is DomainException && e.error == DomainError.AuthenticationRequired) session.signedOut()
