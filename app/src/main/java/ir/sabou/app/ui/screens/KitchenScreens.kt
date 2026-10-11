@@ -75,6 +75,8 @@ object KitchenScreens {
                     var shelf by rememberSaveable { mutableStateOf(item.shelf) }
                     var allergens by rememberSaveable { mutableStateOf(item.allergens) }
                     var active by rememberSaveable { mutableStateOf(item.isActive) }
+                    val parByDay = ir.sabou.app.ui.rememberValueMap<Int, Quantity?>()
+                    var showDays by rememberSaveable { mutableStateOf(item.parByWeekday.isNotEmpty()) }
                     var shelfLife by rememberSaveable { mutableStateOf(item.shelfLifeDays?.let { Fa.number(it.toLong()) }.orEmpty()) }
                     val packs = ir.sabou.app.ui.rememberRows<PackRow>({ listOf(it.name, it.contains) },
                         { PackRow(it[0] as String, it[1] as Quantity?) }) { item.packs.map { PackRow(it.name, it.contains) } }
@@ -86,6 +88,19 @@ object KitchenScreens {
                         TextInput("نام کالا", name, { name = it })
                         QuantityInput("حداقل موجودی (نقطه‌ی سفارش)", unit, { minimum = it }, blankAs = Quantity.ZERO, value = item.minimumStock)
                         QuantityInput("سطح مطلوب (سفارش تا این مقدار)", unit, { par = it }, blankAs = Quantity.ZERO, value = item.parLevel)
+                        if (!item.prepared) {
+                            Text(if (showDays) "سطح مطلوب بر اساس روز تحویل" else "+ سطح مطلوب جدا برای روزهای تحویل (مثلاً پنجشنبه برای آخر هفته)",
+                                style = if (showDays) SabouType.bodyStrong else SabouType.label, color = if (showDays) Sabou.colors.ink else Sabou.colors.primary,
+                                modifier = Modifier.clickable { showDays = true }.padding(vertical = 4.dp))
+                            if (showDays) {
+                                Text("تحویلِ این روزها تا این مقدار سفارش داده می‌شود؛ خالی یعنی همان سطح مطلوب عادی.", style = SabouType.caption, color = Sabou.colors.muted)
+                                WEEKDAYS.forEachIndexed { day, dayName ->
+                                    key(day) {
+                                        QuantityInput(dayName, unit, { parByDay[day] = it }, value = parByDay[day] ?: item.parByWeekday[day])
+                                    }
+                                }
+                            }
+                        }
                         TextInput("محل نگهداری (قفسه)", shelf, { shelf = it }, placeholder = "مثلاً یخچال ۱ · طبقه ۲")
                         TextInput("آلرژن‌ها", allergens, { allergens = it }, placeholder = "مثلاً گلوتن، لبنیات، بادام‌زمینی")
                         val shelfDays = Fa.latinDigits(shelfLife.trim()).toIntOrNull()
@@ -139,7 +154,8 @@ object KitchenScreens {
                         PrimaryButton("ذخیره", {
                             action.run({
                                 inventory.updateItem(UpdateItem(id.value, item.id, name, minimum!!, par!!, shelf, allergens, preferred, approved.toSet(), active,
-                                    packs = packs.map { PackUnit(it.name.trim(), it.contains!!) }, shelfLifeDays = shelfDays))
+                                    packs = packs.map { PackUnit(it.name.trim(), it.contains!!) }, shelfLifeDays = shelfDays,
+                                    parByWeekday = (0..6).mapNotNull { d -> (if (parByDay.containsKey(d)) parByDay[d] else item.parByWeekday[d])?.takeIf { !it.isZero }?.let { d to it } }.toMap()))
                             }) { nav.back() }
                         }, enabled = session.can(Permission.INVENTORY_ITEM_MANAGE) && name.trim().length >= 2 && minimum != null && par != null && !parBad && !preferredBad && !packsBad && !shelfBad, busy = action.busy)
                     }

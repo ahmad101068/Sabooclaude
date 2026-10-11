@@ -93,6 +93,23 @@ class BuyingTest {
         assertEquals(day.plusDays(4), core.buying.suggestions(kitchen, emptyList(), day, 15 * 60).groups.first().delivery!!.date)
     }
 
+    @Test fun theParOfTheDeliveryWeekdayIsTheOneRestored() {
+        setUp()
+        // Wednesday's delivery must last through the weekend: par 9 kg instead of 5.
+        core.inventory.updateItem(UpdateItem(id(), cheese, "پنیر", kg(1), kg(5), "یخچال", "لبنیات", supplier, emptySet(), true, parByWeekday = mapOf(4 to kg(9))))
+        assertEquals(kg(9), core.overview.items().single { it.id == cheese }.parByWeekday[4])
+        val sunday = core.buying.suggestions(kitchen, emptyList(), day, 13 * 60).groups.first().lines.single()
+        assertEquals(kg(5), sunday.par); assertEquals(kg(1), sunday.suggested); assertNull(sunday.deliveryDay)     // 5 − 3 − 1
+        val wednesday = core.buying.suggestions(kitchen, emptyList(), day, 15 * 60).groups.first().lines.single()
+        assertEquals(kg(9), wednesday.par); assertEquals(kg(5), wednesday.suggested); assertEquals(day.plusDays(4), wednesday.deliveryDay)
+        // A day's par below the reorder point, or zero, is refused; an empty map clears them.
+        assertEquals("INVALID_INPUT:parByWeekday", assertFailsWith<DomainException> {
+            core.inventory.updateItem(UpdateItem(id(), cheese, "پنیر", kg(1), kg(5), "یخچال", "لبنیات", supplier, emptySet(), true, parByWeekday = mapOf(4 to Quantity.of(500_000))))
+        }.error.code)
+        core.inventory.updateItem(UpdateItem(id(), cheese, "پنیر", kg(1), kg(5), "یخچال", "لبنیات", supplier, emptySet(), true, parByWeekday = emptyMap()))
+        assertEquals(kg(5), core.buying.suggestions(kitchen, emptyList(), day, 15 * 60).groups.first().lines.single().par)
+    }
+
     @Test fun priceChangesCompareWithTheSameSuppliersPreviousInvoice() {
         setUp()
         val change = core.buying.priceChanges(day.plusDays(-30), day).single()

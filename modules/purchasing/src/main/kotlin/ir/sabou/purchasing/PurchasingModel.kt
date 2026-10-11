@@ -40,11 +40,13 @@ data class Delivery(val date: BusinessDate, val orderBy: BusinessDate, val cutof
 
 object Weekdays {
     /** 0 = Saturday (the Iranian week), …, 6 = Friday. */
-    fun index(date: BusinessDate): Int = Math.floorMod(date.epochDay + 5, 7L).toInt()
+    fun index(date: BusinessDate): Int = ir.sabou.kernel.JalaliCalendar.weekdayIndex(date)
 }
 
-/** Goods line. [supplierItemName] is what the supplier calls it; it is remembered for next time. */
-/** [expiresOn]: the expiry printed on the goods, when there is one (ADR-0030). */
+/**
+ * Goods line. [supplierItemName] is what the supplier calls it; it is remembered for next time. [expiresOn]: the
+ * expiry printed on the goods, when there is one (ADR-0030).
+ */
 data class InvoiceLine(val itemId: GlobalId, val quantity: Quantity, val value: Money, val supplierItemName: String = "", val expiresOn: BusinessDate? = null) {
     /** Rial per whole unit of the item. */
     val unitPrice: Long get() = if (quantity.isZero) 0 else Ratio.mulDiv(value.rial, Quantity.SCALE, quantity.micros)

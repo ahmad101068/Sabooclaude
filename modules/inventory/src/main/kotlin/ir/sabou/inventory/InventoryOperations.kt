@@ -58,13 +58,16 @@ data class UpdateItem(
     val packs: List<PackUnit>? = null,
     /** Days it keeps (1..3650), or null for no shelf life. */
     val shelfLifeDays: Int? = null,
+    /** Par per delivery weekday (0..6); null keeps them as they are, an empty map clears them. */
+    val parByWeekday: Map<Int, Quantity>? = null,
 ) : Command {
     override val requiredPermission = Permission.INVENTORY_ITEM_MANAGE
     override val scope: Scope = Scope.Organization
     override val sharedCatalog = true
     override fun fingerprint() = "$itemId|$name|${minimumStock.micros}|${parLevel.micros}|$shelf|$allergens|$preferredSupplierId|" +
         approvedSupplierIds.map { it.value }.sorted().joinToString(",") + "|$isActive|" +
-        (packs?.joinToString(";") { "${it.name}=${it.contains.micros}" } ?: "keep") + "|${shelfLifeDays ?: "-"}"
+        (packs?.joinToString(";") { "${it.name}=${it.contains.micros}" } ?: "keep") + "|${shelfLifeDays ?: "-"}|" +
+        (parByWeekday?.entries?.sortedBy { it.key }?.joinToString(",") { "${it.key}=${it.value.micros}" } ?: "keep")
 }
 
 /** A new version of how a prepared item is made; [lines] yield [outputQuantity] of it. */
@@ -219,6 +222,10 @@ class InventoryOperations(
         ensure(cmd.parLevel.isZero || cmd.parLevel >= cmd.minimumStock) { DomainError.InvalidInput("parLevel", "سقف سفارش باید از حد سفارش بیشتر باشد.") }
         ensure(cmd.shelf.length <= 80 && cmd.allergens.length <= 200) { DomainError.InvalidInput("text", "متن بیش از حد طولانی است.") }
         ensure(cmd.shelfLifeDays == null || cmd.shelfLifeDays in 1..3650) { DomainError.InvalidInput("shelfLife", "ماندگاری باید بین ۱ و ۳۶۵۰ روز باشد.") }
+        cmd.parByWeekday?.let { byDay ->
+            ensure(byDay.keys.all { it in 0..6 } && byDay.values.none { it.isZero || it.micros < 0 }) { DomainError.InvalidInput("parByWeekday", "سطح مطلوب هر روز باید بیشتر از صفر باشد.") }
+            ensure(byDay.values.all { it >= cmd.minimumStock }) { DomainError.InvalidInput("parByWeekday", "سطح مطلوب هر روز نباید کمتر از حداقل موجودی باشد.") }
+        }
         ensure(cmd.preferredSupplierId == null || cmd.approvedSupplierIds.isEmpty() || cmd.preferredSupplierId in cmd.approvedSupplierIds) {
             DomainError.InvalidInput("supplier", "تأمین‌کننده‌ی اصلی باید در فهرست مجاز باشد.")
         }
@@ -235,6 +242,7 @@ class InventoryOperations(
             name = name, minimumStock = cmd.minimumStock, parLevel = cmd.parLevel, shelf = cmd.shelf.trim(), allergens = cmd.allergens.trim(),
             preferredSupplierId = cmd.preferredSupplierId, approvedSupplierIds = cmd.approvedSupplierIds, isActive = cmd.isActive,
             packs = cmd.packs?.let(Units::validatePacks) ?: item.packs, shelfLifeDays = cmd.shelfLifeDays,
+            parByWeekday = cmd.parByWeekday ?: item.parByWeekday,
         )
         items.save(next)
         ctx.audit(AuditDraft("ITEM_UPDATE", "ITEM", item.id.value, name))

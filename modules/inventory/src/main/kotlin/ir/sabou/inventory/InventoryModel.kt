@@ -31,7 +31,15 @@ data class Item(
     val packs: List<PackUnit> = emptyList(),
     /** Days it keeps after it comes in or is made; goods then get an expiry date without typing one (ADR-0030). */
     val shelfLifeDays: Int? = null,
-)
+    /**
+     * Par for a delivery on a given weekday (0 = Saturday … 6 = Friday), where it differs from [parLevel]: the
+     * Thursday delivery must last through the weekend (ADR-0032).
+     */
+    val parByWeekday: Map<Int, Quantity> = emptyMap(),
+) {
+    /** The par a delivery on [date] should restore ([parLevel] when that weekday has none of its own). */
+    fun parFor(date: BusinessDate?): Quantity = date?.let { parByWeekday[ir.sabou.kernel.JalaliCalendar.weekdayIndex(it)] } ?: parLevel
+}
 
 /** A storeroom or kitchen. Always inside one branch: stock always has an owner (AUD-011). */
 data class Location(val id: GlobalId, val name: String, val scope: Scope.Branch, val isActive: Boolean = true)

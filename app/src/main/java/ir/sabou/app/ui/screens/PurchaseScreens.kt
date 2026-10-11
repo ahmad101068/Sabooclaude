@@ -1284,7 +1284,7 @@ object PurchaseScreens {
                                         g.lines.forEach { s ->
                                             val unit = unitName(s.item.unit)
                                             KeyValue("${s.item.name}: ${Fa.quantity(s.suggested)} $unit", s.value?.let { Fa.rial(it) } ?: "—")
-                                            Text("موجودی ${Fa.quantity(s.onHand)} · در راه ${Fa.quantity(s.onOrder)} · مطلوب ${Fa.quantity(s.par)}" +
+                                            Text("موجودی ${Fa.quantity(s.onHand)} · در راه ${Fa.quantity(s.onOrder)} · مطلوب ${Fa.quantity(s.par)}" + (s.deliveryDay?.let { " (تحویل ${Fa.weekday(it)})" } ?: "") +
                                                 if (!s.planned.isZero) " · برنامه ${Fa.quantity(s.planned)}" else "", style = SabouType.caption, color = Sabou.colors.muted)
                                         }
                                         Divider()

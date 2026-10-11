@@ -60,7 +60,8 @@ data class PlanLine(val menuItemId: GlobalId, val portions: Quantity)
 
 /**
  * What to buy for one item at one location: enough to be back at the par level after covering the
- * planned dishes. [suggested] = par + planned − on hand − already on order (never below zero).
+ * planned dishes. [suggested] = par + planned − on hand − already on order (never below zero). [par] is the one for
+ * the weekday of the supplier's next delivery when the item has one ([deliveryDay], ADR-0032).
  */
 data class Suggestion(
     val item: Item,
@@ -71,6 +72,8 @@ data class Suggestion(
     val suggested: Quantity,
     /** Rial per whole unit (last price from this supplier, else from any supplier in the branch). */
     val unitPrice: Long?,
+    /** The delivery the par was chosen for, when it is a weekday's own par. */
+    val deliveryDay: BusinessDate? = null,
 ) {
     val value: Money? get() = unitPrice?.let { Money.of(Ratio.mulDiv(it, suggested.micros, Quantity.SCALE)) }
 }
@@ -282,15 +285,19 @@ class Buying internal constructor(private val core: SabouCore) {
             inv.lines.filter { !it.quantity.isZero }.forEach { l -> lastBySupplier[inv.supplierId to l.itemId] = l.unitPrice; lastAny[l.itemId] = l.unitPrice }
         }
 
+        val suppliers = core.suppliers.all().associateBy { it.id }
         val rows = items.values.filter { it.isActive && !it.prepared }.mapNotNull { item ->
             val planned = need[item.id] ?: 0L
-            if (item.parLevel.isZero && planned == 0L) return@mapNotNull null
-            val raw = item.parLevel.micros + planned - onHand(item.id) - (onOrder[item.id] ?: 0L)
+            // The par of the weekday the goods will arrive (the supplier's next delivery), else the item's usual par.
+            val delivery = item.preferredSupplierId?.let { suppliers[it] }?.takeIf { it.isActive }?.nextDelivery(date, minutesNow)?.date
+            val par = item.parFor(delivery)
+            if (par.isZero && planned == 0L) return@mapNotNull null
+            val raw = par.micros + planned - onHand(item.id) - (onOrder[item.id] ?: 0L)
             val suggested = roundUp(item, maxOf(0L, raw))
             val price = item.preferredSupplierId?.let { lastBySupplier[it to item.id] } ?: lastAny[item.id]
-            item to Suggestion(item, Quantity.of(onHand(item.id)), Quantity.of(onOrder[item.id] ?: 0L), item.parLevel, Quantity.of(planned), Quantity.of(suggested), price)
+            item to Suggestion(item, Quantity.of(onHand(item.id)), Quantity.of(onOrder[item.id] ?: 0L), par, Quantity.of(planned), Quantity.of(suggested), price,
+                delivery?.takeIf { par != item.parLevel })
         }.filter { !it.second.suggested.isZero }
-        val suppliers = core.suppliers.all().associateBy { it.id }
         return rows.groupBy { (item, _) -> item.preferredSupplierId?.let { suppliers[it] }?.takeIf { it.isActive } }
             .map { (supplier, l) ->
                 SuggestionGroup(supplier, supplier?.nextDelivery(date, minutesNow), l.map { it.second }.sortedBy { it.item.shelf + "\u0000" + it.item.name })
