@@ -56,6 +56,7 @@ class InMemoryPeriodStore : Table<GlobalId, PeriodLock>(), PeriodStore {
     override fun overlapsClosed(from: BusinessDate, to: BusinessDate) = values().any { it.closed && it.from <= to && it.to >= from }
     override fun byId(id: GlobalId) = get(id)
     override fun save(lock: PeriodLock) = put(lock.id, lock)
+    override fun locks() = values()
 }
 
 class InMemoryBudgetStore : ir.sabou.platform.memory.Table<ir.sabou.kernel.GlobalId, ir.sabou.ledger.BudgetEntry>(), ir.sabou.ledger.BudgetStore {

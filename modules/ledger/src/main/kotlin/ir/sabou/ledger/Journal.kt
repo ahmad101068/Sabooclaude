@@ -98,4 +98,6 @@ interface PeriodStore {
     fun overlapsClosed(from: BusinessDate, to: BusinessDate): Boolean
     fun byId(id: GlobalId): PeriodLock?
     fun save(lock: PeriodLock)
+    /** Every lock, closed or reopened, in recording order. */
+    fun locks(): List<PeriodLock>
 }

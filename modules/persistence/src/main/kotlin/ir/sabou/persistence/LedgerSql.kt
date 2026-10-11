@@ -122,6 +122,7 @@ class SqlPeriodStore(private val db: SqlDatabase) : PeriodStore {
     override fun overlapsClosed(from: BusinessDate, to: BusinessDate) =
         db.query("SELECT 1 AS x FROM period_locks WHERE closed = 1 AND from_day <= ? AND to_day >= ? LIMIT 1", to.epochDay, from.epochDay).isNotEmpty()
     override fun byId(id: GlobalId) = db.query("SELECT * FROM period_locks WHERE id = ?", id.value).firstOrNull()?.let(::read)
+    override fun locks() = db.query("SELECT * FROM period_locks ORDER BY rowid").map(::read)
     override fun save(lock: PeriodLock) = db.execute(
         "INSERT INTO period_locks (id, from_day, to_day, closed) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET from_day = excluded.from_day, to_day = excluded.to_day, closed = excluded.closed",
         lock.id.value, lock.from.epochDay, lock.to.epochDay, if (lock.closed) 1L else 0L,
