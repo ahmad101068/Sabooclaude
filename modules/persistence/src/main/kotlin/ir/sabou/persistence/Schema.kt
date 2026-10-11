@@ -223,6 +223,13 @@ object Schema {
                 "CREATE INDEX bank_statements_account ON bank_statements(account_id)",
             ),
         ),
+        Migration(
+            14,
+            listOf(
+                // Tax product IDs of menu items (ADR-0037); the seller's tax profile lives in the meta table.
+                "CREATE TABLE tax_codes (menu_item_id TEXT PRIMARY KEY REFERENCES menu_items(id), doc TEXT NOT NULL)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

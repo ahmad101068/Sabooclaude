@@ -280,7 +280,7 @@ class SqlAttachmentStore(db: SqlDatabase) : SqlTable(db), AttachmentStore {
 class SqlCustomerStore(db: SqlDatabase) : SqlTable(db), CustomerStore {
     private fun read(d: Doc) = Customer(
         Codec.id(d.str("id")), d.str("name"), CustomerType.valueOf(d.str("type")), d.str("phone"), Codec.money(d.long("limit")),
-        Codec.branchOf(d.str("registeredIn")), d.bool("active"),
+        Codec.branchOf(d.str("registeredIn")), d.bool("active"), d.strOr("taxId", ""), d.strOr("postal", ""),
     )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM customers WHERE id = ?", id.value)?.let(::read)
     override fun all() = docs("SELECT doc FROM customers ORDER BY rowid").map(::read)
@@ -292,6 +292,7 @@ class SqlCustomerStore(db: SqlDatabase) : SqlTable(db), CustomerStore {
                 mapOf(
                     "id" to customer.id.value, "name" to customer.name, "type" to customer.type.name, "phone" to customer.phone,
                     "limit" to customer.creditLimit.rial, "registeredIn" to Codec.scope(customer.registeredIn), "active" to customer.isActive,
+                    "taxId" to customer.taxId.ifEmpty { null }, "postal" to customer.postalCode.ifEmpty { null },
                 ),
             ),
         ),
@@ -652,3 +653,24 @@ class SqlPosImportStore(db: SqlDatabase) : SqlTable(db), ir.sabou.sales.PosImpor
     }
 }
 
+
+/** The seller's tax profile (in the database meta) and the menu's tax product IDs (ADR-0037). */
+class SqlTaxStore(db: SqlDatabase) : SqlTable(db), ir.sabou.sales.TaxStore {
+    private val meta = DatabaseMeta(db)
+    @Suppress("UNCHECKED_CAST")
+    override fun profile(): ir.sabou.sales.TaxProfile? = meta.get("tax.profile")?.let { text ->
+        val d = Doc(Json.decode(text) as Map<String, Any?>)
+        ir.sabou.sales.TaxProfile(d.str("seller"), d.strOr("memory", ""), d.docsOr("vat").map { ir.sabou.sales.VatRate(Codec.date(it.long("from")), it.long("bp")) })
+    }
+    override fun saveProfile(profile: ir.sabou.sales.TaxProfile) = meta.put("tax.profile", Json.encode(mapOf(
+        "seller" to profile.sellerTaxId, "memory" to profile.memoryId,
+        "vat" to profile.vatRates.map { mapOf("from" to it.from.epochDay, "bp" to it.bp) },
+    )))
+    override fun codes() = docs("SELECT doc FROM tax_codes ORDER BY rowid").map { d ->
+        ir.sabou.sales.ItemTaxCode(Codec.id(d.str("item")), d.str("product"), d.strOr("unit", ""))
+    }
+    override fun saveCode(code: ir.sabou.sales.ItemTaxCode) = upsert(
+        "tax_codes", "menu_item_id",
+        mapOf("menu_item_id" to code.menuItemId.value, "doc" to Json.encode(mapOf("item" to code.menuItemId.value, "product" to code.productId, "unit" to code.unitCode))),
+    )
+}

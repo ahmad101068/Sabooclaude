@@ -23,6 +23,8 @@ enum class Permission {
     CUSTOMER_MANAGE, CREDIT_OVERRIDE,
     /** Set menu prices (for every branch or one); sell at a price other than the menu's, with a reason. */
     MENU_PRICE_MANAGE, SALES_PRICE_OVERRIDE,
+    /** The seller's tax identity, VAT rates and the menu's tax product IDs (ADR-0037). */
+    TAX_SETTINGS,
     // Purchasing & inventory
     PURCHASE_VIEW, PURCHASE_RECORD, PURCHASE_PAY, PURCHASE_REVERSE, SUPPLIER_MANAGE, PURCHASE_ORDER,
     /** Approve an invoice for payment; take approvals back; define the approval rules. */
@@ -46,6 +48,8 @@ enum class Role(val permissions: Set<Permission>) {
             Permission.PURCHASE_UNAPPROVE, Permission.APPROVAL_RULES,
             // Organization-wide: closing the books and full-data backups stay with the owner/accountant.
             Permission.PERIOD_CLOSE, Permission.BACKUP_CREATE,
+            // The tax identity is the owner's.
+            Permission.TAX_SETTINGS,
         ),
     ),
     ACCOUNTANT(

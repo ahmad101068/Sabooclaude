@@ -109,6 +109,12 @@ class Closing internal constructor(private val core: SabouCore) {
         }
         add("CHEQUES", overdue > 0, CloseCheck.Severity.WARN, "چک‌های سررسید گذشته", "${Fa.number(overdue.toLong())} چک سررسید شده و هنوز وصول یا پاس نشده است.", "چک سررسیدگذشته‌ای نیست.")
 
+        // Tax system readiness, once the seller's tax identity has been set up.
+        if (core.taxStore.profile() != null) {
+            val readiness = core.moadian.readiness(to)
+            add("MOADIAN", !readiness.ready, CloseCheck.Severity.WARN, "آمادگی سامانه‌ی مودیان", readiness.problems.joinToString(" "), "اطلاعات مالیاتی کامل است.")
+        }
+
         // Integrity: the inter-branch account nets to zero across the organization.
         val interBranch = core.journals.netDebit(StandardAccounts.INTER_BRANCH, null, to)
         add("INTER_BRANCH", interBranch != 0L, CloseCheck.Severity.BLOCK, "حساب جاری بین شعب",
