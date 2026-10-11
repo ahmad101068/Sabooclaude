@@ -37,7 +37,11 @@ import ir.sabou.treasury.TreasuryMovement
 
 data class AccountBalance(val account: TreasuryAccount, val balance: Long)
 data class LowStock(val item: Item, val location: Location, val quantity: Quantity)
-data class BranchDay(val branch: Branch, val sale: DailySale?, val closed: Boolean)
+/** A branch's day: its sales (every status, recording order) and whether it is closed. */
+data class BranchDay(val branch: Branch, val sales: List<DailySale>, val closed: Boolean) {
+    val posted: List<DailySale> get() = sales.filter { it.status == ir.sabou.sales.SaleStatus.POSTED }
+    val drafts: List<DailySale> get() = sales.filter { it.status == ir.sabou.sales.SaleStatus.DRAFT }
+}
 data class MenuEntry(val item: MenuItem, val latest: RecipeVersion?)
 
 /**
@@ -45,12 +49,14 @@ data class MenuEntry(val item: MenuItem, val latest: RecipeVersion?)
  * the branch's [own] price, the [organization] price, and every version recorded for the item (newest first).
  */
 data class MenuPriceView(val item: MenuItem, val price: Money?, val own: Boolean, val organization: Money?, val history: List<ir.sabou.sales.MenuPrice>)
+/** A branch's sales day: its sales (drafts, posted, reversed; discarded drafts left out) and what closing it needs. */
 data class SalesDayView(
-    val sale: DailySale?,
+    val sales: List<DailySale>,
     val day: SalesDay?,
     val customers: List<Customer>,
     val accounts: List<TreasuryAccount>,
-    val number: String? = null,
+    /** Document number of each posted (or reversed) sale. */
+    val numbers: Map<ir.sabou.kernel.GlobalId, String> = emptyMap(),
     /** Cash boxes of the branch with their book balance, for whoever closes the day (empty for others). */
     val cashBoxes: List<AccountBalance> = emptyList(),
     /** The day's cash count number once closed. */
@@ -271,21 +277,21 @@ class Overview internal constructor(private val core: SabouCore) {
         actor(Permission.SALES_VIEW)
         return branches().map { b ->
             val scope = Scope.Branch(b.id)
-            BranchDay(b, core.sales.activeSale(scope, date), core.sales.day(scope, date)?.closed == true)
+            BranchDay(b, core.sales.salesOn(scope, date), core.sales.day(scope, date)?.closed == true)
         }
     }
 
     fun salesDay(branch: Scope.Branch, date: BusinessDate): SalesDayView {
         val a = actor(Permission.SALES_VIEW)
         a.require(branch)
-        val sale = core.sales.activeSale(branch, date)
+        val sales = core.sales.salesOn(branch, date).filter { it.status != ir.sabou.sales.SaleStatus.DISCARDED }
         return SalesDayView(
-            sale = sale,
+            sales = sales,
             day = core.sales.day(branch, date),
             customers = core.customers.all().filter { it.isActive && it.registeredIn == branch },
             // A cheque box takes customers' cheques (with their details); a cheque book never receives.
             accounts = core.treasuryAccounts.all().filter { it.isActive && it.scope == branch && it.kind != ir.sabou.treasury.TreasuryKind.ISSUED_CHEQUES },
-            number = sale?.let { core.numbers.of(ir.sabou.platform.DocumentSeries.DAILY_SALE, it.id)?.text },
+            numbers = sales.mapNotNull { s -> core.numbers.of(ir.sabou.platform.DocumentSeries.DAILY_SALE, s.id)?.let { s.id to it.text } }.toMap(),
             cashBoxes = if (a.role.allows(Permission.SALES_DAY_CLOSE) || a.role.allows(Permission.TREASURY_VIEW)) {
                 core.treasuryAccounts.all().filter {
                     it.isActive && it.scope == branch && (it.kind == ir.sabou.treasury.TreasuryKind.CASH || it.kind == ir.sabou.treasury.TreasuryKind.PETTY_CASH)

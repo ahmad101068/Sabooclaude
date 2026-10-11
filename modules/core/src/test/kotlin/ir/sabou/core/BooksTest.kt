@@ -185,7 +185,7 @@ class BooksTest {
         }.exceptionOrNull()!!.let { (it as ir.sabou.kernel.DomainException).error.code })
         val sale = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLineInput(pizza, Quantity.units(1), rial(8_000_000))),
             rial(0), rial(0), rial(0), settlements)).resultId
-        assertEquals(settlements, core.overview.salesDay(branch, day).sale!!.settlements)     // read back with the cheques
+        assertEquals(settlements, core.overview.salesDay(branch, day).sales.single().settlements)     // read back with the cheques
         core.salesOps.post(PostDailySale(id(), branch, sale))
         assertEquals(listOf(3_000_000L, 4_000_000L), core.books.cheques(ChequeDirection.RECEIVED).map { it.cheque.amount.rial }.sorted())
         assertEquals(7_000_000, core.overview.treasury().single { it.account.id == box }.balance)

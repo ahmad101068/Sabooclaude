@@ -42,7 +42,10 @@ data class RegisterCustomer(
     override fun fingerprint() = "$scope|$name|$type|$phone|${creditLimit.rial}"
 }
 
-/** Creates or replaces the draft of a branch's day. Drafts have no financial effect. */
+/**
+ * Creates a new sale draft ([saleId] null) or replaces draft [saleId]. A day has as many sales as needed; drafts
+ * have no financial effect.
+ */
 @NoDocument
 data class SaveSaleDraft(
     override val commandId: GlobalId,
@@ -56,9 +59,10 @@ data class SaveSaleDraft(
     val settlements: List<Settlement>,
     val guests: Int = 0,
     val transactions: Int = 0,
+    val saleId: GlobalId? = null,
 ) : Command {
     override val requiredPermission = Permission.SALES_RECORD
-    override fun fingerprint() = "$scope|${date.epochDay}|$kitchenLocationId|${discount.rial}|${serviceCharge.rial}|${tax.rial}|$guests|$transactions|" +
+    override fun fingerprint() = "$saleId|$scope|${date.epochDay}|$kitchenLocationId|${discount.rial}|${serviceCharge.rial}|${tax.rial}|$guests|$transactions|" +
         lines.joinToString(";") { "${it.menuItemId}:${it.portions.micros}:${it.unitPrice?.rial}:${it.overrideReason}" } + "|" +
         settlements.joinToString(";") { s -> when (s) {
             is Settlement.Liquid -> "L:${s.treasuryAccountId}:${s.amount.rial}:${s.cheque?.fingerprint()}"
@@ -81,6 +85,13 @@ data class SetMenuPrice(
     override val requiredPermission = Permission.MENU_PRICE_MANAGE
     override val sharedCatalog = true
     override fun fingerprint() = "$scope|$menuItemId|${effectiveFrom.epochDay}|${unitPrice?.rial}"
+}
+
+/** Drops a draft that will not be posted; it stays on record as DISCARDED. */
+@NoDocument
+data class DiscardSaleDraft(override val commandId: GlobalId, override val scope: Scope.Branch, val saleId: GlobalId) : Command {
+    override val requiredPermission = Permission.SALES_RECORD
+    override fun fingerprint() = "$scope|$saleId"
 }
 
 @IssuesDocument(DocumentSeries.DAILY_SALE)
@@ -191,8 +202,9 @@ class SalesOperations(
         ensure(cmd.lines.isNotEmpty() && cmd.lines.none { it.portions.isZero }) { DomainError.InvalidInput("lines", "حداقل یک آیتم فروش لازم است.") }
         ensure(cmd.lines.map { it.menuItemId }.distinct().size == cmd.lines.size) { DomainError.InvalidInput("lines", "هر آیتم منو فقط یک‌بار بیاید.") }
         val lines = cmd.lines.map { price(it, cmd.scope, cmd.date, ctx.actor.role) }
-        val existing = sales.activeSale(cmd.scope, cmd.date)
+        val existing = cmd.saleId?.let { requireSale(it, cmd.scope) }
         ensure(existing == null || existing.status == SaleStatus.DRAFT) { DomainError.InvalidState("DAILY_SALE", "ALREADY_POSTED") }
+        ensure(existing == null || existing.date == cmd.date) { DomainError.InvalidInput("date", "تاریخ پیش‌نویس را نمی‌شود عوض کرد؛ آن را کنار بگذارید و فروش تازه ثبت کنید.") }
         val sale = DailySale(
             id = existing?.id ?: GlobalId.new(), scope = cmd.scope, date = cmd.date, kitchenLocationId = cmd.kitchenLocationId,
             lines = lines, discount = cmd.discount, serviceCharge = cmd.serviceCharge, tax = cmd.tax,
@@ -211,6 +223,15 @@ class SalesOperations(
         }
         sales.saveSale(sale)
         ctx.audit(AuditDraft("SALE_DRAFT_SAVE", "DAILY_SALE", sale.id.value, "payable=${sale.payable.rial};settled=${sale.settled.rial}"))
+        sale.id
+    }
+
+    fun discardDraft(c: DiscardSaleDraft): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        val sale = requireSale(cmd.saleId, cmd.scope)
+        ensure(sale.status == SaleStatus.DRAFT) { DomainError.InvalidState("DAILY_SALE", sale.status.name) }
+        requireDayOpen(sale.scope, sale.date)
+        sales.saveSale(sale.copy(status = SaleStatus.DISCARDED))
+        ctx.audit(AuditDraft("SALE_DRAFT_DISCARD", "DAILY_SALE", sale.id.value, "payable=${sale.payable.rial}"))
         sale.id
     }
 
@@ -346,8 +367,8 @@ class SalesOperations(
 
     fun closeDay(c: CloseSalesDay): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
         requireDayOpen(cmd.scope, cmd.date)
-        val sale = sales.activeSale(cmd.scope, cmd.date)
-        ensure(sale == null || sale.status == SaleStatus.POSTED) { DomainError.InvalidState("DAILY_SALE", "NOT_POSTED") }
+        // Every sale of the day is posted (or reversed, or discarded): no draft is left behind a closed day.
+        ensure(sales.salesOn(cmd.scope, cmd.date).none { it.status == SaleStatus.DRAFT }) { DomainError.InvalidState("SALES_DAY", "HAS_DRAFTS") }
         val box = treasury.account(cmd.cashAccountId)
         ensure(box.scope == cmd.scope) { DomainError.InvalidInput("account", "صندوق متعلق به این شعبه نیست.") }
         ensure(box.kind == ir.sabou.treasury.TreasuryKind.CASH || box.kind == ir.sabou.treasury.TreasuryKind.PETTY_CASH) {
@@ -366,7 +387,7 @@ class SalesOperations(
         ensure(cmd.reason.trim().length in 3..300) { DomainError.InvalidInput("reason", "دلیل بازگشایی الزامی است.") }
         sales.saveDay(day!!.copy(closed = false))
         ctx.audit(AuditDraft("SALES_DAY_REOPEN", "SALES_DAY", "${cmd.scope.branchId.value}:${cmd.date.epochDay}", cmd.reason.trim()))
-        sales.activeSale(cmd.scope, cmd.date)?.id ?: GlobalId.new()
+        day.countId ?: GlobalId.new()
     }
 
     private fun requireSale(id: GlobalId, scope: Scope.Branch): DailySale {

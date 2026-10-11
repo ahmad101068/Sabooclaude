@@ -300,9 +300,11 @@ class Reports internal constructor(private val core: SabouCore) {
     fun dayFlash(branch: Scope.Branch, date: BusinessDate): DayFlash {
         val a = actor(Permission.SALES_VIEW)
         a.require(branch)
-        val sale = core.sales.activeSale(branch, date)?.takeIf { it.status == SaleStatus.POSTED }
+        // Every posted sale of the day together (bills, shifts, imported POS days).
+        val posted = core.sales.salesOn(branch, date).filter { it.status == SaleStatus.POSTED }
+        fun sum(f: (ir.sabou.sales.DailySale) -> Money) = Money.sum(posted.map(f))
         val accounts = core.treasuryAccounts.all().associateBy { it.id }
-        val liquid = sale?.settlements.orEmpty().filterIsInstance<Settlement.Liquid>()
+        val liquid = posted.flatMap { it.settlements }.filterIsInstance<Settlement.Liquid>()
         val locations = core.locations.all().filter { it.scope == branch }
         val waste = locations.sumOf { loc ->
             core.stock.movementsAt(loc.id, date, date).filter { it.kind == MovementKind.WASTE }.sumOf { -it.valueDelta }
@@ -310,13 +312,15 @@ class Reports internal constructor(private val core: SabouCore) {
         val purchases = core.purchases.invoices().filter { it.scope == branch && it.date == date && it.status == InvoiceStatus.POSTED }
         val day = core.sales.day(branch, date)
         return DayFlash(
-            branch = scopeName(branch), date = date, posted = sale != null, closed = day?.closed == true,
-            gross = sale?.gross ?: Money.ZERO, discount = sale?.discount ?: Money.ZERO, serviceCharge = sale?.serviceCharge ?: Money.ZERO,
-            tax = sale?.tax ?: Money.ZERO, payable = sale?.payable ?: Money.ZERO, netFood = sale?.netFood ?: Money.ZERO,
-            guests = sale?.guests ?: 0, transactions = sale?.transactions ?: 0,
+            branch = scopeName(branch), date = date, posted = posted.isNotEmpty(), closed = day?.closed == true,
+            gross = sum { it.gross }, discount = sum { it.discount }, serviceCharge = sum { it.serviceCharge },
+            tax = sum { it.tax }, payable = sum { it.payable }, netFood = sum { it.netFood },
+            guests = posted.sumOf { it.guests },
+            // A sale without its own count of bills is one bill.
+            transactions = posted.sumOf { if (it.transactions > 0) it.transactions else 1 },
             settlements = liquid.groupBy { it.treasuryAccountId }.map { (id, l) -> (accounts[id]?.name ?: "حساب") to Money.sum(l.map { it.amount }) },
-            credit = Money.sum(sale?.settlements.orEmpty().filterIsInstance<Settlement.Credit>().map { it.amount }),
-            cost = sale?.cost ?: Money.ZERO,
+            credit = Money.sum(posted.flatMap { it.settlements }.filterIsInstance<Settlement.Credit>().map { it.amount }),
+            cost = sum { it.cost },
             // Purchases and waste values only for roles that may see purchasing / stock values.
             purchases = if (a.role.allows(Permission.PURCHASE_VIEW)) Money.sum(purchases.map { it.total }) else null,
             waste = if (a.role.allows(Permission.INVENTORY_VIEW)) Money.of(maxOf(0, waste)) else null,

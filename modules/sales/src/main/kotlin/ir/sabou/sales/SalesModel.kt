@@ -62,11 +62,13 @@ sealed interface Settlement {
     data class Credit(val customerId: GlobalId, override val amount: Money, val dueDate: BusinessDate) : Settlement
 }
 
-enum class SaleStatus { DRAFT, POSTED, REVERSED }
+/** DRAFT → POSTED (→ REVERSED); a draft never posted can be DISCARDED (kept for the audit trail). */
+enum class SaleStatus { DRAFT, POSTED, REVERSED, DISCARDED }
 
 /**
- * One branch's sales for one business day. Amounts are entered once; the totals the user sees
- * are computed here, so screen and books cannot disagree.
+ * One sale (a bill, or a batch such as a shift's or an imported POS day) of a branch on a business day; a day has
+ * as many as needed, each numbered when posted. Amounts are entered once; the totals the user sees are computed
+ * here, so screen and books cannot disagree.
  */
 data class DailySale(
     val id: GlobalId,
@@ -134,7 +136,8 @@ interface CustomerStore {
 
 interface SalesStore {
     fun sale(id: GlobalId): DailySale?
-    fun activeSale(scope: Scope.Branch, date: BusinessDate): DailySale?
+    /** Every sale of the branch on [date] (any status), in recording order. */
+    fun salesOn(scope: Scope.Branch, date: BusinessDate): List<DailySale>
     fun saveSale(sale: DailySale)
     fun receivable(id: GlobalId): Receivable?
     fun receivablesOfSale(saleId: GlobalId): List<Receivable>

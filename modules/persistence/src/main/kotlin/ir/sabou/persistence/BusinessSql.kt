@@ -325,8 +325,8 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
         docs("SELECT doc FROM daily_sales WHERE doc LIKE ?", "%${menuItemId.value}%").any { d -> d.docs("lines").any { it.str("menuItem") == menuItemId.value } }
 
     override fun sale(id: GlobalId) = doc("SELECT doc FROM daily_sales WHERE id = ?", id.value)?.let(::saleOf)
-    override fun activeSale(scope: Scope.Branch, date: BusinessDate) =
-        doc("SELECT doc FROM daily_sales WHERE scope = ? AND date = ? AND status <> 'REVERSED' ORDER BY rowid LIMIT 1", Codec.scope(scope), date.epochDay)?.let(::saleOf)
+    override fun salesOn(scope: Scope.Branch, date: BusinessDate) =
+        docs("SELECT doc FROM daily_sales WHERE scope = ? AND date = ? ORDER BY rowid", Codec.scope(scope), date.epochDay).map(::saleOf)
     fun sales(scope: Scope.Branch, from: BusinessDate, to: BusinessDate): List<DailySale> =
         docs("SELECT doc FROM daily_sales WHERE scope = ? AND date BETWEEN ? AND ? ORDER BY date, rowid", Codec.scope(scope), from.epochDay, to.epochDay).map(::saleOf)
 
