@@ -230,6 +230,17 @@ object Schema {
                 "CREATE TABLE tax_codes (menu_item_id TEXT PRIMARY KEY REFERENCES menu_items(id), doc TEXT NOT NULL)",
             ),
         ),
+        Migration(
+            15,
+            listOf(
+                // Planned shifts, clock punches and the staff's clock PINs (ADR-0038).
+                "CREATE TABLE shifts (id TEXT PRIMARY KEY, scope TEXT NOT NULL, date INTEGER NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX shifts_day ON shifts(scope, date)",
+                "CREATE TABLE punches (id TEXT PRIMARY KEY, scope TEXT NOT NULL, date INTEGER NOT NULL, employee_id TEXT NOT NULL REFERENCES employees(id), doc TEXT NOT NULL)",
+                "CREATE INDEX punches_day ON punches(scope, date)",
+                "CREATE TABLE clock_pins (employee_id TEXT PRIMARY KEY REFERENCES employees(id), hash TEXT NOT NULL)",
+            ) + immutable("punches"),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

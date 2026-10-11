@@ -39,12 +39,7 @@ interface TaxStore {
 /** Identity numbers as the tax system checks them. */
 object TaxIds {
     /** Individual national ID (کد ملی): 10 digits with a mod-11 check digit; not all the same digit. */
-    fun isNationalId(id: String): Boolean {
-        if (!id.matches(Regex("\\d{10}")) || id.all { it == id[0] }) return false
-        val sum = (0 until 9).sumOf { (id[it] - '0') * (10 - it) }
-        val r = sum % 11
-        return (id[9] - '0') == if (r < 2) r else 11 - r
-    }
+    fun isNationalId(id: String): Boolean = id.matches(Regex("\\d{10}")) && ir.sabou.kernel.NationalId.isValid(id)
 
     /** Legal entity national ID (شناسه ملی): 11 digits with its check digit. */
     fun isLegalId(id: String): Boolean {
