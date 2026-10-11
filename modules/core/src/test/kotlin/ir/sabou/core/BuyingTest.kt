@@ -182,5 +182,20 @@ class BuyingTest {
         assertEquals("INVALID_INPUT:lines", e.error.code)
         assertTrue(e.error.userMessage.contains("سس الف"), e.error.userMessage)
     }
+
+    @Test fun aPriceChangeIsFoundAcrossWarehousesSuppliersAndBranches() {
+        setUp()                                                         // cheese: 300,000 then 360,000 from «لبنیات»
+        val freezer = core.inventory.createLocation(ir.sabou.inventory.CreateLocation(id(), branch, "سردخانه")).resultId
+        val other = core.purchasing.registerSupplier(RegisterSupplier(id(), "پخش شمال", "011")).resultId
+        // Another warehouse of the branch, another supplier: still compared with the last price paid for cheese.
+        core.purchasing.postInvoice(PostPurchaseInvoice(id(), branch, other, "3", freezer, day, day, listOf(InvoiceLine(cheese, kg(1), rial(450_000)))))
+        val change = core.buying.priceChanges(day, day).single { it.price == 450_000L }
+        assertEquals(360_000, change.previousPrice)
+        assertEquals("لبنیات", change.previousSupplier)
+        assertEquals("پخش شمال", change.supplier)
+        assertEquals(2_500, change.changeBp)
+        // The form's hint knows it too, whoever the supplier is.
+        assertEquals(450_000L, core.buying.lastPaid(branch)[cheese]?.price)
+    }
 }
 

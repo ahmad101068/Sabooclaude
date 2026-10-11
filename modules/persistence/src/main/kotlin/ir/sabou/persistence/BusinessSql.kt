@@ -320,6 +320,10 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
         return SaleLine(Codec.id(d.str("menuItem")), portions, unit, gross, d.longOrNull("listPrice")?.let(Codec::money), d.strOrNull("reason"))
     }
 
+    /** Whether any recorded sale (draft, posted or reversed) has a line of [menuItemId]. */
+    fun usesMenuItem(menuItemId: GlobalId): Boolean =
+        docs("SELECT doc FROM daily_sales WHERE doc LIKE ?", "%${menuItemId.value}%").any { d -> d.docs("lines").any { it.str("menuItem") == menuItemId.value } }
+
     override fun sale(id: GlobalId) = doc("SELECT doc FROM daily_sales WHERE id = ?", id.value)?.let(::saleOf)
     override fun activeSale(scope: Scope.Branch, date: BusinessDate) =
         doc("SELECT doc FROM daily_sales WHERE scope = ? AND date = ? AND status <> 'REVERSED' ORDER BY rowid LIMIT 1", Codec.scope(scope), date.epochDay)?.let(::saleOf)

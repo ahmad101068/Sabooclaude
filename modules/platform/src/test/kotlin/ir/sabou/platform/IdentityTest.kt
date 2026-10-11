@@ -51,7 +51,7 @@ class IdentityTest {
         identity.bootstrapOwner("owner", "مالک", "123456".toCharArray())
         identity.logout()
         repeat(5) { code { identity.login("owner", "000000".toCharArray()) } }
-        assertEquals("INVALID_STATE:USER:LOCKED", code { identity.login("owner", "123456".toCharArray()) })
+        assertEquals("INVALID_STATE:USER:LOCKED:30", code { identity.login("owner", "123456".toCharArray()) })   // 30 s after the 5th
         now += 31_000; elapsed += 31_000
         identity.login("owner", "123456".toCharArray())
         now += 31 * 60_000
@@ -82,9 +82,9 @@ class IdentityTest {
     @Test fun guessingTheCurrentPinLocksTheAccount() {
         identity.bootstrapOwner("owner", "مالک", "123456".toCharArray())
         repeat(4) { assertEquals("INVALID_INPUT:pin", code { identity.changeOwnPin("000000".toCharArray(), "333333".toCharArray()) }) }
-        assertEquals("INVALID_STATE:USER:LOCKED", code { identity.changeOwnPin("000000".toCharArray(), "333333".toCharArray()) })
+        assertLocked(code { identity.changeOwnPin("000000".toCharArray(), "333333".toCharArray()) })
         assertNull(session.currentActor())                                   // signed out
-        assertEquals("INVALID_STATE:USER:LOCKED", code { identity.login("owner", "123456".toCharArray()) })
+        assertLocked(code { identity.login("owner", "123456".toCharArray()) })
     }
 
     @Test fun changingTheDeviceClockDoesNotShortenALock() {
@@ -93,10 +93,10 @@ class IdentityTest {
         repeat(5) { code { identity.login("owner", "000000".toCharArray()) } }
         // Clock moved a day forward: same boot, uptime unchanged → still locked.
         now += 86_400_000
-        assertEquals("INVALID_STATE:USER:LOCKED", code { identity.login("owner", "123456".toCharArray()) })
+        assertLocked(code { identity.login("owner", "123456".toCharArray()) })
         // Clock set back before the lock began → still locked, even after a reboot.
         now -= 2 * 86_400_000; boot = "boot-2"; elapsed = 5_000
-        assertEquals("INVALID_STATE:USER:LOCKED", code { identity.login("owner", "123456".toCharArray()) })
+        assertLocked(code { identity.login("owner", "123456".toCharArray()) })
         // Real time passing on the monotonic clock ends it.
         now += 86_400_000; boot = "boot-1"; elapsed = 1_000 + 31_000
         identity.login("owner", "123456".toCharArray())
@@ -129,4 +129,6 @@ class IdentityTest {
         }
         identity.login("owner", "123456".toCharArray())
     }
+
+    private fun assertLocked(code: String) = assertTrue(code.startsWith("INVALID_STATE:USER:LOCKED:"), code)
 }

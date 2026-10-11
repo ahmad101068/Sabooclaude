@@ -221,6 +221,7 @@ class SalesOperations(
      */
     private fun price(input: SaleLineInput, branch: Scope.Branch, date: BusinessDate, role: ir.sabou.platform.Role): SaleLine {
         val item = recipes.menuItem(input.menuItemId) ?: throw DomainException(DomainError.NotFound("MENU_ITEM"))
+        ensure(item.isActive) { DomainError.InvalidInput("lines", "«${item.name}» از منو خارج شده است.") }
         val list = priceList.unitPriceOn(item.id, branch, date)
         val unit = input.unitPrice ?: list
             ?: throw DomainException(DomainError.InvalidInput("price", "«${item.name}» در منو قیمت ندارد؛ قیمت واحد را وارد کنید."))

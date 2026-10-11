@@ -253,9 +253,10 @@ object PurchaseScreens {
         val id = rememberCommandId()
         val action = rememberAction()
         val hints by load(session, supplier, branch) {
-            supplier?.let { buying.supplierItemNames(it) to buying.lastPrices(it, branch) } ?: (emptyMap<String, GlobalId>() to emptyMap<GlobalId, Long>())
+            (supplier?.let { buying.supplierItemNames(it) } ?: emptyMap()) to buying.lastPaid(branch)
         }
-        val (aliases, lastPrices) = hints.orNull() ?: (emptyMap<String, GlobalId>() to emptyMap<GlobalId, Long>())
+        // The last price paid for each item from any supplier and warehouse: a dearer supplier is noticed too.
+        val (aliases, lastPrices) = hints.orNull() ?: (emptyMap<String, GlobalId>() to emptyMap<GlobalId, ir.sabou.core.LastPaid>())
         val itemsById = form.items.associateBy { it.id }
         val loc = locationId ?: form.locations.firstOrNull()?.id
         val supplierObj = form.suppliers.firstOrNull { it.id == supplier }
@@ -290,10 +291,11 @@ object PurchaseScreens {
                         QuantityInput("مقدار", item?.let { unitName(it.unit) } ?: "", { l.qty = it }, value = l.qty)
                         MoneyInput("مبلغ کل ردیف", l.value, { l.value = it })
                         val price = unitPrice(l.qty, l.value)
-                        val last = l.item?.let { lastPrices[it] }
+                        val previous = l.item?.let { lastPrices[it] }
+                        val last = previous?.price
                         if (price != null && item != null) {
                             val text = "قیمت هر ${unitName(item.unit)}: ${Fa.rial(price)} ریال" +
-                                (last?.let { " · خرید قبلی ${Fa.rial(it)} (${changeText(it, price)})" } ?: "")
+                                (previous?.let { p -> " · خرید قبلی ${Fa.rial(p.price)} از ${p.supplier} (${changeText(p.price, price)})" } ?: "")
                             val far = last != null && (ir.sabou.kernel.Ratio.changeBp(last, price)?.let { kotlin.math.abs(it) >= 500 } ?: false)
                             Text(text, style = SabouType.caption, color = if (far) Sabou.colors.danger else Sabou.colors.muted)
                         }
@@ -668,7 +670,7 @@ object PurchaseScreens {
                                 Text("${c.item.name} · ${c.supplier}", style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
                                 Chip(changeText(c.previousPrice, c.price), if ((c.changeBp ?: 1) > 0) ChipKind.DANGER else ChipKind.PRIMARY)
                             }
-                            Text("هر ${unitName(c.item.unit)}: ${Fa.rial(c.previousPrice)} (${Fa.date(c.previousDate)}) ← ${Fa.rial(c.price)} (${Fa.date(c.date)})",
+                            Text("هر ${unitName(c.item.unit)}: ${Fa.rial(c.previousPrice)} از ${c.previousSupplier} (${Fa.date(c.previousDate)}) ← ${Fa.rial(c.price)} (${Fa.date(c.date)})",
                                 style = SabouType.caption, color = Sabou.colors.muted)
                         }
                     }

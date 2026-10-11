@@ -62,6 +62,8 @@ import ir.sabou.core.Fa
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.CreateLocation
 import ir.sabou.inventory.DefineMenuItem
+import ir.sabou.inventory.DeleteMenuItem
+import ir.sabou.inventory.UpdateMenuItem
 import ir.sabou.inventory.PublishRecipe
 import ir.sabou.inventory.RecipeLine
 import ir.sabou.inventory.StockUnit
@@ -331,6 +333,9 @@ object MeScreens {
         var name by rememberSaveable { mutableStateOf("") }
         var menuItem by rememberSaveable { mutableStateOf<GlobalId?>(null) }
         var from by rememberSaveable { mutableStateOf(session.today) }
+        var renaming by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var newName by rememberSaveable { mutableStateOf("") }
+        var deleting by remember { mutableStateOf<ir.sabou.inventory.MenuItem?>(null) }
         val rows = ir.sabou.app.ui.rememberRows<RecipeRow>({ listOf(it.item, it.qty, it.yieldText) }, { RecipeRow(it[0] as GlobalId?, it[1] as Quantity?, it[2] as String) }) { listOf(RecipeRow(null, null)) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
@@ -341,7 +346,10 @@ object MeScreens {
                     if (menu.isEmpty()) EmptyState("هنوز آیتم منویی تعریف نشده است.")
                     menu.forEach { m ->
                         SCard {
-                            Text(m.name, style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(m.name, style = SabouType.bodyStrong, color = if (m.isActive) Sabou.colors.ink else Sabou.colors.muted, modifier = Modifier.weight(1f))
+                                if (!m.isActive) Chip("خارج از منو", ChipKind.NEUTRAL)
+                            }
                             d.prices[m.id]?.let { p ->
                                 val price = p.price
                                 if (price == null) Text("قیمت منو ندارد — هنگام فروش قیمت واحد وارد می‌شود.", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
@@ -355,7 +363,34 @@ object MeScreens {
                             val allergens = v?.lines.orEmpty().mapNotNull { items[it.itemId]?.allergens?.takeIf { a -> a.isNotBlank() } }
                                 .flatMap { it.split('،', ',') }.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
                             if (allergens.isNotEmpty()) Text("آلرژن: " + allergens.joinToString("، "), style = SabouType.caption, color = Sabou.colors.danger)
+                            if (session.can(Permission.RECIPE_MANAGE)) {
+                                if (renaming == m.id) {
+                                    TextInput("نام جدید", newName, { newName = it })
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        SecondaryButton("ذخیره نام", { action.run({ inventory.updateMenuItem(UpdateMenuItem(GlobalId.new(), m.id, newName, m.isActive)) }) { renaming = null } },
+                                            enabled = newName.trim().length >= 2 && !action.busy)
+                                        SecondaryButton("انصراف", { renaming = null })
+                                    }
+                                } else Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                    MenuLink("ویرایش نام") { renaming = m.id; newName = m.name }
+                                    if (m.isActive) MenuLink(if (v == null) "تعریف رسپی" else "ویرایش رسپی") {
+                                        // A recipe is never changed in place: its lines prefill a new version from today.
+                                        menuItem = m.id; from = session.today; rows.clear()
+                                        v?.lines?.forEach { rows.add(RecipeRow(it.itemId, it.quantityPerPortion, if (it.yieldPercent < 100) Fa.number(it.yieldPercent.toLong()) else "")) }
+                                        if (rows.isEmpty()) rows.add(RecipeRow(null, null))
+                                    }
+                                    MenuLink(if (m.isActive) "خارج از منو" else "بازگرداندن", Sabou.colors.onAccentSoft) {
+                                        action.run({ inventory.updateMenuItem(UpdateMenuItem(GlobalId.new(), m.id, m.name, !m.isActive)) })
+                                    }
+                                    MenuLink("حذف", Sabou.colors.danger) { deleting = m }
+                                }
+                            }
                         }
+                    }
+                    deleting?.let { m ->
+                        Confirm("حذف «${m.name}»؟", "فقط آیتمی که هرگز رسپی، قیمت یا فروش نداشته حذف می‌شود؛ وگرنه آن را از منو خارج کنید.", "حذف",
+                            onConfirm = { deleting = null; action.run({ inventory.deleteMenuItem(DeleteMenuItem(GlobalId.new(), m.id)) }) },
+                            onDismiss = { deleting = null }, danger = true)
                     }
                     if (session.can(Permission.MENU_PRICE_MANAGE) && branch != null && menu.isNotEmpty()) MenuPriceForm(branch, menu, d.prices)
                     if (session.can(Permission.RECIPE_MANAGE)) {
@@ -366,6 +401,7 @@ object MeScreens {
                                 enabled = name.trim().length >= 2, busy = action.busy)
                         }
                         FormCard("نسخه جدید رسپی") {
+                            menuItem?.let { id -> latest[id]?.let { Banner("ویرایش رسپی «${menu.firstOrNull { it.id == id }?.name}»: با انتشار، نسخهٔ ${Fa.number(it.version + 1L)} از تاریخ «معتبر از» جایگزین می‌شود؛ فروش‌های قبلی با نسخهٔ خودشان می‌مانند.", ChipKind.ACCENT) } }
                             Text("مصرف خالص هر پرس. بازده: درصدی از ماده که پس از پاک‌کردن و پخت می‌ماند؛ مصرف انبار = خالص ÷ بازده. نسخه‌های قبلی تغییر نمی‌کنند.", style = SabouType.caption, color = Sabou.colors.muted)
                             Picker("آیتم منو", menu.map { Choice(it.id, it.name) }, menuItem, { menuItem = it })
                             DateInput("معتبر از", from, { from = it }, session.today)
@@ -389,6 +425,10 @@ object MeScreens {
             }
         }
     }
+
+    @Composable
+    private fun MenuLink(text: String, color: androidx.compose.ui.graphics.Color = Sabou.colors.primary, onClick: () -> Unit) =
+        Text(text, style = SabouType.label, color = color, modifier = Modifier.clickable(onClick = onClick).padding(vertical = 6.dp))
 
     /**
      * New price version of a menu item from a date, for every branch or only the current one (ADR-0019). Earlier

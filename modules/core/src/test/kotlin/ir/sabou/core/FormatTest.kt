@@ -60,6 +60,9 @@ class FormatTest {
     }
 
     @Test fun errorsBecomeClearPersianSentences() {
+        assertEquals("موجودی انبار «پنیر» کافی نیست: لازم ۲٫۵، موجود ۱.",
+            Messages.of(ir.sabou.kernel.DomainError.InsufficientStock("x", 1_000_000, 2_500_000, "پنیر")))
+        assertEquals("به دلیل رمزهای اشتباه، ورود حدود ۲ دقیقهٔ دیگر قفل است.", Messages.of(ir.sabou.kernel.DomainError.InvalidState("USER", "LOCKED:90")))
         assertEquals("جمع روش‌های تسویه با مبلغ قابل تسویه برابر نیست.",
             Messages.of(ir.sabou.kernel.DomainError.InvalidState("DAILY_SALE", "SETTLEMENT_MISMATCH:40000")))
         assertEquals("موجودی حساب کافی نیست (موجود: ۱۰٬۰۰۰ ریال).",
