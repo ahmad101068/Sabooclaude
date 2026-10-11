@@ -37,6 +37,10 @@ class InMemoryStockStore : StockStore, Transactional {
     override fun balance(itemId: GlobalId, locationId: GlobalId) =
         balances[itemId to locationId] ?: StockBalance(itemId, locationId, Quantity.ZERO, Money.ZERO)
 
+    override fun lastInboundUnitCost(itemId: GlobalId): Long? = movements.lastOrNull {
+        it.itemId == itemId && it.kind == ir.sabou.inventory.MovementKind.RECEIPT && it.quantityDelta > 0 && it.valueDelta > 0
+    }?.let { ir.sabou.kernel.Ratio.mulDiv(it.valueDelta, Quantity.SCALE, it.quantityDelta) }
+
     override fun replace(expected: StockBalance, next: StockBalance) {
         if (balance(expected.itemId, expected.locationId) != expected) throw DomainException(DomainError.ConcurrentModification("STOCK_BALANCE"))
         balances[next.itemId to next.locationId] = next
@@ -89,4 +93,14 @@ class InMemoryStockCountStore : ir.sabou.platform.memory.Table<ir.sabou.kernel.G
     override fun byId(id: ir.sabou.kernel.GlobalId) = get(id)
     override fun all() = values()
     override fun save(count: ir.sabou.inventory.StockCount) = put(count.id, count)
+}
+
+class InMemoryShortageStore : ir.sabou.platform.memory.Table<GlobalId, ir.sabou.inventory.StockShortage>(), ir.sabou.inventory.ShortageStore {
+    override fun byId(id: GlobalId) = get(id)
+    override fun ofSource(sourceType: String, sourceId: GlobalId) = values().filter { it.sourceType == sourceType && it.sourceId == sourceId }
+    override fun open(itemId: GlobalId, locationId: GlobalId) =
+        values().filter { it.itemId == itemId && it.locationId == locationId && it.status == ir.sabou.inventory.StockShortage.Status.OPEN }.sortedBy { it.date }
+    override fun openAt(locationIds: Set<GlobalId>) =
+        values().filter { it.locationId in locationIds && it.status == ir.sabou.inventory.StockShortage.Status.OPEN }.sortedBy { it.date }
+    override fun save(shortage: ir.sabou.inventory.StockShortage) = put(shortage.id, shortage)
 }

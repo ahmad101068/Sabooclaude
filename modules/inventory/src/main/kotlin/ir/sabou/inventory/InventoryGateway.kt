@@ -23,7 +23,8 @@ import ir.sabou.platform.ModuleId
 data class ReceiptLine(val itemId: GlobalId, val quantity: Quantity, val value: Money)
 data class IssueLine(val itemId: GlobalId, val quantity: Quantity)
 data class IssuedCost(val itemId: GlobalId, val quantity: Quantity, val cost: Money)
-data class Consumption(val lines: List<IssuedCost>, val totalCost: Money, val journal: JournalEntry?)
+/** What a consumption took from stock at cost, and what it could not (left as open shortages, ADR-0022). */
+data class Consumption(val lines: List<IssuedCost>, val totalCost: Money, val journal: JournalEntry?, val shortages: List<StockShortage> = emptyList())
 
 /**
  * The only way stock changes. Valuation is moving weighted average **per location**; the value of
@@ -37,6 +38,7 @@ class InventoryGateway(
     private val items: ItemStore,
     private val locations: LocationStore,
     private val stock: StockStore,
+    private val shortages: ShortageStore = ir.sabou.inventory.memory.InMemoryShortageStore(),
 ) {
     init {
         require(capability.module == ModuleId.INVENTORY)
@@ -98,10 +100,16 @@ class InventoryGateway(
             item(line.itemId)
             stockIn(context, line.itemId, location, line.quantity, line.value, MovementKind.RECEIPT, date, journal.id, SourceDocument(owner.module, sourceType, sourceId), null)
         }
+        // What was consumed before these goods were booked is taken from them now, at their cost.
+        lines.forEach { settleShortages(context, owner, location, it.itemId, date) }
         return journal
     }
 
-    /** Goods out at weighted-average cost into COGS (sales consumption). Returns the exact cost. */
+    /**
+     * Goods out at weighted-average cost into COGS (sales consumption). Returns the exact cost. With
+     * [allowShortage], what the book stock cannot cover is not refused: the available quantity is issued and the
+     * rest is recorded as an open [StockShortage] (stock never goes negative).
+     */
     fun consume(
         context: CommandContext,
         owner: PostingCapability,
@@ -111,16 +119,21 @@ class InventoryGateway(
         sourceType: String,
         sourceId: GlobalId,
         description: String,
+        allowShortage: Boolean = false,
     ): Consumption {
         requireOwner(context, owner)
         val location = location(locationId)
         context.requireScope(location.scope)
         val merged = lines.groupBy { it.itemId }.map { (id, rows) -> IssueLine(id, rows.fold(Quantity.ZERO) { a, r -> a + r.quantity }) }
             .filter { !it.quantity.isZero }
-        // Price everything first so a shortage in any line fails before anything is written.
-        val priced = merged.map { line ->
+        // Price everything first so a shortage in any line fails (when not allowed) before anything is written.
+        val missing = ArrayList<IssueLine>()
+        val priced = merged.mapNotNull { line ->
             item(line.itemId)
-            IssuedCost(line.itemId, line.quantity, valueOf(stock.balance(line.itemId, location.id), line.quantity))
+            val balance = stock.balance(line.itemId, location.id)
+            val take = if (allowShortage && line.quantity > balance.quantity) balance.quantity else line.quantity
+            if (take != line.quantity) missing += IssueLine(line.itemId, line.quantity - take)
+            if (take.isZero) null else IssuedCost(line.itemId, take, valueOf(balance, take))
         }
         val total = Money.sum(priced.map { it.cost })
         val journal = if (total.isZero) null else ledger.post(
@@ -133,8 +146,96 @@ class InventoryGateway(
         priced.forEach {
             stockOut(context, it.itemId, location, it.quantity, it.cost, MovementKind.ISSUE, date, journal?.id, SourceDocument(owner.module, sourceType, sourceId), null)
         }
-        return Consumption(priced, total, journal)
+        val recorded = missing.map { m ->
+            StockShortage(GlobalId.new(), m.itemId, location.id, date, sourceType, sourceId, m.quantity).also {
+                shortages.save(it)
+                context.audit(AuditDraft("STOCK_SHORTAGE_OPEN", "STOCK_SHORTAGE", it.id.value, "item=${m.itemId};loc=${location.id};qty=${m.quantity.micros};source=$sourceType:$sourceId"))
+            }
+        }
+        return Consumption(priced, total, journal, recorded)
     }
+
+    /**
+     * Settles open shortages of [itemId] at [location] from what is in stock now, oldest first, at the current
+     * average cost (COGS ← inventory). Called right after goods come in; the journal belongs to [owner], the
+     * module whose document brought the goods.
+     */
+    fun settleShortages(context: CommandContext, owner: PostingCapability, location: Location, itemId: GlobalId, date: BusinessDate) {
+        for (shortage in shortages.open(itemId, location.id)) {
+            val balance = stock.balance(itemId, location.id)
+            if (balance.quantity.isZero) return
+            val take = if (shortage.open < balance.quantity) shortage.open else balance.quantity
+            val cost = valueOf(balance, take)
+            val journal = if (cost.isZero) null else ledger.post(context, owner, JournalDraft(date, location.scope, SHORTAGE, shortage.id,
+                "تسویه کسری مصرف", listOf(
+                    LineDraft(StandardAccounts.COGS, debit = cost, memo = "مصرف پیشین بدون موجودی", by = capability),
+                    LineDraft(StandardAccounts.INVENTORY, credit = cost, memo = location.name, by = capability),
+                )))
+            stockOut(context, itemId, location, take, cost, MovementKind.ISSUE, date, journal?.id, SourceDocument(owner.module, SHORTAGE, shortage.id), null)
+            val settled = shortage.settled + take
+            shortages.save(shortage.copy(settled = settled, settledCost = shortage.settledCost + cost, takenFromStock = shortage.takenFromStock + take,
+                takenCost = shortage.takenCost + cost, status = if (settled == shortage.quantity) StockShortage.Status.SETTLED else StockShortage.Status.OPEN))
+            context.audit(AuditDraft("STOCK_SHORTAGE_SETTLE", "STOCK_SHORTAGE", shortage.id.value, "qty=${take.micros};cost=${cost.rial}"))
+        }
+    }
+
+    /**
+     * A stock count has measured what is really there, so a shortage still open for a counted item can no longer
+     * be taken from stock: it is written off at an estimated cost (COGS ← inventory variance), keeping the cost of
+     * what was sold in the cost of sales. Estimate: the average cost at the location, else the last cost it came in at.
+     */
+    fun writeOffShortages(context: CommandContext, location: Location, itemId: GlobalId, date: BusinessDate, sourceId: GlobalId) {
+        for (shortage in shortages.open(itemId, location.id)) {
+            val unit = unitCost(itemId, location.id)
+            val cost = if (unit == null) Money.ZERO else Money.of(Ratio.mulDiv(unit, shortage.open.micros, Quantity.SCALE))
+            if (!cost.isZero) ledger.post(context, capability, JournalDraft(date, location.scope, SHORTAGE, shortage.id, "کسری مصرف در انبارگردانی", listOf(
+                LineDraft(StandardAccounts.COGS, debit = cost, memo = "مصرف بدون موجودی دفتری", by = capability),
+                LineDraft(StandardAccounts.INVENTORY_VARIANCE, credit = cost, memo = "شمارش ${sourceId.value.take(8)}", by = capability),
+            )))
+            shortages.save(shortage.copy(settled = shortage.quantity, settledCost = shortage.settledCost + cost, status = StockShortage.Status.WRITTEN_OFF))
+            context.audit(AuditDraft("STOCK_SHORTAGE_WRITE_OFF", "STOCK_SHORTAGE", shortage.id.value, "qty=${shortage.open.micros};cost=${cost.rial}"))
+        }
+    }
+
+    /**
+     * The consuming document is reversed: its open shortages are cancelled, and what settlements took from stock
+     * comes back at the cost it left with (inventory ← COGS), in a journal of [owner].
+     */
+    fun cancelShortages(context: CommandContext, owner: PostingCapability, sourceType: String, sourceId: GlobalId, date: BusinessDate) {
+        requireOwner(context, owner)
+        for (shortage in shortages.ofSource(sourceType, sourceId).filter { it.status != StockShortage.Status.CANCELLED }) {
+            if (!shortage.takenFromStock.isZero) {
+                val location = location(shortage.locationId)
+                val journal = if (shortage.takenCost.isZero) null else ledger.post(context, owner, JournalDraft(date, location.scope, SHORTAGE, shortage.id,
+                    "برگشت تسویه کسری مصرف", listOf(
+                        LineDraft(StandardAccounts.INVENTORY, debit = shortage.takenCost, memo = location.name, by = capability),
+                        LineDraft(StandardAccounts.COGS, credit = shortage.takenCost, memo = "برگشت سند", by = capability),
+                    )))
+                stockIn(context, shortage.itemId, location, shortage.takenFromStock, shortage.takenCost, MovementKind.ISSUE, date, journal?.id,
+                    SourceDocument(owner.module, SHORTAGE, shortage.id), null)
+            }
+            val writtenOff = shortage.settledCost - shortage.takenCost
+            if (!writtenOff.isZero) {
+                val location = location(shortage.locationId)
+                ledger.post(context, owner, JournalDraft(date, location.scope, SHORTAGE, shortage.id, "برگشت کسری مصرف", listOf(
+                    LineDraft(StandardAccounts.INVENTORY_VARIANCE, debit = writtenOff, memo = "برگشت سند", by = capability),
+                    LineDraft(StandardAccounts.COGS, credit = writtenOff, memo = "برگشت سند", by = capability),
+                )))
+            }
+            shortages.save(shortage.copy(status = StockShortage.Status.CANCELLED))
+            context.audit(AuditDraft("STOCK_SHORTAGE_CANCEL", "STOCK_SHORTAGE", shortage.id.value, "source=$sourceType:$sourceId"))
+        }
+    }
+
+    /** Rial per stock unit (SCALE micro-units): the location's average, else the last cost the item came in at. */
+    private fun unitCost(itemId: GlobalId, locationId: GlobalId): Long? {
+        val balance = stock.balance(itemId, locationId)
+        if (balance.quantity.micros > 0 && balance.value.rial > 0) return Ratio.mulDiv(balance.value.rial, Quantity.SCALE, balance.quantity.micros)
+        return stock.lastInboundUnitCost(itemId)
+    }
+
+    fun shortagesOf(sourceType: String, sourceId: GlobalId): List<StockShortage> = shortages.ofSource(sourceType, sourceId)
+    fun openShortages(locationIds: Set<GlobalId>): List<StockShortage> = shortages.openAt(locationIds)
 
     /**
      * Reverses every stock movement of one source document at its original value. Taking back a
@@ -211,6 +312,11 @@ class InventoryGateway(
     internal fun postOwn(context: CommandContext, draft: JournalDraft): JournalEntry = ledger.post(context, capability, draft)
     internal fun postAs(context: CommandContext, owner: PostingCapability, draft: JournalDraft): JournalEntry = ledger.post(context, owner, draft)
     internal val ownCapability: PostingCapability get() = capability
+
+    companion object {
+        /** Source type of shortage settlements, write-offs and cancellations. */
+        const val SHORTAGE = "STOCK_SHORTAGE"
+    }
 
     private fun requireOwner(context: CommandContext, owner: PostingCapability) {
         ensure(owner.module == context.module) { DomainError.OwnedByAnotherModule(owner.module.name) }

@@ -107,6 +107,10 @@ fun HomeScreen(nav: Nav) {
                     }
                 }
             }
+            if (branch != null) safe { overview.openShortages(branch) }?.takeIf { it.isNotEmpty() }?.let { list ->
+                add(Todo(R.drawable.ic_alert, "${Fa.number(list.size.toLong())} کسری مصرف باز",
+                    list.take(2).joinToString("، ") { it.item.name } + " — فروش بیش از موجودی دفتری؛ با ثبت خرید یا انبارگردانی بسته می‌شود", Route.Stock, true))
+            }
             safe { overview.lowStock() }?.takeIf { it.isNotEmpty() }?.let { low ->
                 val names = low.take(2).joinToString("، ") { it.item.name } + if (low.size > 2) " و ${Fa.number(low.size - 2L)} مورد دیگر" else ""
                 add(Todo(R.drawable.ic_alert, "${Fa.number(low.size.toLong())} کالا زیر حداقل موجودی", names, Route.Stock, true))

@@ -71,7 +71,8 @@ class SalesTest {
         InMemoryAuditStore().also { uow.register(it) }, InMemoryEventLog(), Clock { 1L }, numbers) { "e1" }
     private val registry = LedgerAccessRegistry()
     private val ledger = Ledger(registry, InMemoryAccountStore(StandardAccounts.chart()), journals, InMemoryPeriodStore())
-    private val inventory = InventoryGateway(ledger, registry.issue(ModuleId.INVENTORY), items, locations, stock)
+    private val shortages = ir.sabou.inventory.memory.InMemoryShortageStore().also { uow.register(it) }
+    private val inventory = InventoryGateway(ledger, registry.issue(ModuleId.INVENTORY), items, locations, stock, shortages)
     private val inventoryOps = InventoryOperations(bus, inventory, items, locations, recipes)
     private val treasuryCap = registry.issue(ModuleId.TREASURY)
     private val treasury = TreasuryGateway(ledger, treasuryCap, tAccounts, movements)
@@ -132,12 +133,17 @@ class SalesTest {
         assertEquals(0, treasury.balance(cash))
     }
 
-    @Test fun ingredientShortageRollsBackTheWholeDay() {
-        val sale = draft(listOf(Settlement.Liquid(cash, rial(2_090_000))), portions = 41)   // needs 10.25 kg
-        assertTrue(code { post(sale) }.startsWith("INSUFFICIENT_STOCK"))
-        assertEquals(0, treasury.balance(cash))
-        assertEquals(0, ledger.balance(StandardAccounts.FOOD_SALES).rial)
-        assertEquals(SaleStatus.DRAFT, salesStore.sale(sale)!!.status)
+    @Test fun aSaleIsNotRefusedForABookShortageWhichWaitsToBeSettled() {
+        val sale = draft(listOf(Settlement.Liquid(cash, rial(2_090_000))), portions = 41)   // needs 10.25 kg, has 10
+        post(sale)
+        assertEquals(SaleStatus.POSTED, salesStore.sale(sale)!!.status)
+        assertEquals(2_090_000, treasury.balance(cash))
+        assertEquals(1_000_000, ledger.balance(StandardAccounts.COGS).rial)                   // what the book had
+        assertEquals(Quantity.of(250_000), inventory.shortagesOf(SalesOperations.CONSUMPTION, sale).single().open)
+        // Reversed before anything came in: the open shortage is cancelled with it.
+        ops.reverse(ReverseDailySale(GlobalId.new(), branch, sale, day, "اشتباه"))
+        assertEquals(ir.sabou.inventory.StockShortage.Status.CANCELLED, inventory.shortagesOf(SalesOperations.CONSUMPTION, sale).single().status)
+        assertEquals(0, ledger.balance(StandardAccounts.COGS).rial)
     }
 
     @Test fun creditLimitIsEnforcedUnlessTheOwnerOverrides() {

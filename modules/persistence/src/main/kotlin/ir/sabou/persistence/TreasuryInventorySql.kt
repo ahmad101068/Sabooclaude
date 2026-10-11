@@ -228,6 +228,9 @@ class SqlStockStore(db: SqlDatabase) : SqlTable(db), StockStore {
     override fun movementsBySource(type: String, id: GlobalId) =
         docs("SELECT doc FROM stock_movements WHERE source_type = ? AND source_id = ? ORDER BY rowid", type, id.value).map(::read)
     override fun reversalOf(id: GlobalId) = doc("SELECT doc FROM stock_movements WHERE reversal_of = ?", id.value)?.let(::read)
+    override fun lastInboundUnitCost(itemId: GlobalId): Long? =
+        db.query("SELECT qty, value FROM stock_movement_index WHERE item_id = ? AND kind = 'RECEIPT' AND qty > 0 AND value > 0 ORDER BY date DESC, rowid DESC LIMIT 1", itemId.value)
+            .firstOrNull()?.let { ir.sabou.kernel.Ratio.mulDiv(it.long("value"), Quantity.SCALE, it.long("qty")) }
     override fun balances(locationId: GlobalId) =
         db.query("SELECT * FROM stock_balances WHERE location_id = ? ORDER BY rowid", locationId.value).map {
             StockBalance(Codec.id(it.str("item_id")), locationId, Codec.qty(it.long("quantity")), Codec.money(it.long("value")))
@@ -310,6 +313,35 @@ class SqlStockCountStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.Sto
                 "note" to count.note, "status" to count.status.name, "countedBy" to count.countedBy.value, "countedByName" to count.countedByName,
                 "countedAt" to count.countedAt, "reviewedBy" to count.reviewedBy?.value, "reviewedByName" to count.reviewedByName,
                 "reviewedAt" to count.reviewedAt, "rejectReason" to count.rejectReason,
+            )),
+        ),
+    )
+}
+
+/** Shortages of consumption (ADR-0022). */
+class SqlShortageStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.ShortageStore {
+    private fun read(d: Doc) = ir.sabou.inventory.StockShortage(
+        Codec.id(d.str("id")), Codec.id(d.str("item")), Codec.id(d.str("location")), Codec.date(d.long("date")),
+        d.str("sourceType"), Codec.id(d.str("sourceId")), Codec.qty(d.long("qty")), Codec.qty(d.long("settled")), Codec.money(d.long("settledCost")),
+        Codec.qty(d.long("taken")), Codec.money(d.long("takenCost")), ir.sabou.inventory.StockShortage.Status.valueOf(d.str("status")),
+    )
+    override fun byId(id: GlobalId) = doc("SELECT doc FROM stock_shortages WHERE id = ?", id.value)?.let(::read)
+    override fun ofSource(sourceType: String, sourceId: GlobalId) =
+        docs("SELECT doc FROM stock_shortages WHERE source_type = ? AND source_id = ? ORDER BY rowid", sourceType, sourceId.value).map(::read)
+    override fun open(itemId: GlobalId, locationId: GlobalId) =
+        docs("SELECT doc FROM stock_shortages WHERE item_id = ? AND location_id = ? AND status = 'OPEN' ORDER BY date, rowid", itemId.value, locationId.value).map(::read)
+    override fun openAt(locationIds: Set<GlobalId>) =
+        docs("SELECT doc FROM stock_shortages WHERE status = 'OPEN' ORDER BY date, rowid").map(::read).filter { it.locationId in locationIds }
+    override fun save(shortage: ir.sabou.inventory.StockShortage) = upsert(
+        "stock_shortages", "id",
+        mapOf(
+            "id" to shortage.id.value, "item_id" to shortage.itemId.value, "location_id" to shortage.locationId.value, "date" to shortage.date.epochDay,
+            "source_type" to shortage.sourceType, "source_id" to shortage.sourceId.value, "status" to shortage.status.name,
+            "doc" to Json.encode(mapOf(
+                "id" to shortage.id.value, "item" to shortage.itemId.value, "location" to shortage.locationId.value, "date" to shortage.date.epochDay,
+                "sourceType" to shortage.sourceType, "sourceId" to shortage.sourceId.value, "qty" to shortage.quantity.micros,
+                "settled" to shortage.settled.micros, "settledCost" to shortage.settledCost.rial, "taken" to shortage.takenFromStock.micros,
+                "takenCost" to shortage.takenCost.rial, "status" to shortage.status.name,
             )),
         ),
     )

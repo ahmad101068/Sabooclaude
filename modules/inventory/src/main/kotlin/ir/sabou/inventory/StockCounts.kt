@@ -174,6 +174,8 @@ class StockCountOperations(
             line.copy(reason = r.reason, reasonNote = r.note.trim())
         }
         val source = SourceDocument(ModuleId.INVENTORY, InventoryOperations.COUNT, count.id)
+        // What was consumed beyond the book before this count is now measured by it: write those shortages off first.
+        count.lines.forEach { gateway.writeOffShortages(ctx, location, it.itemId, count.date, count.id) }
         // The difference measured at count time is applied now, valued at today's average cost, so
         // sales and receipts recorded between counting and approval are not undone.
         val posted = lines.map { line ->

@@ -292,7 +292,8 @@ class SalesOperations(
 
         ctx.number(DocumentSeries.DAILY_SALE, sale.date, sale.id)
         val requirements = sale.lines.flatMap { recipes.requirements(it.menuItemId, sale.date, it.portions) }
-        val consumption = inventory.consume(ctx, capability, sale.kitchenLocationId, requirements, sale.date, CONSUMPTION, sale.id, "مصرف فروش روز")
+        // Sold is sold: a book-stock shortage does not stop the sale; it waits as an open shortage (ADR-0022).
+        val consumption = inventory.consume(ctx, capability, sale.kitchenLocationId, requirements, sale.date, CONSUMPTION, sale.id, "مصرف فروش", allowShortage = true)
 
         val liquid = Money.sum(sale.settlements.filterIsInstance<Settlement.Liquid>().map { it.amount })
         val credit = Money.sum(sale.settlements.filterIsInstance<Settlement.Credit>().map { it.amount })
@@ -330,6 +331,7 @@ class SalesOperations(
         if (sale.settlements.any { it is Settlement.Liquid }) treasury.reverseDocument(ctx, capability, SETTLEMENT, sale.id, cmd.date, cmd.reason)
         ledger.reverse(ctx, capability, emptySet(), requireNotNull(sale.revenueJournalId), cmd.date, cmd.reason)
         if (sale.consumed) inventory.reverseDocument(ctx, capability, CONSUMPTION, sale.id, cmd.date, cmd.reason)
+        inventory.cancelShortages(ctx, capability, CONSUMPTION, sale.id, cmd.date)
         receivables.forEach { sales.saveReceivable(it.copy(voided = true)) }
         sales.saveSale(sale.copy(status = SaleStatus.REVERSED))
         ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.DAILY_SALE to sale.id)
