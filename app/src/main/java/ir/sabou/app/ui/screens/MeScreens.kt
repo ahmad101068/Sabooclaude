@@ -51,6 +51,7 @@ import ir.sabou.app.ui.components.ItemQuantityInput
 import ir.sabou.app.ui.components.QuantityInput
 import ir.sabou.app.ui.components.SCard
 import ir.sabou.app.ui.components.SecondaryButton
+import ir.sabou.app.ui.components.Segmented
 import ir.sabou.app.ui.components.SectionTitle
 import ir.sabou.app.ui.components.TextInput
 import ir.sabou.app.ui.load
@@ -62,6 +63,8 @@ import ir.sabou.core.Fa
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.CreateLocation
 import ir.sabou.inventory.DefineMenuItem
+import ir.sabou.inventory.DeleteMenuItem
+import ir.sabou.inventory.UpdateMenuItem
 import ir.sabou.inventory.PublishRecipe
 import ir.sabou.inventory.RecipeLine
 import ir.sabou.inventory.StockUnit
@@ -311,26 +314,48 @@ object MeScreens {
         val yieldPercent: Int? get() = if (yieldText.isBlank()) 100 else Fa.latinDigits(yieldText).trim().toIntOrNull()?.takeIf { it in 1..100 }
     }
 
+    private class MenuData(
+        val menu: List<ir.sabou.inventory.MenuItem>,
+        val items: Map<GlobalId, ir.sabou.inventory.Item>,
+        val latest: Map<GlobalId, ir.sabou.inventory.RecipeVersion?>,
+        val prices: Map<GlobalId, ir.sabou.core.MenuPriceView>,
+    )
+
     @Composable
     fun Menu(nav: Nav) {
         val session = LocalSession.current
-        val data by load(session) {
+        val branch = session.branch
+        val seesPrices = session.can(Permission.SALES_VIEW) || session.can(Permission.MENU_PRICE_MANAGE)
+        val data by load(session, branch) {
             val menu = overview.menu()
-            Triple(menu.map { it.item }, overview.items().associateBy { it.id }, menu.associate { it.item.id to it.latest })
+            MenuData(menu.map { it.item }, overview.items().associateBy { it.id }, menu.associate { it.item.id to it.latest },
+                if (branch != null && seesPrices) overview.menuPrices(branch, session.today).associateBy { it.item.id } else emptyMap())
         }
         var name by rememberSaveable { mutableStateOf("") }
         var menuItem by rememberSaveable { mutableStateOf<GlobalId?>(null) }
         var from by rememberSaveable { mutableStateOf(session.today) }
+        var renaming by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var newName by rememberSaveable { mutableStateOf("") }
+        var deleting by remember { mutableStateOf<ir.sabou.inventory.MenuItem?>(null) }
         val rows = ir.sabou.app.ui.rememberRows<RecipeRow>({ listOf(it.item, it.qty, it.yieldText) }, { RecipeRow(it[0] as GlobalId?, it[1] as Quantity?, it[2] as String) }) { listOf(RecipeRow(null, null)) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
-            Header("منو و رسپی", onBack = nav.back)
+            Header("منو و رسپی", onBack = nav.back) { if (seesPrices) BranchSwitcher() }
             Page {
-                Loaded(data) { (menu, items, latest) ->
+                Loaded(data) { d ->
+                    val menu = d.menu; val items = d.items; val latest = d.latest
                     if (menu.isEmpty()) EmptyState("هنوز آیتم منویی تعریف نشده است.")
                     menu.forEach { m ->
                         SCard {
-                            Text(m.name, style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(m.name, style = SabouType.bodyStrong, color = if (m.isActive) Sabou.colors.ink else Sabou.colors.muted, modifier = Modifier.weight(1f))
+                                if (!m.isActive) Chip("خارج از منو", ChipKind.NEUTRAL)
+                            }
+                            d.prices[m.id]?.let { p ->
+                                val price = p.price
+                                if (price == null) Text("قیمت منو ندارد — هنگام فروش قیمت واحد وارد می‌شود.", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
+                                else KeyValue(if (p.own) "قیمت (ویژه این شعبه)" else "قیمت", Fa.rial(price) + " ریال", strong = true)
+                            }
                             val v = latest[m.id]
                             if (v == null) Text("رسپی ندارد — فروش آن ثبت نهایی نمی‌شود.", style = SabouType.caption, color = Sabou.colors.danger)
                             else Text("نسخه ${Fa.number(v.version.toLong())} از ${Fa.date(v.effectiveFrom)}: " +
@@ -339,8 +364,36 @@ object MeScreens {
                             val allergens = v?.lines.orEmpty().mapNotNull { items[it.itemId]?.allergens?.takeIf { a -> a.isNotBlank() } }
                                 .flatMap { it.split('،', ',') }.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
                             if (allergens.isNotEmpty()) Text("آلرژن: " + allergens.joinToString("، "), style = SabouType.caption, color = Sabou.colors.danger)
+                            if (session.can(Permission.RECIPE_MANAGE)) {
+                                if (renaming == m.id) {
+                                    TextInput("نام جدید", newName, { newName = it })
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        SecondaryButton("ذخیره نام", { action.run({ inventory.updateMenuItem(UpdateMenuItem(GlobalId.new(), m.id, newName, m.isActive)) }) { renaming = null } },
+                                            enabled = newName.trim().length >= 2 && !action.busy)
+                                        SecondaryButton("انصراف", { renaming = null })
+                                    }
+                                } else Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                    MenuLink("ویرایش نام") { renaming = m.id; newName = m.name }
+                                    if (m.isActive) MenuLink(if (v == null) "تعریف رسپی" else "ویرایش رسپی") {
+                                        // A recipe is never changed in place: its lines prefill a new version from today.
+                                        menuItem = m.id; from = session.today; rows.clear()
+                                        v?.lines?.forEach { rows.add(RecipeRow(it.itemId, it.quantityPerPortion, if (it.yieldPercent < 100) Fa.number(it.yieldPercent.toLong()) else "")) }
+                                        if (rows.isEmpty()) rows.add(RecipeRow(null, null))
+                                    }
+                                    MenuLink(if (m.isActive) "خارج از منو" else "بازگرداندن", Sabou.colors.onAccentSoft) {
+                                        action.run({ inventory.updateMenuItem(UpdateMenuItem(GlobalId.new(), m.id, m.name, !m.isActive)) })
+                                    }
+                                    MenuLink("حذف", Sabou.colors.danger) { deleting = m }
+                                }
+                            }
                         }
                     }
+                    deleting?.let { m ->
+                        Confirm("حذف «${m.name}»؟", "فقط آیتمی که هرگز رسپی، قیمت یا فروش نداشته حذف می‌شود؛ وگرنه آن را از منو خارج کنید.", "حذف",
+                            onConfirm = { deleting = null; action.run({ inventory.deleteMenuItem(DeleteMenuItem(GlobalId.new(), m.id)) }) },
+                            onDismiss = { deleting = null }, danger = true)
+                    }
+                    if (session.can(Permission.MENU_PRICE_MANAGE) && branch != null && menu.isNotEmpty()) MenuPriceForm(branch, menu, d.prices)
                     if (session.can(Permission.RECIPE_MANAGE)) {
                         FormCard("آیتم منوی جدید") {
                             TextInput("نام", name, { name = it })
@@ -349,6 +402,7 @@ object MeScreens {
                                 enabled = name.trim().length >= 2, busy = action.busy)
                         }
                         FormCard("نسخه جدید رسپی") {
+                            menuItem?.let { id -> latest[id]?.let { Banner("ویرایش رسپی «${menu.firstOrNull { it.id == id }?.name}»: با انتشار، نسخهٔ ${Fa.number(it.version + 1L)} از تاریخ «معتبر از» جایگزین می‌شود؛ فروش‌های قبلی با نسخهٔ خودشان می‌مانند.", ChipKind.ACCENT) } }
                             Text("مصرف خالص هر پرس. بازده: درصدی از ماده که پس از پاک‌کردن و پخت می‌ماند؛ مصرف انبار = خالص ÷ بازده. نسخه‌های قبلی تغییر نمی‌کنند.", style = SabouType.caption, color = Sabou.colors.muted)
                             Picker("آیتم منو", menu.map { Choice(it.id, it.name) }, menuItem, { menuItem = it })
                             DateInput("معتبر از", from, { from = it }, session.today)
@@ -369,6 +423,47 @@ object MeScreens {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    @Composable
+    private fun MenuLink(text: String, color: androidx.compose.ui.graphics.Color = Sabou.colors.primary, onClick: () -> Unit) =
+        Text(text, style = SabouType.label, color = color, modifier = Modifier.clickable(onClick = onClick).padding(vertical = 6.dp))
+
+    /**
+     * New price version of a menu item from a date, for every branch or only the current one (ADR-0019). Earlier
+     * versions stay as they were, so past days keep their prices.
+     */
+    @Composable
+    private fun MenuPriceForm(branch: Scope.Branch, menu: List<ir.sabou.inventory.MenuItem>, prices: Map<GlobalId, ir.sabou.core.MenuPriceView>) {
+        val session = LocalSession.current
+        var item by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var price by rememberSaveable { mutableStateOf<Money?>(null) }
+        var from by rememberSaveable { mutableStateOf(session.today) }
+        var onlyBranch by rememberSaveable { mutableStateOf(0) }
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
+        val action = rememberAction()
+        FormCard("قیمت منو") {
+            Text("قیمت هر پرس به ریال. قیمت جدید از تاریخ «معتبر از» اعمال می‌شود و فروش روزهای قبل با قیمت خودشان می‌ماند.", style = SabouType.caption, color = Sabou.colors.muted)
+            Picker("آیتم منو", menu.filter { it.isActive }.map { m -> Choice(m.id, m.name, prices[m.id]?.price?.let { Fa.rial(it) + " ریال" }) }, item, { item = it })
+            val current = item?.let { prices[it] }
+            current?.history?.take(3)?.forEach { v ->
+                Text("${Fa.date(v.effectiveFrom)} · ${if (v.scope == Scope.Organization) "همه شعب" else "این شعبه"} · ${v.unitPrice?.let { Fa.rial(it) + " ریال" } ?: "پایان قیمت ویژه"}",
+                    style = SabouType.caption, color = Sabou.colors.muted)
+            }
+            Segmented(listOf("همه شعب", "فقط این شعبه"), onlyBranch, { onlyBranch = it })
+            MoneyInput("قیمت هر پرس", price, { price = it })
+            DateInput("معتبر از", from, { from = it }, session.today)
+            action.error?.let { Banner(it) }
+            val scope: Scope = if (onlyBranch == 1) branch else Scope.Organization
+            PrimaryButton("ثبت قیمت", {
+                action.run({ salesOps.setMenuPrice(ir.sabou.sales.SetMenuPrice(id.value, scope, item!!, from, price!!)) }) { id.value = GlobalId.new(); price = null }
+            }, enabled = item != null && price != null && !price!!.isZero, busy = action.busy)
+            if (current?.own == true) {
+                SecondaryButton("پایان قیمت ویژه این شعبه (از همین تاریخ قیمت همه شعب)", {
+                    action.run({ salesOps.setMenuPrice(ir.sabou.sales.SetMenuPrice(id.value, branch, item!!, from, null)) }) { id.value = GlobalId.new() }
+                }, enabled = !action.busy)
             }
         }
     }
@@ -422,7 +517,7 @@ object MeScreens {
                 val action = rememberAction()
                 Page {
                     Loaded(data) { list ->
-                        list.forEach { (c, owed) -> SCard { KeyValue(c.name, "بدهی ${Fa.toman(owed)} از سقف ${Fa.tomanShort(c.creditLimit.rial)}") } }
+                        list.forEach { (c, owed) -> SCard { KeyValue(c.name, "بدهی ${Fa.rial(owed)} از سقف ${Fa.rialShort(c.creditLimit.rial)}") } }
                     }
                     FormCard("مشتری جدید") {
                         TextInput("نام", name, { name = it })

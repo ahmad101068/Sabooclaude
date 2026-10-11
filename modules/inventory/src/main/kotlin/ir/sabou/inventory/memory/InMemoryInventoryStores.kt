@@ -74,6 +74,7 @@ class InMemoryRecipeStore : RecipeStore, Transactional {
     override fun menuItem(id: GlobalId) = menu[id]
     override fun menuItems() = menu.values.toList()
     override fun saveMenuItem(item: MenuItem) { menu[item.id] = item }
+    override fun deleteMenuItem(id: GlobalId) { menu.remove(id) }
     override fun versions(menuItemId: GlobalId) = versions.filter { it.menuItemId == menuItemId }
     override fun saveVersion(version: RecipeVersion) { versions += version }
     override fun snapshot(): Any = Triple(LinkedHashMap(menu), versions.toList(), preps.toList())

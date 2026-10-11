@@ -71,7 +71,15 @@ class InMemoryPurchaseStore : PurchaseStore, Transactional {
 }
 
 class InMemoryApprovalRuleStore : ir.sabou.platform.memory.Table<GlobalId, ir.sabou.purchasing.ApprovalRule>(), ir.sabou.purchasing.ApprovalRuleStore {
+    private var policy = ir.sabou.purchasing.SelfApprovalPolicy()
     override fun all() = values()
     override fun byId(id: GlobalId) = get(id)
     override fun save(rule: ir.sabou.purchasing.ApprovalRule) = put(rule.id, rule)
+    override fun selfApproval() = policy
+    override fun saveSelfApproval(policy: ir.sabou.purchasing.SelfApprovalPolicy) { this.policy = policy }
+    override fun snapshot(): Any = super.snapshot() to policy
+    override fun restore(snapshot: Any) {
+        val (rows, saved) = snapshot as Pair<*, *>
+        super.restore(rows!!); policy = saved as ir.sabou.purchasing.SelfApprovalPolicy
+    }
 }

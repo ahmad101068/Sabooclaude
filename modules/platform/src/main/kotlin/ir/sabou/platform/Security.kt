@@ -21,6 +21,8 @@ enum class Permission {
     // Sales
     SALES_VIEW, SALES_RECORD, SALES_POST, SALES_REVERSE, SALES_DAY_CLOSE, SALES_DAY_REOPEN, RECEIVABLE_COLLECT, RECEIVABLE_REVERSE,
     CUSTOMER_MANAGE, CREDIT_OVERRIDE,
+    /** Set menu prices (for every branch or one); sell at a price other than the menu's, with a reason. */
+    MENU_PRICE_MANAGE, SALES_PRICE_OVERRIDE,
     // Purchasing & inventory
     PURCHASE_VIEW, PURCHASE_RECORD, PURCHASE_PAY, PURCHASE_REVERSE, SUPPLIER_MANAGE, PURCHASE_ORDER,
     /** Approve an invoice for payment; take approvals back; define the approval rules. */

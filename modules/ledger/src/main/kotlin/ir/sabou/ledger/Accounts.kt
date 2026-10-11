@@ -123,7 +123,7 @@ object StandardAccounts {
             a(OTHER_EXPENSE, "سایر هزینه‌ها", AccountType.EXPENSE),
             a(INVENTORY_VARIANCE, "مغایرت انبار", AccountType.EXPENSE, i),
             a(EMPLOYER_INSURANCE, "بیمه سهم کارفرما", AccountType.EXPENSE, y),
-            a(CASH_OVER_SHORT, "کسر و اضافه صندوق", AccountType.EXPENSE, t),
+            a(CASH_OVER_SHORT, "کسر و اضافه صندوق", AccountType.EXPENSE, t, s),   // counts: treasury, and sales at day close
             a(COMPS, "پذیرایی، غذای پرسنل و اهدایی", AccountType.EXPENSE, i),
             a(DEPRECIATION, "هزینه استهلاک", AccountType.EXPENSE, f),
         )

@@ -10,8 +10,8 @@ sealed interface Cell {
     val text: String
 
     data class Text(override val text: String) : Cell
-    /** Rial; shown and exported in Toman. */
-    data class Amount(val rial: Long) : Cell { override val text: String get() = Fa.toman(rial) }
+    /** Rial, shown and exported as Rial. */
+    data class Amount(val rial: Long) : Cell { override val text: String get() = Fa.rial(rial) }
     /** Micro-units of stock or portions. */
     data class Qty(val micros: Long) : Cell { override val text: String get() = (if (micros < 0) "−" else "") + Fa.quantity(ir.sabou.kernel.Quantity.of(kotlin.math.abs(micros))) }
     /** Basis points (1/100 of a percent). */
@@ -43,7 +43,7 @@ data class ReportTable(
 
 /**
  * Minimal Office Open XML spreadsheet writer (no library): one right-to-left sheet per table, inline
- * strings, real numbers for amounts (Toman), quantities and percentages so they can be summed in Excel.
+ * strings, real numbers for amounts (Rial), quantities and percentages so they can be summed in Excel.
  */
 object Xlsx {
     fun write(tables: List<ReportTable>): ByteArray {
@@ -119,7 +119,7 @@ object Xlsx {
     private fun cell(row: Int, col: Int, cell: Cell, bold: Boolean): String = when (cell) {
         is Cell.Text -> text(row, col, cell.text, if (bold) 1 else 0)
         // Whole numbers use the integer format: "#,##0.#" would show a trailing decimal point in Excel.
-        is Cell.Amount -> number(row, col, BigDecimal.valueOf(cell.rial).movePointLeft(1).stripTrailingZeros().toPlainString(),
+        is Cell.Amount -> number(row, col, cell.rial.toString(),
             if (cell.rial % 10 == 0L) (if (bold) 10 else 6) else (if (bold) 7 else 3))
         is Cell.Qty -> number(row, col, BigDecimal.valueOf(cell.micros).movePointLeft(6).stripTrailingZeros().toPlainString(),
             if (cell.micros % 1_000_000 == 0L) (if (bold) 10 else 6) else (if (bold) 8 else 4))

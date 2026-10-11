@@ -74,7 +74,7 @@ import ir.sabou.sales.DailySale
 import ir.sabou.sales.PostDailySale
 import ir.sabou.sales.ReopenSalesDay
 import ir.sabou.sales.ReverseDailySale
-import ir.sabou.sales.SaleLine
+import ir.sabou.sales.SaleLineInput
 import ir.sabou.sales.SaleStatus
 import ir.sabou.sales.SalesDay
 import ir.sabou.sales.SaveSaleDraft
@@ -90,6 +90,10 @@ private class SalesData(
     val day: SalesDay?,
     /** The sale's document number once posted. */
     val number: String? = null,
+    /** Menu price in force per menu item on the day (no entry: the item has no menu price). */
+    val prices: Map<GlobalId, Money> = emptyMap(),
+    val cashBoxes: List<ir.sabou.core.AccountBalance> = emptyList(),
+    val countNumber: String? = null,
 )
 
 @Composable
@@ -108,6 +112,9 @@ fun SalesScreen(nav: Nav) {
                     sale = view.sale,
                     day = view.day,
                     number = view.number,
+                    prices = overview.menuPrices(branch, date).mapNotNull { v -> v.price?.let { v.item.id to it } }.toMap(),
+                    cashBoxes = view.cashBoxes,
+                    countNumber = view.countNumber,
                 )
             }
             val d = state.orNull()
@@ -169,7 +176,10 @@ private class ChequeRow(account: GlobalId, amount: Money?, number: String, bank:
 
 private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
     val portions = mutableStateMapOf<GlobalId, Quantity?>().apply { sale?.lines?.forEach { put(it.menuItemId, it.portions) } }
-    val gross = mutableStateMapOf<GlobalId, Money?>().apply { sale?.lines?.forEach { put(it.menuItemId, it.gross) } }
+    /** A typed unit price: only where the menu has none, or for an override (with its reason). */
+    val unitPrice = mutableStateMapOf<GlobalId, Money?>().apply { sale?.lines?.filter { it.listPrice == null || it.overridden }?.forEach { put(it.menuItemId, it.unitPrice) } }
+    val reason = mutableStateMapOf<GlobalId, String>().apply { sale?.lines?.forEach { l -> l.overrideReason?.let { put(l.menuItemId, it) } } }
+    private val prices = data.prices
     var kitchen by mutableStateOf(sale?.kitchenLocationId ?: data.kitchens.firstOrNull()?.id)
     var discount by mutableStateOf(sale?.discount)
     var service by mutableStateOf(sale?.serviceCharge)
@@ -195,9 +205,25 @@ private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
     fun addCheque(box: GlobalId, today: BusinessDate) { cheques.add(ChequeRow(box, null, "", "", "", today, "")) }
     fun chequesComplete() = cheques.all { it.settlement() != null }
 
-    fun lines(): List<SaleLine> = portions.entries.mapNotNull { (id, q) ->
-        val g = gross[id]
-        if (q == null || q.isZero || g == null) null else SaleLine(id, q, g)
+    fun listPrice(id: GlobalId): Money? = prices[id]
+    /** The price the line will be recorded at: the typed one, else the menu's. */
+    fun priceOf(id: GlobalId): Money? = unitPrice[id] ?: prices[id]
+    fun overridden(id: GlobalId): Boolean = unitPrice[id] != null && prices[id] != null && unitPrice[id] != prices[id]
+    /** Line total as the sales domain computes it (unit price × quantity, half-up to the Rial). */
+    fun lineTotal(id: GlobalId): Money? {
+        val q = portions[id]?.takeIf { !it.isZero } ?: return null
+        return priceOf(id)?.let { runCatching { it.times(q) }.getOrNull() }
+    }
+
+    fun lines(): List<SaleLineInput> = portions.entries.mapNotNull { (id, q) ->
+        if (q == null || q.isZero) null
+        else SaleLineInput(id, q, unitPrice[id], reason[id]?.trim()?.takeIf { overridden(id) })
+    }
+
+    /** Every entered line has a price, and every override its reason. */
+    fun linesComplete(): Boolean = lines().isNotEmpty() && lines().all { l ->
+        val price = priceOf(l.menuItemId)
+        price != null && !price.isZero && (!overridden(l.menuItemId) || (reason[l.menuItemId]?.trim()?.length ?: 0) >= 3)
     }
 
     fun settlements(): List<Settlement> =
@@ -205,7 +231,7 @@ private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
             cheques.mapNotNull { it.settlement() } +
             credits.mapNotNull { r -> val c = r.customer; val a = r.amount; if (c != null && a != null && !a.isZero) Settlement.Credit(c, a, r.due) else null }
 
-    fun grossTotal() = lines().sumOf { it.gross.rial }
+    fun grossTotal() = lines().sumOf { lineTotal(it.menuItemId)?.rial ?: 0L }
     fun payable() = grossTotal() - (discount?.rial ?: 0) + (service?.rial ?: 0) + (tax?.rial ?: 0)
     fun settled() = settlements().sumOf { it.amount.rial }
 
@@ -218,15 +244,15 @@ private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
 private fun saleFormSaver(data: SalesData, today: BusinessDate) = androidx.compose.runtime.saveable.listSaver<SaleForm, Any?>(
     save = { f ->
         listOf(
-            HashMap(f.portions), HashMap(f.gross), f.kitchen, f.discount, f.service, f.tax, HashMap(f.liquid),
+            HashMap(f.portions), HashMap<GlobalId, Money?>(), f.kitchen, f.discount, f.service, f.tax, HashMap(f.liquid),
             ArrayList(f.credits.map { arrayListOf(it.customer, it.amount, it.due) }), f.step, f.guests, f.transactions,
             ArrayList(f.cheques.map { it.fields() }),
+            HashMap(f.unitPrice), HashMap(f.reason),
         )
     },
     restore = { l ->
         runCatching { SaleForm(null, data, today).apply {
             portions.putAll(l[0] as Map<GlobalId, Quantity?>)
-            gross.putAll(l[1] as Map<GlobalId, Money?>)
             kitchen = l[2] as GlobalId? ?: kitchen
             discount = l[3] as Money?; service = l[4] as Money?; tax = l[5] as Money?
             liquid.putAll(l[6] as Map<GlobalId, Money?>)
@@ -234,9 +260,41 @@ private fun saleFormSaver(data: SalesData, today: BusinessDate) = androidx.compo
             step = l[8] as Int
             if (l.size > 10) { guests = l[9] as String; transactions = l[10] as String }
             if (l.size > 11) (l[11] as List<List<Any?>>).forEach { cheques.add(ChequeRow.of(it)) }
+            if (l.size > 13) { unitPrice.putAll(l[12] as Map<GlobalId, Money?>); reason.putAll(l[13] as Map<GlobalId, String>) }
         } }.getOrNull()   // a draft that does not fit the form starts it fresh
     },
 )
+
+/**
+ * One menu item: quantity, the price it sells at and the computed line total. The menu price is used as it is;
+ * a person allowed to override types another price with a reason. Without a menu price, the unit price is typed.
+ */
+@Composable
+private fun SaleLineEditor(form: SaleForm, id: GlobalId, canOverride: Boolean) {
+    val list = form.listPrice(id)
+    var editing by rememberSaveable(id) { mutableStateOf(form.overridden(id)) }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = androidx.compose.ui.Alignment.Top) {
+        var text by rememberSaveable { mutableStateOf(form.portions[id]?.let { Fa.quantity(it) } ?: "") }
+        TextInput("تعداد", text, { text = it; form.portions[id] = Fa.parseQuantity(it) }, Modifier.weight(0.4f),
+            keyboard = androidx.compose.ui.text.input.KeyboardType.Decimal,
+            error = if (text.isNotBlank() && Fa.parseQuantity(text) == null) "نامعتبر" else null)
+        if (list == null || editing) MoneyInput("قیمت واحد", form.unitPrice[id], { form.unitPrice[id] = it }, Modifier.weight(0.6f))
+        else Column(Modifier.weight(0.6f).padding(top = 6.dp)) {
+            Text("قیمت منو", style = SabouType.caption, color = Sabou.colors.muted)
+            Text(Fa.rial(list) + " ریال", style = SabouType.bodyStrong, color = Sabou.colors.ink)
+        }
+    }
+    if (list != null && canOverride) {
+        Text(if (editing) "استفاده از قیمت منو" else "تغییر قیمت", style = SabouType.label, color = Sabou.colors.primary,
+            modifier = Modifier.clickable { editing = !editing; if (!editing) { form.unitPrice.remove(id); form.reason.remove(id) } }.padding(vertical = 4.dp))
+    }
+    if (form.overridden(id)) {
+        TextInput("دلیل تغییر قیمت (منو: ${Fa.rial(list!!)} ریال)", form.reason[id] ?: "", { form.reason[id] = it },
+            error = if ((form.reason[id]?.trim()?.length ?: 0) < 3) "دلیل لازم است" else null)
+    }
+    if (list == null) Text("این آیتم در منو قیمت ندارد؛ قیمت واحد را وارد کنید یا از «منو و رسپی» قیمت بگذارید.", style = SabouType.caption, color = Sabou.colors.muted)
+    form.lineTotal(id)?.let { KeyValue("جمع ردیف", Fa.rial(it) + " ریال") }
+}
 
 @Composable
 private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
@@ -256,12 +314,7 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                     key(m.id) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(m.name, style = SabouType.bodyStrong, color = Sabou.colors.ink)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                var text by rememberSaveable { mutableStateOf(form.portions[m.id]?.let { Fa.quantity(it) } ?: "") }
-                                TextInput("تعداد", text, { text = it; form.portions[m.id] = Fa.parseQuantity(it) }, Modifier.weight(0.4f),
-                                    keyboard = androidx.compose.ui.text.input.KeyboardType.Decimal)
-                                MoneyInput("مبلغ", form.gross[m.id], { form.gross[m.id] = it }, Modifier.weight(0.6f))
-                            }
+                            SaleLineEditor(form, m.id, session.can(Permission.SALES_PRICE_OVERRIDE))
                         }
                     }
                 }
@@ -276,7 +329,7 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                         error = if (form.count(form.transactions) == null) "عدد معتبر نیست" else null)
                 }
                 Text("اختیاری؛ برای میانگین خرید هر مهمان و هر فاکتور در گزارش پایان روز.", style = SabouType.caption, color = Sabou.colors.muted)
-                PrimaryButton("ادامه: تسویه", { form.step = 1 }, enabled = form.lines().isNotEmpty() && form.countsValid())
+                PrimaryButton("ادامه: تسویه", { form.step = 1 }, enabled = form.linesComplete() && form.countsValid())
             }
             1 -> FormCard("روش‌های تسویه") {
                 if (data.accounts.isEmpty()) Banner("برای این شعبه صندوق یا کارت‌خوانی تعریف نشده است.", ChipKind.ACCENT)
@@ -330,7 +383,7 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                                 Text("نسیه ${Fa.number(i + 1L)}", style = SabouType.bodyStrong, color = Sabou.colors.onAccentSoft, modifier = Modifier.weight(1f))
                                 Text("حذف", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable { form.credits.remove(row) }.padding(6.dp))
                             }
-                            PickerOrHint("مشتری", data.customers.map { Choice(it.id, it.name, "سقف اعتبار ${Fa.toman(it.creditLimit)} تومان") }, row.customer,
+                            PickerOrHint("مشتری", data.customers.map { Choice(it.id, it.name, "سقف اعتبار ${Fa.rial(it.creditLimit)} ریال") }, row.customer,
                                 { row.customer = it }, "برای این شعبه مشتری اعتباری تعریف نشده است (من ← مشتریان).")
                             MoneyInput("مبلغ نسیه", row.amount, { row.amount = it })
                             DateInput("سررسید", row.due, { row.due = it }, session.today)
@@ -350,19 +403,19 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                 PrimaryButton("ادامه: تأیید", { form.step = 2 }, enabled = form.settlements().isNotEmpty() && form.chequesComplete())
             }
             else -> FormCard("تأیید و ثبت") {
-                KeyValue("فروش ناخالص", Fa.toman(form.grossTotal()))
-                KeyValue("تخفیف", "− " + Fa.toman(form.discount?.rial ?: 0), Sabou.colors.danger)
-                KeyValue("حق سرویس", Fa.toman(form.service?.rial ?: 0))
-                KeyValue("مالیات و عوارض", Fa.toman(form.tax?.rial ?: 0))
+                KeyValue("فروش ناخالص", Fa.rial(form.grossTotal()))
+                KeyValue("تخفیف", "− " + Fa.rial(form.discount?.rial ?: 0), Sabou.colors.danger)
+                KeyValue("حق سرویس", Fa.rial(form.service?.rial ?: 0))
+                KeyValue("مالیات و عوارض", Fa.rial(form.tax?.rial ?: 0))
                 Divider()
-                KeyValue("قابل تسویه (تومان)", Fa.toman(form.payable()), strong = true)
+                KeyValue("قابل تسویه (ریال)", Fa.rial(form.payable()), strong = true)
                 form.settlements().forEach { s ->
                     val label = when (s) {
                         is Settlement.Liquid -> s.cheque?.let { "چک ${Fa.digits(it.number)} · ${it.bank} · سررسید ${Fa.date(it.dueDate)}" }
                             ?: data.accounts.firstOrNull { it.id == s.treasuryAccountId }?.name ?: "حساب"
                         is Settlement.Credit -> "نسیه · " + (data.customers.firstOrNull { it.id == s.customerId }?.name ?: "مشتری")
                     }
-                    KeyValue(label, Fa.toman(s.amount))
+                    KeyValue(label, Fa.rial(s.amount))
                 }
                 action.error?.let { Banner(it) }
                 val kitchen = form.kitchen
@@ -408,10 +461,10 @@ private fun Steps(step: Int, onStep: (Int) -> Unit) {
 private fun Summary(form: SaleForm) {
     val remaining = form.payable() - form.settled()
     SCard {
-        KeyValue("قابل تسویه", Fa.toman(form.payable()) + " تومان", strong = true)
+        KeyValue("قابل تسویه", Fa.rial(form.payable()) + " ریال", strong = true)
         if (form.step >= 1) {
             if (remaining == 0L && form.payable() > 0) Banner("تسویه کامل است · مانده: ۰", ChipKind.PRIMARY, R.drawable.ic_check)
-            else Banner("مانده تسویه: ${Fa.toman(remaining)} تومان", ChipKind.ACCENT)
+            else Banner("مانده تسویه: ${Fa.rial(remaining)} ریال", ChipKind.ACCENT)
         }
     }
 }
@@ -424,6 +477,7 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
     val sale = data.sale!!
     val action = rememberAction()
     var counted by rememberSaveable { mutableStateOf<Money?>(null) }
+    var cashBox by rememberSaveable { mutableStateOf<GlobalId?>(null) }
     var reason by rememberSaveable { mutableStateOf("") }
     var confirmReverse by remember { mutableStateOf(false) }
     val commandId = rememberSaveable(sale.id) { mutableStateOf(GlobalId.new()) }
@@ -432,18 +486,25 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SCard {
             data.number?.let { KeyValue("شماره سند", Fa.digits(it), strong = true) }
-            KeyValue("فروش ناخالص", Fa.toman(sale.gross))
-            KeyValue("تخفیف", "− " + Fa.toman(sale.discount), Sabou.colors.danger)
-            KeyValue("حق سرویس", Fa.toman(sale.serviceCharge))
-            KeyValue("مالیات و عوارض", Fa.toman(sale.tax))
+            KeyValue("فروش ناخالص", Fa.rial(sale.gross))
+            KeyValue("تخفیف", "− " + Fa.rial(sale.discount), Sabou.colors.danger)
+            KeyValue("حق سرویس", Fa.rial(sale.serviceCharge))
+            KeyValue("مالیات و عوارض", Fa.rial(sale.tax))
             Divider()
-            KeyValue("جمع تسویه‌شده (تومان)", Fa.toman(sale.payable), strong = true)
-            if (sale.guests > 0) KeyValue("مهمان · میانگین هر نفر", "${Fa.number(sale.guests.toLong())} · ${Fa.toman(sale.netFood.rial / sale.guests)}")
-            if (sale.transactions > 0) KeyValue("فاکتور · میانگین هر فاکتور", "${Fa.number(sale.transactions.toLong())} · ${Fa.toman(sale.payable.rial / sale.transactions)}")
-            KeyValue("بهای تمام‌شده مواد", Fa.toman(sale.cost))
+            KeyValue("جمع تسویه‌شده (ریال)", Fa.rial(sale.payable), strong = true)
+            if (sale.guests > 0) KeyValue("مهمان · میانگین هر نفر", "${Fa.number(sale.guests.toLong())} · ${Fa.rial(sale.netFood.rial / sale.guests)}")
+            if (sale.transactions > 0) KeyValue("فاکتور · میانگین هر فاکتور", "${Fa.number(sale.transactions.toLong())} · ${Fa.rial(sale.payable.rial / sale.transactions)}")
+            KeyValue("بهای تمام‌شده مواد", Fa.rial(sale.cost))
             if (!sale.netFood.isZero) {
-                val pct = sale.cost.rial * 1000 / sale.netFood.rial
-                KeyValue("درصد بهای غذا (Food cost)", Fa.digits("${pct / 10}.${pct % 10}").replace('.', '٫') + "٪")
+                KeyValue("درصد بهای غذا (Food cost)", Fa.percent(ir.sabou.kernel.Ratio.mulDiv(sale.cost.rial, 10_000, sale.netFood.rial)))
+            }
+        }
+        SCard {
+            Text("اقلام فروش", style = SabouType.section, color = Sabou.colors.ink)
+            val names = data.menu.associate { it.id to it.name }
+            sale.lines.forEach { l ->
+                KeyValue(names[l.menuItemId] ?: "آیتم منو", "${Fa.quantity(l.portions)} × ${Fa.rial(l.unitPrice)} = ${Fa.rial(l.gross)}")
+                if (l.overridden) Text("قیمت منو ${Fa.rial(l.listPrice!!)} ریال · ${l.overrideReason.orEmpty()}", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
             }
         }
         SCard {
@@ -451,19 +512,39 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
             sale.settlements.forEach { s ->
                 when (s) {
                     is Settlement.Liquid -> KeyValue(s.cheque?.let { "چک ${Fa.digits(it.number)} · ${it.bank}" } ?: data.accounts.firstOrNull { it.id == s.treasuryAccountId }?.name ?: "حساب",
-                        "+ " + Fa.toman(s.amount), Sabou.colors.moneyIn)
-                    is Settlement.Credit -> KeyValue("نسیه · " + (data.customers.firstOrNull { it.id == s.customerId }?.name ?: "مشتری"), Fa.toman(s.amount), Sabou.colors.onAccentSoft)
+                        "+ " + Fa.rial(s.amount), Sabou.colors.moneyIn)
+                    is Settlement.Credit -> KeyValue("نسیه · " + (data.customers.firstOrNull { it.id == s.customerId }?.name ?: "مشتری"), Fa.rial(s.amount), Sabou.colors.onAccentSoft)
                 }
+            }
+        }
+        data.day?.takeIf { it.closed }?.let { day ->
+            SCard {
+                Text("شمارش صندوق", style = SabouType.section, color = Sabou.colors.ink)
+                data.countNumber?.let { KeyValue("شماره سند", Fa.digits(it)) }
+                day.countedCash?.let { KeyValue("نقد شمارش‌شده", Fa.rial(it) + " ریال") }
+                if (day.difference != 0L) KeyValue(if (day.difference < 0) "کسری صندوق" else "اضافه صندوق", Fa.rial(kotlin.math.abs(day.difference)) + " ریال",
+                    if (day.difference < 0) Sabou.colors.danger else Sabou.colors.moneyIn)
+                else if (day.countId != null) Text("صندوق با دفاتر برابر بود.", style = SabouType.caption, color = Sabou.colors.muted)
             }
         }
         action.error?.let { Banner(it) }
         if (!closed && session.can(Permission.SALES_DAY_CLOSE)) {
             FormCard("بستن روز") {
-                MoneyInput("نقد شمارش‌شده صندوق", counted, { counted = it }, hint = "پس از بستن، فروش این روز قابل تغییر نیست مگر با بازگشایی مالک.")
-                PrimaryButton("بستن روز فروش", {
-                    val c = counted ?: return@PrimaryButton
-                    action.run({ salesOps.closeDay(CloseSalesDay(commandId.value, branch, date, c)) }) { commandId.value = GlobalId.new() }
-                }, enabled = counted != null, busy = action.busy)
+                if (data.cashBoxes.isEmpty()) Banner("برای این شعبه صندوق نقدی تعریف نشده است.", ChipKind.ACCENT)
+                else {
+                    val box = data.cashBoxes.firstOrNull { it.account.id == cashBox } ?: data.cashBoxes.first()
+                    if (data.cashBoxes.size > 1) Picker("صندوق", data.cashBoxes.map { Choice(it.account.id, it.account.name) }, box.account.id, { cashBox = it })
+                    KeyValue("مانده دفتری صندوق", Fa.rial(box.balance) + " ریال")
+                    MoneyInput("نقد شمارش‌شده صندوق", counted, { counted = it }, hint = "پس از بستن، فروش این روز قابل تغییر نیست مگر با بازگشایی مالک.")
+                    counted?.let { c ->
+                        val diff = c.rial - box.balance
+                        if (diff != 0L) Banner((if (diff < 0) "کسری صندوق: " else "اضافه صندوق: ") + Fa.rial(kotlin.math.abs(diff)) + " ریال — با بستن روز در حساب «کسر و اضافه صندوق» ثبت می‌شود.", ChipKind.ACCENT)
+                    }
+                    PrimaryButton("شمارش و بستن روز", {
+                        val c = counted ?: return@PrimaryButton
+                        action.run({ salesOps.closeDay(CloseSalesDay(commandId.value, branch, date, box.account.id, c)) }) { commandId.value = GlobalId.new() }
+                    }, enabled = counted != null, busy = action.busy)
+                }
             }
         }
         if (closed && session.can(Permission.SALES_DAY_REOPEN)) {

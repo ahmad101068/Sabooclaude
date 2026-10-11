@@ -69,7 +69,7 @@ fun HeldChequePicker(scope: Scope, accountId: GlobalId, selected: GlobalId?, onP
     if (held is Load.Done && list.isEmpty()) Banner("چکی در این صندوق نیست.", ChipKind.ACCENT)
     if (list.isNotEmpty()) Picker(
         "چک",
-        list.map { Choice(it.cheque.id, "${Fa.digits(it.cheque.details.number)} · ${it.cheque.details.counterparty}", "${Fa.toman(it.cheque.amount)} تومان · سررسید ${Fa.date(it.cheque.dueDate)}") },
+        list.map { Choice(it.cheque.id, "${Fa.digits(it.cheque.details.number)} · ${it.cheque.details.counterparty}", "${Fa.rial(it.cheque.amount)} ریال · سررسید ${Fa.date(it.cheque.dueDate)}") },
         selected,
         { id -> list.firstOrNull { it.cheque.id == id }?.let(onPick) },
     )

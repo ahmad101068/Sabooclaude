@@ -124,7 +124,7 @@ object PurchaseScreens {
         if (qty == null || value == null || qty.isZero) null else Ratio.mulDiv(value.rial, Quantity.SCALE, qty.micros)
 
     private fun changeText(previous: Long, now: Long): String {
-        val bp = if (previous == 0L) 0 else (now - previous) * 10_000 / previous
+        val bp = ir.sabou.kernel.Ratio.changeBp(previous, now) ?: return "قیمت اول"
         return (if (bp > 0) "+" else if (bp < 0) "−" else "") + Fa.percent(kotlin.math.abs(bp))
     }
 
@@ -144,7 +144,7 @@ object PurchaseScreens {
             Page {
                 if (session.can(Permission.PURCHASE_RECORD)) PrimaryButton("ثبت فاکتور خرید", { nav.go(Route.NewPurchase) })
                 Loaded(data) { (list, review, changes) ->
-                    SCard { KeyValue("جمع بدهی (تومان)", Fa.toman(Money.sum(list.filter { it.invoice.status == InvoiceStatus.POSTED }.map { it.outstanding })), strong = true) }
+                    SCard { KeyValue("جمع بدهی (ریال)", Fa.rial(Money.sum(list.filter { it.invoice.status == InvoiceStatus.POSTED }.map { it.outstanding })), strong = true) }
                     NavRow(R.drawable.ic_purchase, "سفارش‌های خرید", "پیشنهاد خرید، سفارش و تحویل", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft,
                         onClick = { nav.go(Route.Orders) })
                     if (session.can(Permission.PURCHASE_APPROVE) || session.can(Permission.APPROVAL_RULES)) NavRow(R.drawable.ic_check, "در انتظار تأیید", "تأیید فاکتورها پیش از پرداخت",
@@ -158,7 +158,7 @@ object PurchaseScreens {
                         val sub = (number?.let { Fa.digits(it) + " · " } ?: "") + "فاکتور ${Fa.digits(inv.supplierInvoiceNo)} · ${Fa.date(inv.date)}" +
                             (if (inv.status == InvoiceStatus.REVERSED) " · برگشت‌خورده" else if (outstanding.isZero) " · تسویه" else " · سررسید ${Fa.date(inv.dueDate)}") +
                             (if (inv.openReviewLines.isNotEmpty()) " · در انتظار بررسی" else "")
-                        NavRow(R.drawable.ic_purchase, supplier, sub, Fa.tomanShort(outstanding.rial), tint = Sabou.colors.onAccentSoft,
+                        NavRow(R.drawable.ic_purchase, supplier, sub, Fa.rialShort(outstanding.rial), tint = Sabou.colors.onAccentSoft,
                             tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.PurchaseDetail(inv.id)) })
                     }
                 }
@@ -254,9 +254,10 @@ object PurchaseScreens {
         val id = rememberCommandId()
         val action = rememberAction()
         val hints by load(session, supplier, branch) {
-            supplier?.let { buying.supplierItemNames(it) to buying.lastPrices(it, branch) } ?: (emptyMap<String, GlobalId>() to emptyMap<GlobalId, Long>())
+            (supplier?.let { buying.supplierItemNames(it) } ?: emptyMap()) to buying.lastPaid(branch)
         }
-        val (aliases, lastPrices) = hints.orNull() ?: (emptyMap<String, GlobalId>() to emptyMap<GlobalId, Long>())
+        // The last price paid for each item from any supplier and warehouse: a dearer supplier is noticed too.
+        val (aliases, lastPrices) = hints.orNull() ?: (emptyMap<String, GlobalId>() to emptyMap<GlobalId, ir.sabou.core.LastPaid>())
         val itemsById = form.items.associateBy { it.id }
         val loc = locationId ?: form.locations.firstOrNull()?.id
         val supplierObj = form.suppliers.firstOrNull { it.id == supplier }
@@ -291,11 +292,12 @@ object PurchaseScreens {
                         ItemQuantityInput("مقدار", item, { l.qty = it }, value = l.qty)
                         MoneyInput("مبلغ کل ردیف", l.value, { l.value = it })
                         val price = unitPrice(l.qty, l.value)
-                        val last = l.item?.let { lastPrices[it] }
+                        val previous = l.item?.let { lastPrices[it] }
+                        val last = previous?.price
                         if (price != null && item != null) {
-                            val text = "قیمت هر ${unitName(item.unit)}: ${Fa.toman(price)} تومان" +
-                                (last?.let { " · خرید قبلی ${Fa.toman(it)} (${changeText(it, price)})" } ?: "")
-                            val far = last != null && last > 0 && kotlin.math.abs(price - last) * 100 / last >= 5
+                            val text = "قیمت هر ${unitName(item.unit)}: ${Fa.rial(price)} ریال" +
+                                (previous?.let { p -> " · خرید قبلی ${Fa.rial(p.price)} از ${p.supplier} (${changeText(p.price, price)})" } ?: "")
+                            val far = last != null && (ir.sabou.kernel.Ratio.changeBp(last, price)?.let { kotlin.math.abs(it) >= 500 } ?: false)
                             Text(text, style = SabouType.caption, color = if (far) Sabou.colors.danger else Sabou.colors.muted)
                         }
                         if (item != null && supplier != null && item.approvedSupplierIds.isNotEmpty() && supplier !in item.approvedSupplierIds) {
@@ -350,7 +352,7 @@ object PurchaseScreens {
                 }
             }
             AttachmentPicker("پیوست عکس یا PDF فاکتور") { files.add(it) }
-            KeyValue("جمع فاکتور (تومان)", Fa.toman(total), strong = true)
+            KeyValue("جمع فاکتور (ریال)", Fa.rial(total), strong = true)
             supplierObj?.nextDelivery(session.today, minutesNow())?.let { Text(deliveryText(it, session.today), style = SabouType.caption, color = Sabou.colors.muted) }
         }
         if (session.can(Permission.PURCHASE_PAY)) FormCard {
@@ -432,16 +434,16 @@ object PurchaseScreens {
                         if (inv.lines.isNotEmpty()) Divider()
                         inv.lines.forEach { l ->
                             val item = d.items[l.itemId]
-                            KeyValue("${item?.name ?: ""} × ${Fa.quantity(l.quantity)}" + if (l.supplierItemName.isNotBlank()) " («${l.supplierItemName}»)" else "", Fa.toman(l.value))
+                            KeyValue("${item?.name ?: ""} × ${Fa.quantity(l.quantity)}" + if (l.supplierItemName.isNotBlank()) " («${l.supplierItemName}»)" else "", Fa.rial(l.value))
                         }
                         if (inv.accountLines.isNotEmpty()) Divider()
                         inv.accountLines.forEach { l ->
                             val where = l.branch?.let { " · ${d.branchNames[it.branchId.value] ?: "شعبه دیگر"}" } ?: ""
-                            KeyValue("${d.accountNames[l.account.value] ?: l.account.value}$where" + if (l.memo.isNotBlank()) " · ${l.memo}" else "", Fa.toman(l.amount))
+                            KeyValue("${d.accountNames[l.account.value] ?: l.account.value}$where" + if (l.memo.isNotBlank()) " · ${l.memo}" else "", Fa.rial(l.amount))
                         }
                         Divider()
-                        KeyValue("جمع فاکتور", Fa.toman(inv.total))
-                        KeyValue("مانده (تومان)", Fa.toman(v.outstanding), strong = true)
+                        KeyValue("جمع فاکتور", Fa.rial(inv.total))
+                        KeyValue("مانده (ریال)", Fa.rial(v.outstanding), strong = true)
                         if (inv.note.isNotBlank()) Text(inv.note, style = SabouType.caption, color = Sabou.colors.muted)
                         if (inv.status == InvoiceStatus.REVERSED) Chip("برگشت‌خورده", ChipKind.DANGER)
                     }
@@ -453,7 +455,7 @@ object PurchaseScreens {
                                 val gotQty = Quantity.of(got.sumOf { it.quantity.micros })
                                 val gotPrice = unitPrice(gotQty, Money.of(got.sumOf { it.value.rial }))
                                 val name = d.items[ol.itemId]?.name ?: ""
-                                val text = "سفارش ${Fa.quantity(ol.quantity)} × ${Fa.toman(ol.unitPrice)} · تحویل ${Fa.quantity(gotQty)}" + (gotPrice?.let { " × ${Fa.toman(it)}" } ?: "")
+                                val text = "سفارش ${Fa.quantity(ol.quantity)} × ${Fa.rial(ol.unitPrice)} · تحویل ${Fa.quantity(gotQty)}" + (gotPrice?.let { " × ${Fa.rial(it)}" } ?: "")
                                 val differs = gotQty != ol.quantity || (gotPrice != null && gotPrice != ol.unitPrice.rial)
                                 KeyValue(name, text, valueColor = if (differs) Sabou.colors.danger else Sabou.colors.ink)
                             }
@@ -468,7 +470,7 @@ object PurchaseScreens {
                                 r.itemId != null -> "به «${d.items[r.itemId]?.name ?: ""}» (${Fa.quantity(r.quantity ?: Quantity.ZERO)}) وصل شد"
                                 else -> "به حساب «${r.account?.let { d.accountNames[it.value] ?: it.value } ?: ""}» رفت"
                             }
-                            KeyValue("${l.supplierItemName}" + if (l.quantityNote.isNotBlank()) " · ${l.quantityNote}" else "", Fa.toman(l.amount))
+                            KeyValue("${l.supplierItemName}" + if (l.quantityNote.isNotBlank()) " · ${l.quantityNote}" else "", Fa.rial(l.amount))
                             Text(status, style = SabouType.caption, color = if (r == null) Sabou.colors.danger else Sabou.colors.muted)
                             if (r == null && inv.status == InvoiceStatus.POSTED && session.can(Permission.PURCHASE_RECORD)) {
                                 key(i) { ResolveForm(inv.scope, inv.id, i, d.items.values.filter { it.isActive && !it.prepared }, d.locations, inv.locationId, d.accountNames) }
@@ -482,7 +484,7 @@ object PurchaseScreens {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("${Fa.date(p.date)} · ${d.accounts.firstOrNull { it.id == p.treasuryAccountId }?.name ?: ""}" + if (p.reversed) " · برگشت‌خورده" else "",
                                     style = SabouType.body, color = Sabou.colors.muted, modifier = Modifier.weight(1f))
-                                Text(Fa.toman(p.amount), style = SabouType.bodyStrong, color = Sabou.colors.moneyOut)
+                                Text(Fa.rial(p.amount), style = SabouType.bodyStrong, color = Sabou.colors.moneyOut)
                                 if (!p.reversed && session.can(Permission.PURCHASE_REVERSE)) {
                                     Text("برگشت", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable {
                                         pending = "برگشت این پرداخت؟" to {
@@ -499,7 +501,7 @@ object PurchaseScreens {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(Fa.date(c.date) + (if (c.returnId != null) " · از مرجوعی" else " · اعمال اعتبار") + if (c.released) " · آزادشده" else "",
                                     style = SabouType.body, color = Sabou.colors.muted, modifier = Modifier.weight(1f))
-                                Text(Fa.toman(c.amount), style = SabouType.bodyStrong, color = Sabou.colors.moneyIn)
+                                Text(Fa.rial(c.amount), style = SabouType.bodyStrong, color = Sabou.colors.moneyIn)
                                 if (!c.released && inv.status == InvoiceStatus.POSTED && session.can(Permission.PURCHASE_PAY)) {
                                     Text("آزاد کن", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable {
                                         pending = "آزاد کردن این اعتبار؟" to {
@@ -521,7 +523,7 @@ object PurchaseScreens {
                     action.error?.let { Banner(it) }
                     if (inv.status == InvoiceStatus.POSTED && !v.outstanding.isZero && !v.supplierCredit.isZero && session.can(Permission.PURCHASE_PAY)) {
                         FormCard("استفاده از اعتبار مرجوعی") {
-                            Text("این تأمین‌کننده ${Fa.toman(v.supplierCredit)} تومان اعتبار استفاده‌نشده دارد.", style = SabouType.caption, color = Sabou.colors.muted)
+                            Text("این تأمین‌کننده ${Fa.rial(v.supplierCredit)} ریال اعتبار استفاده‌نشده دارد.", style = SabouType.caption, color = Sabou.colors.muted)
                             MoneyInput("مبلغ", creditAmount, { creditAmount = it })
                             PrimaryButton("اعمال اعتبار", {
                                 action.run({ purchasing.applyCredit(ApplySupplierCredit(creditId.value, inv.scope, inv.id, creditAmount!!, session.today)) }) {
@@ -541,8 +543,8 @@ object PurchaseScreens {
                             val passOn = account?.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES
                             Picker("از حساب", accountChoices(d.accounts, cheques = true), payAccount, { payAccount = it; heldCheque = null })
                             if (passOn) ir.sabou.app.ui.HeldChequePicker(account!!.scope, account.id, heldCheque) { row -> heldCheque = row.cheque.id; payAmount = row.cheque.amount }
-                            else MoneyInput("مبلغ", payAmount, { payAmount = it }, hint = "مانده: ${Fa.toman(v.outstanding)} تومان")
-                            if (passOn) payAmount?.let { KeyValue("مبلغ چک", Fa.toman(it) + " تومان") }
+                            else MoneyInput("مبلغ", payAmount, { payAmount = it }, hint = "مانده: ${Fa.rial(v.outstanding)} ریال")
+                            if (passOn) payAmount?.let { KeyValue("مبلغ چک", Fa.rial(it) + " ریال") }
                             if (ourCheque) ir.sabou.app.ui.ChequeInputs(chequeFields, session.today, v.supplier, issued = true, banks = d.accounts.filter { it.scope == account!!.scope })
                             val cheque = if (ourCheque) ir.sabou.app.ui.chequeDetails(chequeFields, session.today, v.supplier, issued = true) else null
                             PrimaryButton("ثبت پرداخت", {
@@ -638,7 +640,7 @@ object PurchaseScreens {
                     if (list.isEmpty()) EmptyState("همه‌ی ردیف‌ها تعیین تکلیف شده‌اند.")
                     list.forEach { r ->
                         NavRow(R.drawable.ic_alert, r.line.supplierItemName, "${r.supplier} · فاکتور ${Fa.digits(r.invoice.supplierInvoiceNo)} · ${Fa.date(r.invoice.date)}",
-                            Fa.tomanShort(r.line.amount.rial), tint = Sabou.colors.danger, onClick = { nav.go(Route.PurchaseDetail(r.invoice.id)) })
+                            Fa.rialShort(r.line.amount.rial), tint = Sabou.colors.danger, onClick = { nav.go(Route.PurchaseDetail(r.invoice.id)) })
                     }
                 }
             }
@@ -667,9 +669,9 @@ object PurchaseScreens {
                         SCard(onClick = { nav.go(Route.PurchaseDetail(c.invoiceId)) }) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("${c.item.name} · ${c.supplier}", style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
-                                Chip(changeText(c.previousPrice, c.price), if (c.changeBp > 0) ChipKind.DANGER else ChipKind.PRIMARY)
+                                Chip(changeText(c.previousPrice, c.price), if ((c.changeBp ?: 1) > 0) ChipKind.DANGER else ChipKind.PRIMARY)
                             }
-                            Text("هر ${unitName(c.item.unit)}: ${Fa.toman(c.previousPrice)} (${Fa.date(c.previousDate)}) ← ${Fa.toman(c.price)} (${Fa.date(c.date)})",
+                            Text("هر ${unitName(c.item.unit)}: ${Fa.rial(c.previousPrice)} از ${c.previousSupplier} (${Fa.date(c.previousDate)}) ← ${Fa.rial(c.price)} (${Fa.date(c.date)})",
                                 style = SabouType.caption, color = Sabou.colors.muted)
                         }
                     }
@@ -691,9 +693,18 @@ object PurchaseScreens {
                 Text("تأیید برای پرداخت", style = SabouType.section, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
                 Chip("${Fa.number(inv.approvals.size.toLong())} از ${Fa.number(inv.requiredApprovals.toLong())}", if (inv.approved) ChipKind.PRIMARY else ChipKind.ACCENT)
             }
-            inv.approvals.forEach { a -> Text("تأیید: ${a.name}", style = SabouType.caption, color = Sabou.colors.muted) }
+            inv.approvals.forEach { a ->
+                Text("تأیید: ${a.name}" + if (a.self) " (ثبت‌کننده · ${a.reason.orEmpty()})" else "", style = SabouType.caption,
+                    color = if (a.self) Sabou.colors.onAccentSoft else Sabou.colors.muted)
+            }
             if (inv.status == InvoiceStatus.POSTED && !inv.approved && session.can(Permission.PURCHASE_APPROVE)) {
-                PrimaryButton("تأیید می‌کنم", { action.run({ approvals.approve(ir.sabou.purchasing.ApproveInvoice(GlobalId.new(), inv.scope, inv.id)) }) }, busy = action.busy)
+                // Approving an invoice you recorded yourself (owner only): with a reason, within the owner's policy.
+                val self = inv.recordedBy == session.actor.userId
+                var why by rememberSaveable(inv.id) { mutableStateOf("") }
+                if (self) TextInput("دلیل تأیید فاکتوری که خودتان ثبت کرده‌اید", why, { why = it })
+                PrimaryButton("تأیید می‌کنم", {
+                    action.run({ approvals.approve(ir.sabou.purchasing.ApproveInvoice(GlobalId.new(), inv.scope, inv.id, why.takeIf { self })) }) { why = "" }
+                }, enabled = !self || why.trim().length >= 3, busy = action.busy)
             }
             if (inv.status == InvoiceStatus.POSTED && inv.approvals.isNotEmpty() && session.can(Permission.PURCHASE_UNAPPROVE)) {
                 TextInput("دلیل لغو تأیید", reason, { reason = it })
@@ -719,7 +730,7 @@ object PurchaseScreens {
                         val inv = item.invoice.invoice
                         NavRow(R.drawable.ic_purchase, item.invoice.supplier,
                             "${Fa.digits(inv.supplierInvoiceNo)} · سررسید ${Fa.date(inv.dueDate)} · ${Fa.number(inv.approvals.size.toLong())} از ${Fa.number(inv.requiredApprovals.toLong())} تأیید",
-                            Fa.tomanShort(inv.total.rial), tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.PurchaseDetail(inv.id)) })
+                            Fa.rialShort(inv.total.rial), tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.PurchaseDetail(inv.id)) })
                     }
                 }
             }
@@ -730,6 +741,7 @@ object PurchaseScreens {
     fun ApprovalRules(nav: Nav) {
         val session = LocalSession.current
         val data by load(session) { Triple(books.approvalRules(), overview.branches(), overview.suppliers().map { it.supplier }) }
+        val policy by load(session) { books.selfApprovalPolicy() }
         var name by rememberSaveable { mutableStateOf("") }
         var branchId by rememberSaveable { mutableStateOf<BranchId?>(null) }
         var supplierId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
@@ -746,7 +758,7 @@ object PurchaseScreens {
             Header("قانون‌های تأیید فاکتور", onBack = nav.back)
             Page {
                 Text("فاکتوری که با یک قانون جور باشد، پیش از پرداخت به همان تعداد تأییدِ افراد مختلف نیاز دارد (سخت‌ترین قانون ملاک است). " +
-                    "قانون فقط بر فاکتورهای بعد از تعریفش اثر دارد. ثبت‌کننده‌ی فاکتور نمی‌تواند آن را تأیید کند.", style = SabouType.caption, color = Sabou.colors.muted)
+                    "قانون فقط بر فاکتورهای بعد از تعریفش اثر دارد. ثبت‌کننده‌ی فاکتور نمی‌تواند آن را تأیید کند؛ مالک فقط طبق تنظیم پایین و با ذکر دلیل.", style = SabouType.caption, color = Sabou.colors.muted)
                 Loaded(data) { (rules, branches, suppliers) ->
                     if (rules.isEmpty()) EmptyState("قانونی تعریف نشده است؛ همه‌ی فاکتورها بدون تأیید پرداخت می‌شوند.")
                     rules.forEach { r ->
@@ -758,13 +770,14 @@ object PurchaseScreens {
                             Text(listOf(
                                 r.branch?.let { b -> branches.firstOrNull { it.id == b.branchId }?.name } ?: "همه‌ی شعب",
                                 r.supplierId?.let { s -> suppliers.firstOrNull { it.id == s }?.name } ?: "همه‌ی تأمین‌کنندگان",
-                                "نوع: ${categoryName(r.category)}", "از ${Fa.toman(r.minAmount)} تومان", "${Fa.number(r.steps.toLong())} تأیید",
+                                "نوع: ${categoryName(r.category)}", "از ${Fa.rial(r.minAmount)} ریال", "${Fa.number(r.steps.toLong())} تأیید",
                             ).joinToString(" · "), style = SabouType.caption, color = Sabou.colors.muted)
                             if (session.can(Permission.APPROVAL_RULES)) SecondaryButton(if (r.isActive) "غیرفعال کن" else "فعال کن", {
                                 action.run({ approvals.saveRule(ir.sabou.purchasing.SaveApprovalRule(GlobalId.new(), r.id, r.name, r.branch, r.supplierId, r.category, r.minAmount, r.steps, !r.isActive)) })
                             })
                         }
                     }
+                    policy.orNull()?.let { SelfApprovalCard(it, action) }
                     if (session.can(Permission.APPROVAL_RULES)) FormCard("قانون جدید") {
                         TextInput("نام", name, { name = it }, placeholder = "مثلاً خریدهای بالای ۱۰ میلیون")
                         Picker("شعبه", listOf(Choice<BranchId?>(null, "همه‌ی شعب")) + branches.map { Choice<BranchId?>(it.id, it.name) }, branchId, { branchId = it })
@@ -783,6 +796,31 @@ object PurchaseScreens {
                         }, enabled = name.trim().length >= 2, busy = action.busy)
                     }
                 }
+            }
+        }
+    }
+
+    /** The owner's own invoices: may they be approved by the owner, up to which total (always with a reason). */
+    @Composable
+    private fun SelfApprovalCard(policy: ir.sabou.purchasing.SelfApprovalPolicy, action: ir.sabou.app.ui.Action) {
+        val session = LocalSession.current
+        var allowed by rememberSaveable(policy) { mutableStateOf(policy.allowed) }
+        var cap by rememberSaveable(policy) { mutableStateOf(policy.maxAmount) }
+        SCard {
+            Text("تأیید فاکتورِ ثبت‌شده توسط خود مالک", style = SabouType.section, color = Sabou.colors.ink)
+            Text(
+                when {
+                    !policy.allowed -> "مجاز نیست؛ فاکتوری که مالک ثبت کند را باید شخص دیگری تأیید کند."
+                    policy.maxAmount == null -> "مجاز، با ذکر دلیل، بدون سقف مبلغ."
+                    else -> "مجاز، با ذکر دلیل، تا ${Fa.rial(policy.maxAmount!!)} ریال."
+                }, style = SabouType.caption, color = Sabou.colors.muted,
+            )
+            if (session.can(Permission.APPROVAL_RULES)) {
+                Segmented(listOf("مجاز", "مجاز نیست"), if (allowed) 0 else 1, { allowed = it == 0 })
+                if (allowed) MoneyInput("سقف مبلغ فاکتور", cap, { cap = it }, hint = "خالی = بدون سقف")
+                SecondaryButton("ذخیره", {
+                    action.run({ approvals.setSelfApproval(ir.sabou.purchasing.SetSelfApprovalPolicy(GlobalId.new(), allowed, cap.takeIf { allowed })) })
+                }, enabled = !action.busy && (allowed != policy.allowed || cap != policy.maxAmount))
             }
         }
     }
@@ -807,8 +845,8 @@ object PurchaseScreens {
                         val delivery = s.nextDelivery(session.today, minutesNow())?.let { deliveryText(it, session.today) }
                         val sub = listOfNotNull(
                             s.phone.takeIf { it.isNotBlank() }?.let(Fa::digits),
-                            "بدهی ${Fa.toman(b.owed)}",
-                            if (b.credit.isZero) null else "اعتبار ${Fa.toman(b.credit)}",
+                            "بدهی ${Fa.rial(b.owed)}",
+                            if (b.credit.isZero) null else "اعتبار ${Fa.rial(b.credit)}",
                             if (!s.isActive) "غیرفعال" else delivery,
                         ).joinToString(" · ")
                         NavRow(R.drawable.ic_supplier, s.name, sub, tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft,
@@ -856,8 +894,8 @@ object PurchaseScreens {
                     SCard {
                         Text(s.name, style = SabouType.section, color = Sabou.colors.ink)
                         if (s.phone.isNotBlank()) KeyValue("تلفن", Fa.digits(s.phone))
-                        KeyValue("بدهی ما (تومان)", Fa.toman(acc.owed), strong = true)
-                        acc.credits.forEach { (b, credit) -> KeyValue("اعتبار مرجوعی · ${branches[b.branchId] ?: "شعبه"}", Fa.toman(credit), Sabou.colors.moneyIn) }
+                        KeyValue("بدهی ما (ریال)", Fa.rial(acc.owed), strong = true)
+                        acc.credits.forEach { (b, credit) -> KeyValue("اعتبار مرجوعی · ${branches[b.branchId] ?: "شعبه"}", Fa.rial(credit), Sabou.colors.moneyIn) }
                         s.nextDelivery(session.today, minutesNow())?.let { Text(deliveryText(it, session.today), style = SabouType.caption, color = Sabou.colors.muted) }
                     }
                     if (session.can(Permission.SUPPLIER_MANAGE)) NavRow(R.drawable.ic_settings, "ویرایش مشخصات", "تلفن، روزهای تحویل و مهلت سفارش", onClick = { nav.go(Route.SupplierEdit(s.id)) })
@@ -867,7 +905,7 @@ object PurchaseScreens {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("${Fa.date(r.date)} · ${accounts.firstOrNull { it.id == r.treasuryAccountId }?.name ?: ""}" + if (r.reversed) " · برگشت‌خورده" else "",
                                     style = SabouType.body, color = Sabou.colors.muted, modifier = Modifier.weight(1f))
-                                Text(Fa.toman(r.amount), style = SabouType.bodyStrong, color = Sabou.colors.moneyIn)
+                                Text(Fa.rial(r.amount), style = SabouType.bodyStrong, color = Sabou.colors.moneyIn)
                                 if (!r.reversed && session.can(Permission.PURCHASE_REVERSE)) {
                                     Text("برگشت", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable {
                                         pending = "برگشت این استرداد؟" to {
@@ -882,13 +920,13 @@ object PurchaseScreens {
                         Text("وقتی تأمین‌کننده مبلغ کالای مرجوعی را پس می‌دهد (به‌جای کم کردن از فاکتور بعدی).", style = SabouType.caption, color = Sabou.colors.muted)
                         val branch = scopeId ?: acc.credits.first().first.branchId
                         val available = acc.credits.firstOrNull { it.first.branchId == branch }?.second ?: Money.ZERO
-                        if (acc.credits.size > 1) Picker("اعتبار شعبه", acc.credits.map { Choice(it.first.branchId, branches[it.first.branchId] ?: "شعبه", "${Fa.toman(it.second)} تومان") },
+                        if (acc.credits.size > 1) Picker("اعتبار شعبه", acc.credits.map { Choice(it.first.branchId, branches[it.first.branchId] ?: "شعبه", "${Fa.rial(it.second)} ریال") },
                             branch, { scopeId = it })
                         val usable = accounts.filter { it.kind != ir.sabou.treasury.TreasuryKind.ISSUED_CHEQUES }
                         val account = usable.firstOrNull { it.id == accountId }
                         val byCheque = account?.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES
                         Picker("واریز به", accountChoices(usable, cheques = true), accountId, { accountId = it })
-                        MoneyInput(if (byCheque) "مبلغ چک" else "مبلغ", amount, { amount = it }, hint = "حداکثر ${Fa.toman(available)} تومان")
+                        MoneyInput(if (byCheque) "مبلغ چک" else "مبلغ", amount, { amount = it }, hint = "حداکثر ${Fa.rial(available)} ریال")
                         DateInput("تاریخ", date, { date = it }, session.today)
                         if (byCheque) ir.sabou.app.ui.ChequeInputs(chequeFields, session.today, s.name, issued = false, banks = emptyList())
                         val cheque = if (byCheque) ir.sabou.app.ui.chequeDetails(chequeFields, session.today, s.name, issued = false) else null
@@ -987,7 +1025,7 @@ object PurchaseScreens {
                             OrderStatus.RECEIVED -> "تحویل شد"
                             OrderStatus.CANCELLED -> "لغو شد"
                         }
-                        NavRow(R.drawable.ic_purchase, "${r.supplier} · ${r.number?.let(Fa::digits) ?: Fa.number(o.number)}", "$status · ${r.location}", Fa.tomanShort(o.total.rial),
+                        NavRow(R.drawable.ic_purchase, "${r.supplier} · ${r.number?.let(Fa::digits) ?: Fa.number(o.number)}", "$status · ${r.location}", Fa.rialShort(o.total.rial),
                             tint = if (o.status == OrderStatus.OPEN && o.expectedDate < session.today) Sabou.colors.danger else Sabou.colors.onAccentSoft,
                             tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.OrderDetail(o.id)) })
                     }
@@ -1056,7 +1094,7 @@ object PurchaseScreens {
                                         val item = r.item?.let { itemsById[it] }
                                         ItemQuantityInput("مقدار", item, { r.qty = it }, value = r.qty)
                                         MoneyInput("قیمت هر ${item?.let { unitName(it.unit) } ?: "واحد"}", r.price, { r.price = it },
-                                            hint = r.item?.let { last[it] }?.let { "آخرین خرید: ${Fa.toman(it)}" })
+                                            hint = r.item?.let { last[it] }?.let { "آخرین خرید: ${Fa.rial(it)}" })
                                         if (item != null && supplier != null && item.approvedSupplierIds.isNotEmpty() && supplier !in item.approvedSupplierIds) {
                                             Banner("این تأمین‌کننده برای «${item.name}» در فهرست مجاز نیست؛ سفارش ثبت نمی‌شود.", ChipKind.DANGER)
                                         }
@@ -1066,7 +1104,7 @@ object PurchaseScreens {
                             }
                             SecondaryButton("افزودن ردیف", { rows.add(OrderRowDraft(null, null, null)) })
                             val total = rows.sumOf { r -> if (r.qty != null && r.price != null) Ratio.mulDiv(r.price!!.rial, r.qty!!.micros, Quantity.SCALE) else 0L }
-                            KeyValue("جمع تقریبی (تومان)", Fa.toman(total), strong = true)
+                            KeyValue("جمع تقریبی (ریال)", Fa.rial(total), strong = true)
                         }
                         FormCard { TextInput("توضیح برای تأمین‌کننده", note, { note = it }, singleLine = false) }
                         action.error?.let { Banner(it) }
@@ -1101,10 +1139,10 @@ object PurchaseScreens {
                         Divider()
                         o.lines.forEach { l ->
                             val item = items[l.itemId]
-                            KeyValue("${item?.name ?: ""} × ${Fa.quantity(l.quantity)} ${item?.let { unitName(it.unit) } ?: ""}", Fa.toman(l.value))
+                            KeyValue("${item?.name ?: ""} × ${Fa.quantity(l.quantity)} ${item?.let { unitName(it.unit) } ?: ""}", Fa.rial(l.value))
                         }
                         Divider()
-                        KeyValue("جمع (تومان)", Fa.toman(o.total), strong = true)
+                        KeyValue("جمع (ریال)", Fa.rial(o.total), strong = true)
                         if (o.note.isNotBlank()) Text(o.note, style = SabouType.caption, color = Sabou.colors.muted)
                         when (o.status) {
                             OrderStatus.OPEN -> Chip("باز", ChipKind.ACCENT)
@@ -1170,7 +1208,12 @@ object PurchaseScreens {
                         if (loc == null) EmptyState("انباری برای این شعبه تعریف نشده است.")
                         else {
                             val result by load(session, loc, lines) { buying.suggestions(loc, lines, session.today, minutesNow()) }
-                            Loaded(result) { groups ->
+                            Loaded(result) { suggested ->
+                                val groups = suggested.groups
+                                // What could not be broken down is said, never silently left out of the order.
+                                suggested.problems.forEach { pr ->
+                                    Banner("«${pr.name}»: ${pr.detail}", if (pr.kind == ir.sabou.core.RecipeProblem.Kind.CYCLE) ChipKind.DANGER else ChipKind.ACCENT)
+                                }
                                 if (groups.isEmpty()) EmptyState("فعلاً خریدی لازم نیست. برای کالاها «سطح مطلوب» تعریف کنید یا غذاهای برنامه را وارد کنید.")
                                 groups.forEach { g ->
                                     SCard {
@@ -1179,12 +1222,12 @@ object PurchaseScreens {
                                             color = if (it.orderBy == session.today) Sabou.colors.danger else Sabou.colors.muted) }
                                         g.lines.forEach { s ->
                                             val unit = unitName(s.item.unit)
-                                            KeyValue("${s.item.name}: ${Fa.quantity(s.suggested)} $unit", s.value?.let { Fa.toman(it) } ?: "—")
+                                            KeyValue("${s.item.name}: ${Fa.quantity(s.suggested)} $unit", s.value?.let { Fa.rial(it) } ?: "—")
                                             Text("موجودی ${Fa.quantity(s.onHand)} · در راه ${Fa.quantity(s.onOrder)} · مطلوب ${Fa.quantity(s.par)}" +
                                                 if (!s.planned.isZero) " · برنامه ${Fa.quantity(s.planned)}" else "", style = SabouType.caption, color = Sabou.colors.muted)
                                         }
                                         Divider()
-                                        KeyValue("جمع تقریبی (تومان)", Fa.toman(g.total), strong = true)
+                                        KeyValue("جمع تقریبی (ریال)", Fa.rial(g.total), strong = true)
                                         if (g.supplier != null && session.can(Permission.PURCHASE_ORDER)) {
                                             SecondaryButton("ساخت سفارش", {
                                                 nav.go(Route.NewOrder(g.supplier!!.id, loc, g.lines.map { OrderDraftLine(it.item.id, it.suggested.micros, it.unitPrice ?: 0L) }))
@@ -1193,7 +1236,7 @@ object PurchaseScreens {
                                     }
                                 }
                                 if (groups.isNotEmpty()) ExportButtons("پیشنهاد-خرید") {
-                                    listOf(ReportTables.suggestions(buying.suggestions(loc, lines, session.today, minutesNow()), locations.firstOrNull { it.id == loc }?.name ?: "", session.today))
+                                    listOf(ReportTables.suggestions(buying.suggestions(loc, lines, session.today, minutesNow()).groups, locations.firstOrNull { it.id == loc }?.name ?: "", session.today))
                                 }
                             }
                         }

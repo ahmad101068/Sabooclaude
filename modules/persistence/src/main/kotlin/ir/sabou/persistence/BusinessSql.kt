@@ -97,7 +97,7 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
         },
         note = d.strOr("note", ""), orderId = Codec.idOrNull(d.strOrNull("order")), journalIds = d.strsOr("journals").map(Codec::id),
         recordedBy = Codec.idOrNull(d.strOrNull("recordedBy")), requiredApprovals = d.intOr("requiredApprovals", 0),
-        approvals = d.docsOr("approvals").map { Approval(Codec.id(it.str("user")), it.str("name"), it.long("at")) },
+        approvals = d.docsOr("approvals").map { Approval(Codec.id(it.str("user")), it.str("name"), it.long("at"), it.boolOr("self", false), it.strOrNull("reason")) },
     )
 
     override fun invoice(id: GlobalId) = doc("SELECT doc FROM purchase_invoices WHERE id = ?", id.value)?.let(::invoiceOf)
@@ -126,7 +126,7 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
                     },
                     "note" to invoice.note, "order" to invoice.orderId?.value, "journals" to invoice.journalIds.map { it.value },
                     "recordedBy" to invoice.recordedBy?.value, "requiredApprovals" to invoice.requiredApprovals.toLong(),
-                    "approvals" to invoice.approvals.map { mapOf("user" to it.userId.value, "name" to it.name, "at" to it.atEpochMillis) },
+                    "approvals" to invoice.approvals.map { mapOf("user" to it.userId.value, "name" to it.name, "at" to it.atEpochMillis, "self" to it.self, "reason" to it.reason) },
                 ),
             ),
         ),
@@ -226,6 +226,14 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
 }
 
 class SqlApprovalRuleStore(db: SqlDatabase) : SqlTable(db), ApprovalRuleStore {
+    private val meta = DatabaseMeta(db)
+    override fun selfApproval(): ir.sabou.purchasing.SelfApprovalPolicy = meta.get(SELF_APPROVAL)?.let { Doc.parse(it) }
+        ?.let { ir.sabou.purchasing.SelfApprovalPolicy(it.bool("allowed"), it.longOrNull("max")?.let(Codec::money)) }
+        ?: ir.sabou.purchasing.SelfApprovalPolicy()
+    override fun saveSelfApproval(policy: ir.sabou.purchasing.SelfApprovalPolicy) =
+        meta.put(SELF_APPROVAL, Json.encode(mapOf("allowed" to policy.allowed, "max" to policy.maxAmount?.rial)))
+    private companion object { const val SELF_APPROVAL = "purchasing.self_approval" }
+
     private fun read(d: Doc) = ApprovalRule(
         Codec.id(d.str("id")), d.str("name"), d.strOrNull("branch")?.let(Codec::branchOf), Codec.idOrNull(d.strOrNull("supplier")),
         d.strOrNull("category")?.let(InvoiceCategory::valueOf), Codec.money(d.long("min")), d.int("steps"), d.bool("active"),
@@ -286,7 +294,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
     private fun saleOf(d: Doc) = DailySale(
         id = Codec.id(d.str("id")), scope = Codec.branchOf(d.str("scope")), date = Codec.date(d.long("date")),
         kitchenLocationId = Codec.id(d.str("kitchen")),
-        lines = d.docs("lines").map { SaleLine(Codec.id(it.str("menuItem")), Codec.qty(it.long("portions")), Codec.money(it.long("gross"))) },
+        lines = d.docs("lines").map(::saleLineOf),
         discount = Codec.money(d.long("discount")), serviceCharge = Codec.money(d.long("service")), tax = Codec.money(d.long("tax")),
         settlements = d.docs("settlements").map {
             when (it.str("kind")) {
@@ -299,6 +307,22 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
         cost = Codec.money(d.long("cost")), consumed = d.bool("consumed"),
         guests = d.intOr("guests", 0), transactions = d.intOr("transactions", 0),
     )
+
+    /**
+     * A line as recorded. Lines written before menu prices (schema 7 and older) carry only their total; their unit
+     * price is the total per portion, shown for information, while the recorded total stays what was posted.
+     */
+    private fun saleLineOf(d: Doc): SaleLine {
+        val portions = Codec.qty(d.long("portions"))
+        val gross = Codec.money(d.long("gross"))
+        val unit = d.longOrNull("unitPrice")?.let(Codec::money)
+            ?: Codec.money(if (portions.isZero) 0 else ir.sabou.kernel.Ratio.mulDiv(gross.rial, ir.sabou.kernel.Quantity.SCALE, portions.micros, ir.sabou.kernel.Rounding.HALF_UP))
+        return SaleLine(Codec.id(d.str("menuItem")), portions, unit, gross, d.longOrNull("listPrice")?.let(Codec::money), d.strOrNull("reason"))
+    }
+
+    /** Whether any recorded sale (draft, posted or reversed) has a line of [menuItemId]. */
+    fun usesMenuItem(menuItemId: GlobalId): Boolean =
+        docs("SELECT doc FROM daily_sales WHERE doc LIKE ?", "%${menuItemId.value}%").any { d -> d.docs("lines").any { it.str("menuItem") == menuItemId.value } }
 
     override fun sale(id: GlobalId) = doc("SELECT doc FROM daily_sales WHERE id = ?", id.value)?.let(::saleOf)
     override fun activeSale(scope: Scope.Branch, date: BusinessDate) =
@@ -313,7 +337,10 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
             "doc" to Json.encode(
                 mapOf(
                     "id" to sale.id.value, "scope" to Codec.scope(sale.scope), "date" to sale.date.epochDay, "kitchen" to sale.kitchenLocationId.value,
-                    "lines" to sale.lines.map { mapOf("menuItem" to it.menuItemId.value, "portions" to it.portions.micros, "gross" to it.gross.rial) },
+                    "lines" to sale.lines.map {
+                        mapOf("menuItem" to it.menuItemId.value, "portions" to it.portions.micros, "unitPrice" to it.unitPrice.rial, "gross" to it.gross.rial,
+                            "listPrice" to it.listPrice?.rial, "reason" to it.overrideReason)
+                    },
                     "discount" to sale.discount.rial, "service" to sale.serviceCharge.rial, "tax" to sale.tax.rial,
                     "settlements" to sale.settlements.map {
                         when (it) {
@@ -371,13 +398,15 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
 
     override fun day(scope: Scope.Branch, date: BusinessDate) =
         doc("SELECT doc FROM sales_days WHERE scope = ? AND date = ?", Codec.scope(scope), date.epochDay)?.let {
-            SalesDay(Codec.branchOf(it.str("scope")), Codec.date(it.long("date")), it.bool("closed"), it.longOrNull("countedCash")?.let(Codec::money))
+            SalesDay(Codec.branchOf(it.str("scope")), Codec.date(it.long("date")), it.bool("closed"), it.longOrNull("countedCash")?.let(Codec::money),
+                Codec.idOrNull(it.strOrNull("cashAccount")), it.longOr("difference", 0), Codec.idOrNull(it.strOrNull("count")))
         }
     override fun saveDay(day: SalesDay) = upsert(
         "sales_days", listOf("scope", "date"),
         mapOf(
             "scope" to Codec.scope(day.scope), "date" to day.date.epochDay,
-            "doc" to Json.encode(mapOf("scope" to Codec.scope(day.scope), "date" to day.date.epochDay, "closed" to day.closed, "countedCash" to day.countedCash?.rial)),
+            "doc" to Json.encode(mapOf("scope" to Codec.scope(day.scope), "date" to day.date.epochDay, "closed" to day.closed, "countedCash" to day.countedCash?.rial,
+                "cashAccount" to day.cashAccountId?.value, "difference" to day.difference, "count" to day.countId?.value)),
         ),
     )
 }
@@ -562,4 +591,27 @@ class SqlAssetStore(db: SqlDatabase) : SqlTable(db), ir.sabou.assets.AssetStore 
             "journal" to run.journalId?.value, "reversed" to run.reversed,
         ))),
     )
+}
+
+/** Menu price versions (ADR-0019); append-only, the table refuses updates and deletes. */
+class SqlMenuPriceStore(db: SqlDatabase) : SqlTable(db), ir.sabou.sales.MenuPriceStore {
+    private fun priceOf(d: Doc) = ir.sabou.sales.MenuPrice(
+        Codec.id(d.str("id")), Codec.id(d.str("menuItem")), Codec.scopeOf(d.str("scope")), Codec.date(d.long("from")),
+        d.longOrNull("price")?.let(Codec::money), d.long("sequence"),
+    )
+    override fun versions(menuItemId: GlobalId) = docs("SELECT doc FROM menu_prices WHERE menu_item_id = ? ORDER BY sequence", menuItemId.value).map(::priceOf)
+    override fun all() = docs("SELECT doc FROM menu_prices ORDER BY sequence").map(::priceOf)
+    override fun nextSequence(): Long = db.query("SELECT COALESCE(MAX(sequence), 0) + 1 AS n FROM menu_prices").single().long("n")
+    override fun save(price: ir.sabou.sales.MenuPrice) {
+        db.execute(
+            "INSERT INTO menu_prices (id, menu_item_id, scope, effective_from, sequence, doc) VALUES (?, ?, ?, ?, ?, ?)",
+            price.id.value, price.menuItemId.value, Codec.scope(price.scope), price.effectiveFrom.epochDay, price.sequence,
+            Json.encode(
+                mapOf(
+                    "id" to price.id.value, "menuItem" to price.menuItemId.value, "scope" to Codec.scope(price.scope),
+                    "from" to price.effectiveFrom.epochDay, "price" to price.unitPrice?.rial, "sequence" to price.sequence,
+                ),
+            ),
+        )
+    }
 }

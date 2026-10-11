@@ -35,7 +35,7 @@ import ir.sabou.sales.CollectReceivable
 import ir.sabou.sales.CustomerType
 import ir.sabou.sales.PostDailySale
 import ir.sabou.sales.RegisterCustomer
-import ir.sabou.sales.SaleLine
+import ir.sabou.sales.SaleLineInput
 import ir.sabou.sales.SaveSaleDraft
 import ir.sabou.sales.Settlement
 import ir.sabou.treasury.OpenTreasuryAccount
@@ -119,7 +119,7 @@ class SabouCoreTest {
         assertEquals(StartupVerdict.Healthy, core.verifyStartup())
         val w = setUp(core)
         val draft = core.salesOps.saveDraft(
-            SaveSaleDraft(id(), w.branch, day, w.kitchen, listOf(SaleLine(w.pizza, Quantity.units(20), rial(12_000_000))),
+            SaveSaleDraft(id(), w.branch, day, w.kitchen, listOf(SaleLineInput(w.pizza, Quantity.units(20), rial(600_000))),
                 rial(1_000_000), rial(0), rial(990_000),
                 listOf(Settlement.Liquid(w.cash, rial(8_990_000)), Settlement.Credit(w.customer, rial(3_000_000), day.plusDays(10)))),
         ).resultId
@@ -148,7 +148,7 @@ class SabouCoreTest {
         val journalsBefore = core.journals.all().size
         val auditBefore = core.db.query("SELECT COUNT(*) AS n FROM audit_events").single().long("n")
         val tooBig = core.salesOps.saveDraft(
-            SaveSaleDraft(id(), w.branch, day, w.kitchen, listOf(SaleLine(w.pizza, Quantity.units(60), rial(6_000_000))),
+            SaveSaleDraft(id(), w.branch, day, w.kitchen, listOf(SaleLineInput(w.pizza, Quantity.units(60), rial(100_000))),
                 rial(0), rial(0), rial(0), listOf(Settlement.Liquid(w.cash, rial(6_000_000)))),
         ).resultId
         val auditWithDraft = auditBefore + 1

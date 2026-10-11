@@ -214,19 +214,8 @@ class TreasuryOperations(
 
     fun reconcile(c: ReconcileAccount): CommandOutcome = bus.execute(ModuleId.TREASURY, c) { cmd, ctx ->
         requireAccountScope(cmd.accountId, cmd.scope)
-        ensure(gateway.account(cmd.accountId).kind.isOrdinary) { DomainError.InvalidInput("account", "صندوق و دسته‌چک شمارش نمی‌شوند؛ وضعیت هر چک را ثبت کنید.") }
-        val book = gateway.balance(cmd.accountId)
-        val difference = cmd.counted.rial - book
         val docId = GlobalId.new()
-        ctx.number(DocumentSeries.CASH_COUNT, cmd.date, docId)
-        ctx.audit(AuditDraft("TREASURY_COUNT", "TREASURY_ACCOUNT", cmd.accountId.value, "book=$book;counted=${cmd.counted.rial}"))
-        if (difference != 0L) {
-            val amount = Money.of(kotlin.math.abs(difference))
-            val direction = if (difference > 0) Direction.RECEIPT else Direction.PAYMENT
-            val line = if (difference > 0) LineDraft(StandardAccounts.CASH_OVER_SHORT, credit = amount, by = capability)
-            else LineDraft(StandardAccounts.CASH_OVER_SHORT, debit = amount, by = capability)
-            gateway.settle(ctx, capability, cmd.accountId, direction, amount, cmd.date, RECONCILIATION, docId, cmd.description, listOf(line))
-        }
+        gateway.count(ctx, capability, cmd.accountId, cmd.counted, cmd.date, RECONCILIATION, docId, cmd.description)
         docId
     }
 

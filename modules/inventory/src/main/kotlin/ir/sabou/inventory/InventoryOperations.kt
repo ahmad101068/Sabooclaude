@@ -157,6 +157,24 @@ data class DefineMenuItem(override val commandId: GlobalId, val name: String) : 
     override fun fingerprint() = name
 }
 
+/** Renames a menu item or takes it off / back on the menu (inactive items are not sold or priced). */
+@NoDocument
+data class UpdateMenuItem(override val commandId: GlobalId, val menuItemId: GlobalId, val name: String, val isActive: Boolean) : Command {
+    override val requiredPermission = Permission.RECIPE_MANAGE
+    override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
+    override fun fingerprint() = "$menuItemId|$name|$isActive"
+}
+
+/** Deletes a menu item that was never used (no recipe, price or sale); a used one can only be deactivated. */
+@NoDocument
+data class DeleteMenuItem(override val commandId: GlobalId, val menuItemId: GlobalId) : Command {
+    override val requiredPermission = Permission.RECIPE_MANAGE
+    override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
+    override fun fingerprint() = menuItemId.toString()
+}
+
 @NoDocument
 data class PublishRecipe(
     override val commandId: GlobalId,
@@ -176,6 +194,8 @@ class InventoryOperations(
     private val items: ItemStore,
     private val locations: LocationStore,
     private val recipes: RecipeStore,
+    /** Whether another module refers to a menu item (prices, sales); such an item is never deleted. */
+    private val menuItemInUse: (GlobalId) -> Boolean = { false },
 ) {
     private val cap get() = gateway.ownCapability
 
@@ -224,6 +244,11 @@ class InventoryOperations(
         ensure(!cmd.outputQuantity.isZero) { DomainError.InvalidInput("output", "مقدار تولید باید بیشتر از صفر باشد.") }
         validateLines(cmd.lines)
         ensure(cmd.lines.none { it.itemId == item.id }) { DomainError.InvalidInput("lines", "کالای آماده نمی‌تواند ماده‌ی اولیه‌ی خودش باشد.") }
+        // No recipe may (indirectly) use the item it makes: production and costing would never end.
+        PrepGraph(recipes) { items.byId(it)?.prepared == true }.cycleWith(item.id, cmd.lines, cmd.effectiveFrom)?.let { cycle ->
+            val names = cycle.joinToString(" ← ") { items.byId(it)?.name ?: "؟" }
+            throw DomainException(DomainError.InvalidInput("lines", "این رسپی چرخه می‌سازد: $names"))
+        }
         val existing = recipes.prepVersions(item.id)
         ensure(existing.none { it.effectiveFrom >= cmd.effectiveFrom }) { DomainError.InvalidState("RECIPE", "NOT_AFTER_LATEST_VERSION") }
         val version = PrepRecipe(GlobalId.new(), item.id, (existing.maxOfOrNull { it.version } ?: 0) + 1, cmd.effectiveFrom, cmd.outputQuantity, cmd.lines)
@@ -336,10 +361,29 @@ class InventoryOperations(
     fun defineMenuItem(c: DefineMenuItem): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
         val name = cmd.name.trim()
         ensure(name.length in 2..80) { DomainError.InvalidInput("name", "نام آیتم منو الزامی است.") }
+        ensure(recipes.menuItems().none { it.name == name }) { DomainError.InvalidInput("name", "آیتمی با این نام در منو هست.") }
         val menuItem = MenuItem(GlobalId.new(), name)
         recipes.saveMenuItem(menuItem)
         ctx.audit(AuditDraft("MENU_ITEM_CREATE", "MENU_ITEM", menuItem.id.value, name))
         menuItem.id
+    }
+
+    fun updateMenuItem(c: UpdateMenuItem): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val item = recipes.menuItem(cmd.menuItemId) ?: throw DomainException(DomainError.NotFound("MENU_ITEM"))
+        val name = cmd.name.trim()
+        ensure(name.length in 2..80) { DomainError.InvalidInput("name", "نام آیتم منو الزامی است.") }
+        ensure(recipes.menuItems().none { it.id != item.id && it.name == name }) { DomainError.InvalidInput("name", "آیتمی با این نام در منو هست.") }
+        recipes.saveMenuItem(item.copy(name = name, isActive = cmd.isActive))
+        ctx.audit(AuditDraft("MENU_ITEM_UPDATE", "MENU_ITEM", item.id.value, "name=$name;active=${cmd.isActive}"))
+        item.id
+    }
+
+    fun deleteMenuItem(c: DeleteMenuItem): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val item = recipes.menuItem(cmd.menuItemId) ?: throw DomainException(DomainError.NotFound("MENU_ITEM"))
+        ensure(recipes.versions(item.id).isEmpty() && !menuItemInUse(item.id)) { DomainError.InvalidState("MENU_ITEM", "IN_USE") }
+        recipes.deleteMenuItem(item.id)
+        ctx.audit(AuditDraft("MENU_ITEM_DELETE", "MENU_ITEM", item.id.value, item.name))
+        item.id
     }
 
     /** Recipes are versioned: a new version applies from its date and never alters past sales. */
@@ -372,6 +416,8 @@ class InventoryOperations(
 
 /** Turns menu sales into ingredient requirements using the recipe version in force on the sale date. */
 class RecipeBook(private val recipes: RecipeStore) {
+    fun menuItem(id: GlobalId): MenuItem? = recipes.menuItem(id)
+
     fun versionOn(menuItemId: GlobalId, date: BusinessDate): RecipeVersion =
         recipes.versions(menuItemId).filter { it.effectiveFrom <= date }.maxByOrNull { it.effectiveFrom }
             ?: throw DomainException(DomainError.InvalidState("RECIPE", "NO_VERSION_ON_DATE"))

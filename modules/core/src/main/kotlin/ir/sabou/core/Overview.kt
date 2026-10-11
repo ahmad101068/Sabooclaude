@@ -39,7 +39,23 @@ data class AccountBalance(val account: TreasuryAccount, val balance: Long)
 data class LowStock(val item: Item, val location: Location, val quantity: Quantity)
 data class BranchDay(val branch: Branch, val sale: DailySale?, val closed: Boolean)
 data class MenuEntry(val item: MenuItem, val latest: RecipeVersion?)
-data class SalesDayView(val sale: DailySale?, val day: SalesDay?, val customers: List<Customer>, val accounts: List<TreasuryAccount>, val number: String? = null)
+
+/**
+ * A menu item's price in one branch on one day: [price] in force (null: none, typed at the sale), whether it is
+ * the branch's [own] price, the [organization] price, and every version recorded for the item (newest first).
+ */
+data class MenuPriceView(val item: MenuItem, val price: Money?, val own: Boolean, val organization: Money?, val history: List<ir.sabou.sales.MenuPrice>)
+data class SalesDayView(
+    val sale: DailySale?,
+    val day: SalesDay?,
+    val customers: List<Customer>,
+    val accounts: List<TreasuryAccount>,
+    val number: String? = null,
+    /** Cash boxes of the branch with their book balance, for whoever closes the day (empty for others). */
+    val cashBoxes: List<AccountBalance> = emptyList(),
+    /** The day's cash count number once closed. */
+    val countNumber: String? = null,
+)
 data class CustomerBalance(val customer: Customer, val owed: Money)
 data class OpenReceivable(val receivable: Receivable, val customer: String, val outstanding: Money)
 data class InvoiceRow(val invoice: PurchaseInvoice, val supplier: String, val outstanding: Money, val number: String? = null)
@@ -173,6 +189,18 @@ class Overview internal constructor(private val core: SabouCore) {
         return core.recipes.menuItems().map { m -> MenuEntry(m, core.recipes.versions(m.id).maxByOrNull { it.version }) }
     }
 
+    /** Prices of the active menu in [branch] on [date] (ADR-0019). */
+    fun menuPrices(branch: Scope.Branch, date: BusinessDate): List<MenuPriceView> {
+        actor(Permission.SALES_VIEW, Permission.MENU_PRICE_MANAGE).require(branch)
+        return core.recipes.menuItems().filter { it.isActive }.map { m ->
+            val versions = core.menuPrices.versions(m.id)
+            val inForce = ir.sabou.sales.PriceList.resolve(versions, branch, date)
+            val organization = ir.sabou.sales.PriceList.resolve(versions.filter { it.scope == Scope.Organization }, branch, date)
+            MenuPriceView(m, inForce?.unitPrice, inForce?.scope == branch, organization?.unitPrice,
+                versions.filter { it.scope == Scope.Organization || it.scope == branch }.sortedWith(compareByDescending<ir.sabou.sales.MenuPrice> { it.effectiveFrom }.thenByDescending { it.sequence }))
+        }
+    }
+
     // ------------------------------------------------------------ Inventory
 
     /** Prepared items with their current prep recipe (null: none yet). */
@@ -258,6 +286,12 @@ class Overview internal constructor(private val core: SabouCore) {
             // A cheque box takes customers' cheques (with their details); a cheque book never receives.
             accounts = core.treasuryAccounts.all().filter { it.isActive && it.scope == branch && it.kind != ir.sabou.treasury.TreasuryKind.ISSUED_CHEQUES },
             number = sale?.let { core.numbers.of(ir.sabou.platform.DocumentSeries.DAILY_SALE, it.id)?.text },
+            cashBoxes = if (a.role.allows(Permission.SALES_DAY_CLOSE) || a.role.allows(Permission.TREASURY_VIEW)) {
+                core.treasuryAccounts.all().filter {
+                    it.isActive && it.scope == branch && (it.kind == ir.sabou.treasury.TreasuryKind.CASH || it.kind == ir.sabou.treasury.TreasuryKind.PETTY_CASH)
+                }.map { AccountBalance(it, core.treasuryGateway.balance(it.id)) }
+            } else emptyList(),
+            countNumber = core.sales.day(branch, date)?.countId?.let { core.numbers.of(ir.sabou.platform.DocumentSeries.CASH_COUNT, it)?.text },
         )
     }
 

@@ -171,6 +171,15 @@ object Schema {
                 }
             },
         ),
+        Migration(
+            8,
+            listOf(
+                // Menu price versions (ADR-0019): per menu item, for the organization or one branch, from a date.
+                "CREATE TABLE menu_prices (id TEXT PRIMARY KEY, menu_item_id TEXT NOT NULL REFERENCES menu_items(id), scope TEXT NOT NULL, " +
+                    "effective_from INTEGER NOT NULL, sequence INTEGER NOT NULL UNIQUE, doc TEXT NOT NULL)",
+                "CREATE INDEX menu_prices_item ON menu_prices(menu_item_id, scope, effective_from)",
+            ) + immutable("menu_prices"),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }
