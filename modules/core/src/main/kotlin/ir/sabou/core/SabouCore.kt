@@ -74,7 +74,7 @@ class SabouCore private constructor(
     // Stores
     private val auditStore = SqlAuditStore(db)
     internal val events = SqlEventLog(db)
-    private val users = SqlUserStore(db)
+    internal val users = SqlUserStore(db)
     internal val branches = SqlBranchStore(db)
     internal val accounts = SqlAccountStore(db)
     internal val journals = SqlJournalStore(db)
@@ -142,6 +142,7 @@ class SabouCore private constructor(
     val numbers = Numbers(this)
     val reports = Reports(this)
     val dashboards = Dashboards(this)
+    val alerts = Alerts(this)
     val buying = Buying(this)
     val books = Books(this)
 

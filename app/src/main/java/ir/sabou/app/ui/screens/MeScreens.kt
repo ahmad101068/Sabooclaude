@@ -124,7 +124,7 @@ object MeScreens {
                 if (session.can(Permission.APPROVAL_RULES)) item { NavRow(R.drawable.ic_check, "قانون‌های تأیید فاکتور", "چه فاکتوری پیش از پرداخت چند تأیید بخواهد", onClick = { nav.go(Route.ApprovalRules) }) }
                 if (session.can(Permission.BUDGET_MANAGE)) item { NavRow(R.drawable.ic_finance, "بودجه", "مبلغ ماهانه‌ی هر حساب درآمد و هزینه", onClick = { nav.go(Route.Budget) }) }
                 if (session.can(Permission.BACKUP_CREATE)) item { NavRow(R.drawable.ic_backup, "پشتیبان‌گیری و بازیابی", onClick = { nav.go(Route.Backup) }) }
-                item { NavRow(R.drawable.ic_lock, "امنیت ورود", "تغییر رمز" + if (session.actor.role == ir.sabou.platform.Role.OWNER) "، کد بازیابی" else "", onClick = { nav.go(Route.Security) }) }
+                item { NavRow(R.drawable.ic_lock, "امنیت و اعلان‌ها", "تغییر رمز، اثر انگشت، اعلان هشدارها" + if (session.actor.role == ir.sabou.platform.Role.OWNER) "، کد بازیابی" else "", onClick = { nav.go(Route.Security) }) }
                 item { SecondaryButton("خروج از حساب", onSignOut, danger = true) }
             }
         }
@@ -499,6 +499,7 @@ object MeScreens {
                     }, enabled = current.length >= 6 && next.length >= 6 && next == again, busy = change.busy)
                 }
                 FingerprintCard()
+                AlertsCard()
                 if (owner) FormCard("کد بازیابی رمز مالک") {
                     Text("اگر رمز مالک فراموش شود، فقط با این کد ۱۶ رقمی می‌شود رمز تازه گذاشت. کد یک بار نمایش داده می‌شود: روی کاغذ بنویسید و جای امنی جدا از گوشی نگه دارید. " +
                         "برنامه فقط اثر یک‌طرفه‌ی آن را نگه می‌دارد. هر کد یک بار کار می‌کند و ساختن کد تازه، کد قبلی را باطل می‌کند.",
@@ -525,6 +526,20 @@ object MeScreens {
                     }
                 }
             }
+        }
+    }
+
+    /** Alerts on this phone (ADR-0024): what is announced, and a switch. */
+    @Composable
+    private fun AlertsCard() {
+        val context = LocalContext.current
+        var on by remember { mutableStateOf(ir.sabou.app.data.PhoneAlerts.enabled(context)) }
+        FormCard("اعلان هشدارها روی این گوشی") {
+            Text("برای کاربری که آخر روی این گوشی وارد شده، طبق دسترسی‌هایش: کمبود کالا، کسری مصرف، گران یا ارزان شدن خرید (بیش از ۱۰٪)، چک نزدیک یا گذشته از سررسید، و فاکتور منتظر تأیید. " +
+                "هر مورد یک بار اعلام می‌شود و اگر رفع شد و دوباره پیش آمد، دوباره. روی صفحه‌ی قفل فقط «هشدار تازه» دیده می‌شود.",
+                style = SabouType.caption, color = Sabou.colors.muted)
+            Segmented(listOf("روشن", "خاموش"), if (on) 0 else 1, { on = it == 0; ir.sabou.app.data.PhoneAlerts.setEnabled(context, on) })
+            if (on) SecondaryButton("بررسی همین حالا", { ir.sabou.app.data.PhoneAlerts.soon() })
         }
     }
 

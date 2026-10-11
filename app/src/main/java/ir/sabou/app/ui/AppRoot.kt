@@ -71,6 +71,7 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun AppRoot(container: AppContainer, ui: UiState) {
+    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val state by container.state.collectAsState()
     val rootScope = rememberCoroutineScope()
     LaunchedEffect(Unit) { withContext(Dispatchers.IO) { container.ensureOpen() } }
@@ -118,6 +119,7 @@ fun AppRoot(container: AppContainer, ui: UiState) {
                             if (draft != null) runCatching { ui.restoreDraft(draft, session, allowed.toSet(), System.currentTimeMillis()) }
                                 .onFailure { ui.discardRestoredDraft() }
                             ui.session = session
+                            ir.sabou.app.data.PhoneAlerts.onSignedIn(appContext, actor.userId)
                         }
                     }
                 }
@@ -453,6 +455,7 @@ private val tabs = listOf(
 
 @Composable
 private fun Shell(ui: UiState, session: AppSession) {
+    AskForNotifications()
     // Back walks the page stack, then returns to the Home tab; only on Home does it reach the exit prompt.
     BackHandler(enabled = ui.stack.size > 1 || ui.stack.first() != Route.Home) { if (!ui.back()) ui.go(Route.Home) }
     val route = ui.current
@@ -583,3 +586,20 @@ private fun Pages(route: Route, nav: Nav) {
         Route.Home, Route.Sales, Route.Operations, Route.Finance, Route.Me -> Unit
     }
 }
+
+/** Android 13+: ask once, after signing in, whether alerts may be shown (ADR-0024). */
+@Composable
+private fun AskForNotifications() {
+    if (android.os.Build.VERSION.SDK_INT < 33) return
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { context.getSharedPreferences("alerts", android.content.Context.MODE_PRIVATE) }
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(Unit) {
+        val granted = context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted && !prefs.getBoolean("asked", false)) {
+            prefs.edit().putBoolean("asked", true).apply()
+            launcher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+}
+
