@@ -1,0 +1,273 @@
+package ir.sabou.app.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import ir.sabou.app.ui.LocalSession
+import ir.sabou.app.ui.Nav
+import ir.sabou.app.ui.components.Banner
+import ir.sabou.app.ui.components.Chip
+import ir.sabou.app.ui.components.ChipKind
+import ir.sabou.app.ui.components.Choice
+import ir.sabou.app.ui.components.DateInput
+import ir.sabou.app.ui.components.Divider
+import ir.sabou.app.ui.components.EmptyState
+import ir.sabou.app.ui.components.FormCard
+import ir.sabou.app.ui.components.Header
+import ir.sabou.app.ui.components.KeyValue
+import ir.sabou.app.ui.components.Page
+import ir.sabou.app.ui.components.Picker
+import ir.sabou.app.ui.components.PrimaryButton
+import ir.sabou.app.ui.components.SCard
+import ir.sabou.app.ui.components.SecondaryButton
+import ir.sabou.app.ui.components.TextInput
+import ir.sabou.app.ui.load
+import ir.sabou.app.ui.orNull
+import ir.sabou.app.ui.rememberAction
+import ir.sabou.app.ui.theme.Sabou
+import ir.sabou.app.ui.theme.SabouType
+import ir.sabou.core.Fa
+import ir.sabou.kernel.GlobalId
+import ir.sabou.payroll.ClockPunch
+import ir.sabou.payroll.ConfirmDayTime
+import ir.sabou.payroll.CopyWeek
+import ir.sabou.payroll.DeleteShift
+import ir.sabou.payroll.Punch
+import ir.sabou.payroll.SaveShift
+import ir.sabou.platform.Permission
+
+/** Shifts, the shared-phone time clock and the day's planned-vs-clocked time (ADR-0038). */
+object ShiftScreens {
+    /** «۹:۰۵»; past midnight shows the next day's hour. */
+    fun clock(minute: Int): String = Fa.digits("${(minute / 60) % 24}:${(minute % 60).toString().padStart(2, '0')}")
+
+    /** «9:05», «۹٫۰۵» or «905» → minutes; null when not a time. */
+    fun parseClock(text: String): Int? {
+        val t = Fa.latinDigits(text.trim()).replace('٫', ':').replace('.', ':')
+        val (h, m) = when {
+            ':' in t -> t.split(':').let { it[0].toIntOrNull() to it.getOrNull(1)?.toIntOrNull() }
+            t.length in 3..4 -> t.dropLast(2).toIntOrNull() to t.takeLast(2).toIntOrNull()
+            else -> t.toIntOrNull() to 0
+        }
+        if (h == null || m == null || h !in 0..23 || m !in 0..59) return null
+        return h * 60 + m
+    }
+
+    @Composable
+    fun Schedule(nav: Nav) {
+        val session = LocalSession.current
+        // Weeks start on Saturday.
+        val thisWeek = session.today.plusDays(-Fa.weekdayIndex(session.today).toLong())
+        var week by rememberSaveable { mutableStateOf(thisWeek) }
+        var adding by rememberSaveable { mutableStateOf<Long?>(null) }
+        val action = rememberAction()
+        Column(Modifier.fillMaxSize()) {
+            Header("برنامه‌ی شیفت", onBack = nav.back) { BranchSwitcher() }
+            WithBranch { branch ->
+                val data by load(session, branch, week) { labor.week(branch, week) to overview.employees(branch).filter { it.endDate == null && it.isActive } }
+                Page {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("‹ هفته‌ی قبل", style = SabouType.label, color = Sabou.colors.primary, modifier = Modifier.clickable { week = week.plusDays(-7) }.padding(8.dp))
+                        Text("از ${Fa.date(week)}", style = SabouType.section, color = Sabou.colors.ink, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
+                        Text("هفته‌ی بعد ›", style = SabouType.label, color = Sabou.colors.primary, modifier = Modifier.clickable { week = week.plusDays(7) }.padding(8.dp))
+                    }
+                    action.error?.let { Banner(it) }
+                    Loaded(data) { (days, employees) ->
+                        if (employees.isEmpty()) EmptyState("کارمندی ثبت نشده است.")
+                        if (days.all { it.shifts.isEmpty() } && session.can(Permission.SHIFT_MANAGE)) {
+                            SecondaryButton("کپی برنامه‌ی هفته‌ی قبل", { action.run({ shifts.copyWeek(CopyWeek(GlobalId.new(), branch, week.plusDays(-7), week)) }) }, enabled = !action.busy)
+                        }
+                        SCard {
+                            KeyValue("ساعت کل هفته", Fa.number(days.sumOf { it.minutes }.toLong() / 60))
+                            KeyValue("هزینه‌ی نیرو", Fa.rial(days.sumOf { it.cost.rial }) + " ریال")
+                            val budget = days.sumOf { it.budget.rial }
+                            if (budget > 0) KeyValue("بودجه‌ی نیرو", Fa.rial(budget) + " ریال", if (days.sumOf { it.cost.rial } > budget) Sabou.colors.danger else Sabou.colors.ink)
+                        }
+                        days.forEach { d ->
+                            SCard {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(Fa.dayTitle(d.date), style = SabouType.section, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                                    d.laborBp?.let { Chip("نیرو " + Fa.percent(it) + " فروش", if (it > 3_500) ChipKind.DANGER else ChipKind.PRIMARY) }
+                                }
+                                Text("${Fa.number(d.minutes.toLong() / 60)} ساعت · ${Fa.rialShort(d.cost.rial)}" +
+                                    (if (d.budget.rial > 0) " از بودجه‌ی ${Fa.rialShort(d.budget.rial)}" else "") +
+                                    (if (d.expectedSales.rial > 0) " · فروش مورد انتظار ${Fa.rialShort(d.expectedSales.rial)}" else ""),
+                                    style = SabouType.caption, color = Sabou.colors.muted)
+                                d.shifts.forEach { s ->
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("${s.employee} · ${clock(s.shift.startMinute)}–${clock(s.shift.endMinute)}" + if (s.shift.station.isNotBlank()) " · ${s.shift.station}" else "",
+                                            style = SabouType.body, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                                        if (session.can(Permission.SHIFT_MANAGE)) Text("حذف", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable {
+                                            action.run({ shifts.delete(DeleteShift(GlobalId.new(), branch, s.shift.id)) })
+                                        }.padding(6.dp))
+                                    }
+                                }
+                                if (session.can(Permission.SHIFT_MANAGE) && employees.isNotEmpty()) {
+                                    if (adding == d.date.epochDay) ShiftForm(branch, d.date, employees.map { Choice(it.id, it.name) }) { adding = null }
+                                    else Text("+ شیفت", style = SabouType.label, color = Sabou.colors.primary, modifier = Modifier.clickable { adding = d.date.epochDay }.padding(vertical = 6.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun ShiftForm(branch: ir.sabou.kernel.Scope.Branch, date: ir.sabou.kernel.BusinessDate, employees: List<Choice<GlobalId>>, onDone: () -> Unit) {
+        var employee by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var start by rememberSaveable { mutableStateOf("") }
+        var end by rememberSaveable { mutableStateOf("") }
+        var rest by rememberSaveable { mutableStateOf("") }
+        var station by rememberSaveable { mutableStateOf("") }
+        val action = rememberAction()
+        Picker("کارمند", employees, employee, { employee = it })
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextInput("از (مثلاً ۹:۰۰)", start, { start = it }, Modifier.weight(1f), keyboard = KeyboardType.Number)
+            TextInput("تا (مثلاً ۱۷:۰۰)", end, { end = it }, Modifier.weight(1f), keyboard = KeyboardType.Number)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextInput("استراحت (دقیقه)", rest, { rest = it }, Modifier.weight(1f), keyboard = KeyboardType.Number)
+            TextInput("ایستگاه", station, { station = it }, Modifier.weight(1f), placeholder = "صندوق، کباب‌پز…")
+        }
+        val s = parseClock(start); val e = parseClock(end)?.let { if (s != null && it <= s) it + 1_440 else it }
+        val b = Fa.latinDigits(rest.trim()).ifBlank { "0" }.toIntOrNull()
+        if (s != null && e != null && e - s > 0) Text("${Fa.number((e - s - (b ?: 0)).toLong() / 60)} ساعت" + if (e >= 1_440) " (تا بامداد روز بعد)" else "", style = SabouType.caption, color = Sabou.colors.muted)
+        action.error?.let { Banner(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PrimaryButton("ثبت شیفت", {
+                action.run({ shifts.save(SaveShift(GlobalId.new(), branch, null, employee!!, date, s!!, e!!, b!!, station)) }) { onDone() }
+            }, Modifier.weight(1f), enabled = employee != null && s != null && e != null && b != null && !action.busy, busy = action.busy)
+            SecondaryButton("انصراف", onDone, Modifier.weight(1f))
+        }
+    }
+
+    /** The shared phone: pick your name, type your PIN. */
+    @Composable
+    fun TimeClock(nav: Nav) {
+        val session = LocalSession.current
+        var who by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var pin by rememberSaveable { mutableStateOf("") }
+        var done by rememberSaveable { mutableStateOf<String?>(null) }
+        val action = rememberAction()
+        Column(Modifier.fillMaxSize()) {
+            Header("ساعت‌زنی", Fa.dayTitle(session.today), onBack = nav.back)
+            WithBranch { branch ->
+                val people by load(session, branch, done) { labor.clockList(branch, session.today) }
+                Page {
+                    done?.let { Banner(it, ChipKind.PRIMARY, ir.sabou.app.R.drawable.ic_check) }
+                    Loaded(people) { list ->
+                        if (list.isEmpty()) EmptyState("برای هیچ کارمندی رمز ساعت‌زنی تعیین نشده است (کارکنان ← رمز ساعت‌زنی).")
+                        val selected = list.firstOrNull { it.first == who }
+                        if (selected == null) {
+                            list.forEach { (id, name) ->
+                                Box(Modifier.fillMaxWidth().height(56.dp).clip(RoundedCornerShape(12.dp)).background(Sabou.colors.primarySoft)
+                                    .clickable { who = id; pin = ""; done = null }, contentAlignment = Alignment.Center) {
+                                    Text(name, style = SabouType.section, color = Sabou.colors.primary)
+                                }
+                            }
+                        } else {
+                            val punches by load(session, branch, who, done) { labor.punchesToday(branch, session.today, selected.first) }
+                            val inside = punches.orNull()?.lastOrNull()?.kind == Punch.Kind.IN
+                            FormCard(selected.second) {
+                                punches.orNull()?.forEach { p -> Text((if (p.kind == Punch.Kind.IN) "ورود " else "خروج ") + clock(p.minute), style = SabouType.caption, color = Sabou.colors.muted) }
+                                Text("•".repeat(pin.length).ifEmpty { "رمز خود را بزنید" }, style = SabouType.section, color = Sabou.colors.ink)
+                                PinPad({ if (pin.length < 6) pin += it }, { pin = pin.dropLast(1) })
+                                action.error?.let { Banner(it) }
+                                PrimaryButton(if (inside) "ثبت خروج" else "ثبت ورود", {
+                                    val now = java.time.LocalTime.now()
+                                    val minute = now.hour * 60 + now.minute
+                                    action.run({ shifts.punch(ClockPunch(GlobalId.new(), branch, selected.first, pin, session.today, minute)) }) {
+                                        done = "${selected.second}: ${if (inside) "خروج" else "ورود"} ساعت ${clock(minute)} ثبت شد."
+                                        who = null; pin = ""
+                                    }
+                                }, enabled = pin.length >= 4 && !action.busy, busy = action.busy)
+                                SecondaryButton("انصراف", { who = null; pin = "" })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun PinPad(onDigit: (Char) -> Unit, onDelete: () -> Unit) {
+        listOf("123", "456", "789", "<0").forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { c ->
+                    Box(Modifier.weight(1f).height(52.dp).clip(RoundedCornerShape(10.dp)).background(Sabou.colors.track)
+                        .clickable { if (c == '<') onDelete() else onDigit(c) }, contentAlignment = Alignment.Center) {
+                        Text(if (c == '<') "پاک" else Fa.digits(c.toString()), style = SabouType.section, color = Sabou.colors.ink)
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun DayTime(nav: Nav) {
+        val session = LocalSession.current
+        var date by rememberSaveable { mutableStateOf(session.today) }
+        val action = rememberAction()
+        Column(Modifier.fillMaxSize()) {
+            Header("کارکرد روز", onBack = nav.back) { BranchSwitcher() }
+            WithBranch { branch ->
+                val data by load(session, branch, date) { labor.day(branch, date) }
+                Page {
+                    DateInput("روز", date, { date = it }, session.today)
+                    Loaded(data) { rows ->
+                        if (rows.isEmpty()) EmptyState("برای این روز شیفت یا ساعت‌زنی‌ای نیست.")
+                        SCard {
+                            rows.forEach { r ->
+                                val t = r.time
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(r.employee.name, style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                                        Text("برنامه ${Fa.number(t.planned.toLong() / 60)}:${Fa.digits((t.planned % 60).toString().padStart(2, '0'))} · کارکرد ${Fa.number(t.worked.toLong() / 60)}:${Fa.digits((t.worked % 60).toString().padStart(2, '0'))}" +
+                                            (if (t.late > 0) " · تأخیر ${Fa.number(t.late.toLong())} دقیقه" else "") +
+                                            (if (t.overtime > 0) " · اضافه‌کار ${Fa.number(t.overtime.toLong())}" else "") +
+                                            (if (t.absent > 0) " · کسر ${Fa.number(t.absent.toLong())}" else ""), style = SabouType.caption, color = Sabou.colors.muted)
+                                    }
+                                    when {
+                                        t.openPunch -> Chip("خروج نزده", ChipKind.ACCENT)
+                                        t.planned > 0 && t.worked == 0 -> Chip("غایب", ChipKind.DANGER)
+                                        t.late > 0 -> Chip("تأخیر", ChipKind.ACCENT)
+                                        else -> Chip("درست", ChipKind.PRIMARY)
+                                    }
+                                }
+                                Divider()
+                            }
+                        }
+                        action.error?.let { Banner(it) }
+                        if (rows.isNotEmpty() && session.can(Permission.ATTENDANCE_RECORD)) {
+                            Text("با تأیید، کارکرد، اضافه‌کار و کسر هر نفر در «حضور و غیاب» ثبت و در حقوق ماه حساب می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
+                            PrimaryButton("تأیید کارکرد این روز", { action.run({ shifts.confirmDay(ConfirmDayTime(GlobalId.new(), branch, date)) }) },
+                                enabled = rows.none { it.time.openPunch } && date <= session.today && !action.busy, busy = action.busy)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

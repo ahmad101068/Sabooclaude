@@ -1,5 +1,7 @@
 package ir.sabou.payroll
 
+import ir.sabou.kernel.NationalId
+
 import ir.sabou.platform.NoDocument
 
 import ir.sabou.platform.DocumentSeries
@@ -185,19 +187,23 @@ class PayrollOperations(
     }
 
     fun recordAttendance(c: RecordAttendance): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
-        val employee = requireEmployee(cmd.employeeId, cmd.scope)
-        ensure(employee.employedDays(cmd.date, cmd.date) == 1) { DomainError.InvalidState("EMPLOYEE", "NOT_EMPLOYED_ON_DATE") }
-        ensure(listOf(cmd.workedMinutes, cmd.overtimeMinutes, cmd.absentMinutes).all { it in 0..1_440 } &&
-            cmd.workedMinutes + cmd.overtimeMinutes <= 1_440) { DomainError.InvalidInput("minutes", "زمان حضور معتبر نیست.") }
-        ensure(payroll.runs(cmd.scope).none { it.status == RunStatus.APPROVED && cmd.date >= it.from && cmd.date <= it.to }) {
+        applyAttendance(ctx, cmd.scope, cmd.employeeId, cmd.date, cmd.workedMinutes, cmd.overtimeMinutes, cmd.absentMinutes)
+    }
+
+    /** One day's attendance under the attendance rules; also used when a day's punches are confirmed (ADR-0038). */
+    internal fun applyAttendance(ctx: ir.sabou.platform.CommandContext, scope: Scope.Branch, employeeId: GlobalId, date: BusinessDate, worked: Int, overtime: Int, absent: Int): GlobalId {
+        val employee = requireEmployee(employeeId, scope)
+        ensure(employee.employedDays(date, date) == 1) { DomainError.InvalidState("EMPLOYEE", "NOT_EMPLOYED_ON_DATE") }
+        ensure(listOf(worked, overtime, absent).all { it in 0..1_440 } && worked + overtime <= 1_440) { DomainError.InvalidInput("minutes", "زمان حضور معتبر نیست.") }
+        ensure(payroll.runs(scope).none { it.status == RunStatus.APPROVED && date >= it.from && date <= it.to }) {
             DomainError.InvalidState("ATTENDANCE", "PERIOD_APPROVED")
         }
-        val existing = personnel.attendanceOn(employee.id, cmd.date)
-        val record = AttendanceRecord(existing?.id ?: GlobalId.new(), employee.id, cmd.date, cmd.workedMinutes, cmd.overtimeMinutes, cmd.absentMinutes)
+        val existing = personnel.attendanceOn(employee.id, date)
+        val record = AttendanceRecord(existing?.id ?: GlobalId.new(), employee.id, date, worked, overtime, absent)
         personnel.saveAttendance(record)
         ctx.audit(AuditDraft(if (existing == null) "ATTENDANCE_RECORD" else "ATTENDANCE_CORRECT", "EMPLOYEE", employee.id.value,
-            "day=${cmd.date.epochDay};w=${cmd.workedMinutes};ot=${cmd.overtimeMinutes};abs=${cmd.absentMinutes}"))
-        record.id
+            "day=${date.epochDay};w=$worked;ot=$overtime;abs=$absent"))
+        return record.id
     }
 
     /** Creates (or recalculates) the draft run for a period. A draft has no accounting effect. */

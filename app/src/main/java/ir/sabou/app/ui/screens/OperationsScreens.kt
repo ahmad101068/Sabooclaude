@@ -128,6 +128,9 @@ object OperationsScreens {
                 if (any(purchasePerms)) item { NavRow(R.drawable.ic_supplier, "تأمین‌کنندگان", "فهرست و مانده حساب", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Suppliers) }) }
                 if (any(personnelPerms)) item { SectionTitle("پرسنل") }
                 if (session.can(Permission.PERSONNEL_VIEW) || session.can(Permission.PERSONNEL_MANAGE)) item { NavRow(R.drawable.ic_person, "کارکنان", "ثبت و مشخصات", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Personnel) }) }
+                if (session.can(Permission.SHIFT_MANAGE)) item { NavRow(R.drawable.ic_calendar, "برنامه‌ی شیفت", "هفتگی، با هزینه‌ی نیرو در برابر بودجه و فروش", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Schedule) }) }
+                if (session.can(Permission.TIME_CLOCK)) item { NavRow(R.drawable.ic_clock, "ساعت‌زنی", "ورود و خروج کارکنان با رمز خودشان", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.TimeClock) }) }
+                if (session.can(Permission.ATTENDANCE_RECORD)) item { NavRow(R.drawable.ic_clock, "کارکرد امروز", "برنامه در برابر ساعت‌زنی؛ تأیید برای حقوق", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.DayTime) }) }
                 if (session.can(Permission.ATTENDANCE_RECORD) || session.can(Permission.PERSONNEL_VIEW)) item { NavRow(R.drawable.ic_clock, "حضور و غیاب", "ثبت روزانه کارکرد", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Attendance) }) }
                 if (listOf(Permission.PAYROLL_CALCULATE, Permission.PAYROLL_APPROVE, Permission.PAYROLL_PAY).any { session.can(it) }) item { NavRow(R.drawable.ic_payroll, "حقوق", "محاسبه، تأیید و پرداخت", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Payroll) }) }
                 if (FinanceScreens.reportPerms.any { session.can(it) }) item { SectionTitle("گزارش‌ها") }
@@ -574,6 +577,13 @@ object OperationsScreens {
                                 Text("کد ملی ${Fa.digits(e.nationalId)}" + (e.startDate?.let { " · شروع کار ${Fa.date(it)}" } ?: ""),
                                     style = SabouType.caption, color = Sabou.colors.muted)
                                 if (e.endDate == null && e.isActive && session.can(Permission.PERSONNEL_MANAGE)) {
+                                    var pin by rememberSaveable(e.id) { mutableStateOf("") }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        TextInput("رمز ساعت‌زنی (۴ تا ۶ رقم)", pin, { pin = it }, Modifier.weight(1f), keyboard = KeyboardType.NumberPassword, secret = true)
+                                        Text("ثبت", style = SabouType.label, color = Sabou.colors.primary, modifier = Modifier.clickable(enabled = pin.length >= 4 && !action.busy) {
+                                            action.run({ shifts.setPin(ir.sabou.payroll.SetClockPin(GlobalId.new(), branch, e.id, pin)) }) { pin = "" }
+                                        }.padding(8.dp))
+                                    }
                                     if (ending == e.id) {
                                         DateInput("آخرین روز کار", lastDay, { lastDay = it }, session.today)
                                         Text("حقوق ماه آخر به نسبت روزهای کار تا این تاریخ حساب می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)

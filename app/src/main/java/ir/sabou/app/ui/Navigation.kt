@@ -80,6 +80,9 @@ sealed interface Route : java.io.Serializable {
     data class AssetDetail(val assetId: GlobalId) : Route
     data object Personnel : Route
     data object Attendance : Route
+    data object Schedule : Route
+    data object TimeClock : Route
+    data object DayTime : Route
     data object Payroll : Route
 
     // Settings

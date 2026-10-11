@@ -674,3 +674,34 @@ class SqlTaxStore(db: SqlDatabase) : SqlTable(db), ir.sabou.sales.TaxStore {
         mapOf("menu_item_id" to code.menuItemId.value, "doc" to Json.encode(mapOf("item" to code.menuItemId.value, "product" to code.productId, "unit" to code.unitCode))),
     )
 }
+
+/** Shifts, punches and clock PINs (ADR-0038). Punches are never changed or deleted. */
+class SqlShiftStore(db: SqlDatabase) : SqlTable(db), ir.sabou.payroll.ShiftStore {
+    private fun shiftOf(d: Doc) = ir.sabou.payroll.Shift(Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.id(d.str("employee")), Codec.date(d.long("date")),
+        d.long("start").toInt(), d.long("end").toInt(), d.long("break").toInt(), d.strOr("station", ""))
+    private fun punchOf(d: Doc) = ir.sabou.payroll.Punch(Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.id(d.str("employee")), Codec.date(d.long("date")),
+        d.long("minute").toInt(), ir.sabou.payroll.Punch.Kind.valueOf(d.str("kind")), d.long("at"))
+    override fun shift(id: GlobalId) = doc("SELECT doc FROM shifts WHERE id = ?", id.value)?.let(::shiftOf)
+    override fun shifts(scope: Scope.Branch, from: BusinessDate, to: BusinessDate) =
+        docs("SELECT doc FROM shifts WHERE scope = ? AND date BETWEEN ? AND ? ORDER BY date, rowid", Codec.scope(scope), from.epochDay, to.epochDay).map(::shiftOf)
+    override fun saveShift(shift: ir.sabou.payroll.Shift) = upsert(
+        "shifts", "id",
+        mapOf("id" to shift.id.value, "scope" to Codec.scope(shift.scope), "date" to shift.date.epochDay,
+            "doc" to Json.encode(mapOf("id" to shift.id.value, "scope" to Codec.scope(shift.scope), "employee" to shift.employeeId.value, "date" to shift.date.epochDay,
+                "start" to shift.startMinute.toLong(), "end" to shift.endMinute.toLong(), "break" to shift.breakMinutes.toLong(), "station" to shift.station))),
+    )
+    override fun deleteShift(id: GlobalId) { db.execute("DELETE FROM shifts WHERE id = ?", id.value) }
+    override fun punches(scope: Scope.Branch, from: BusinessDate, to: BusinessDate) =
+        docs("SELECT doc FROM punches WHERE scope = ? AND date BETWEEN ? AND ? ORDER BY date, rowid", Codec.scope(scope), from.epochDay, to.epochDay).map(::punchOf)
+    override fun savePunch(punch: ir.sabou.payroll.Punch) = db.execute(
+        "INSERT INTO punches (id, scope, date, employee_id, doc) VALUES (?, ?, ?, ?, ?)",
+        punch.id.value, Codec.scope(punch.scope), punch.date.epochDay, punch.employeeId.value,
+        Json.encode(mapOf("id" to punch.id.value, "scope" to Codec.scope(punch.scope), "employee" to punch.employeeId.value, "date" to punch.date.epochDay,
+            "minute" to punch.minute.toLong(), "kind" to punch.kind.name, "at" to punch.atEpochMillis)),
+    )
+    override fun clockPin(employeeId: GlobalId) = db.query("SELECT hash FROM clock_pins WHERE employee_id = ?", employeeId.value).firstOrNull()?.str("hash")
+    override fun saveClockPin(employeeId: GlobalId, hash: String?) {
+        if (hash == null) db.execute("DELETE FROM clock_pins WHERE employee_id = ?", employeeId.value)
+        else db.execute("INSERT INTO clock_pins (employee_id, hash) VALUES (?, ?) ON CONFLICT(employee_id) DO UPDATE SET hash = excluded.hash", employeeId.value, hash)
+    }
+}

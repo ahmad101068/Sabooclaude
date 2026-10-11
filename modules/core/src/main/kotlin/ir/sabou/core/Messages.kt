@@ -10,6 +10,22 @@ import ir.sabou.kernel.DomainException
  */
 object Messages {
     private val states = mapOf(
+        // ADR-0029 .. 0038
+        "COUNT_PLAN:DUPLICATE_NAME" to "برنامه‌ی شمارشی با این نام در این شعبه هست.",
+        "COUNT_PLAN:NOT_FOR_THIS_LOCATION" to "این برنامه‌ی شمارش برای این انبار نیست یا غیرفعال است.",
+        "BANK_STATEMENT:ALREADY_IMPORTED" to "این صورت‌حساب (یا بیشتر سطرهایش) قبلاً وارد شده است.",
+        "TREASURY_ACCOUNT:NOT_BANK" to "صورت‌حساب فقط برای حساب بانکی وارد می‌شود.",
+        "STATEMENT_LINE:AMOUNT_DIFFERS" to "مبلغ یا جهت این ردیف با سطر صورت‌حساب یکی نیست.",
+        "STATEMENT_LINE:ALREADY_MATCHED" to "این سطر صورت‌حساب قبلاً جور شده است.",
+        "TREASURY_MOVEMENT:ALREADY_MATCHED" to "این ردیف دفتر با سطر دیگری جور شده است.",
+        "TREASURY_MOVEMENT:NOT_MATCHABLE" to "این ردیف برگشت خورده یا متعلق به حساب دیگری است.",
+        "PERIOD:CHECKLIST" to "پیش از بستن ماه، موارد «لازم» چک‌لیست را انجام دهید.",
+        "PERIOD:ALREADY_CLOSED" to "این ماه قبلاً بسته شده است.",
+        "SHIFT:OVERLAP" to "این کارمند در این ساعت شیفت دیگری دارد.",
+        "CLOCK_PIN:NOT_SET" to "برای این کارمند رمز ساعت‌زنی تعیین نشده است.",
+        "PUNCH:OPEN" to "کسی ورود زده ولی خروج نزده است؛ پیش از تأیید، خروجش را ثبت یا اصلاح کنید.",
+        "PUNCH:DUPLICATE" to "همین الان ساعت زده شده است.",
+        "PUNCH:NOTHING" to "برای این روز شیفت یا ساعت‌زنی‌ای نیست.",
         "ATTENDANCE:PERIOD_APPROVED" to "حقوق این دوره تأیید شده است؛ حضور و غیاب آن قابل تغییر نیست.",
         "COLLECTION:ALREADY_REVERSED" to "این دریافت قبلاً برگشت خورده است.",
         "CUSTOMER:CREDIT_LIMIT_EXCEEDED" to "مبلغ نسیه از سقف اعتبار مشتری بیشتر است.",
@@ -130,6 +146,9 @@ object Messages {
         is DomainError.InvalidState -> if (error.entity == "USER" && error.state.startsWith("LOCKED:")) {
             val seconds = error.state.substringAfter(':').toLongOrNull() ?: 0
             "به دلیل رمزهای اشتباه، ورود ${waitText(seconds)} قفل است."
+        } else if (error.entity == "CLOCK_PIN" && error.state.startsWith("LOCKED:")) {
+            val seconds = error.state.substringAfter(':').toLongOrNull() ?: 0
+            "به دلیل رمزهای اشتباه، ساعت‌زنی این نفر ${waitText(seconds)} قفل است."
         } else states["${error.entity}:${error.state.substringBefore(':')}"] ?: error.userMessage
         else -> error.userMessage
     }

@@ -1,5 +1,7 @@
 package ir.sabou.payroll
 
+import ir.sabou.kernel.NationalId
+
 import ir.sabou.kernel.BranchId
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.Clock

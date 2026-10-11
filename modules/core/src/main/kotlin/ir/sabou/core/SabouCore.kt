@@ -141,9 +141,11 @@ class SabouCore private constructor(
     val salesOps = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventoryGateway, recipeBook, treasuryGateway, customers, sales, menuPrices, posImportStore)
     /** Stored policies (entered by the owner) plus any supplied by the caller (tests). */
     val payrollPolicies = PolicyAdministration(bus, SqlPolicyStore(db))
-    private val policyRegistry = StatutoryPolicyRegistry { payrollPolicies.policies() + policies }
+    internal val policyRegistry = StatutoryPolicyRegistry { payrollPolicies.policies() + policies }
     val fixedAssets = ir.sabou.assets.AssetOperations(bus, ledger, registry.issue(ModuleId.ASSETS), treasuryGateway, assetStore)
     val payroll = PayrollOperations(bus, ledger, registry.issue(ModuleId.PAYROLL), treasuryGateway, personnel, payrollStore, policyRegistry)
+    internal val shiftStore = ir.sabou.persistence.SqlShiftStore(db)
+    val shifts = ir.sabou.payroll.ShiftOperations(bus, personnel, shiftStore, payroll)
 
     val overview = Overview(this)
     val numbers = Numbers(this)
@@ -157,6 +159,7 @@ class SabouCore private constructor(
     val closing = Closing(this)
     val taxOps = ir.sabou.sales.TaxOperations(bus, taxStore, customers) { recipes.menuItem(it) != null }
     val moadian = Moadian(this)
+    val labor = Labor(this)
     val books = Books(this)
 
     /**

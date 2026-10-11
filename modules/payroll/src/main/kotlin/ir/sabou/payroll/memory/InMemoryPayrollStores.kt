@@ -59,3 +59,19 @@ class InMemoryPolicyStore : ir.sabou.payroll.PolicyStore, Transactional {
     @Suppress("UNCHECKED_CAST")
     override fun restore(snapshot: Any) { rows.clear(); rows.addAll(snapshot as List<ir.sabou.payroll.StatutoryPolicy>) }
 }
+
+class InMemoryShiftStore : ir.sabou.payroll.ShiftStore {
+    private val shifts = LinkedHashMap<GlobalId, ir.sabou.payroll.Shift>()
+    private val punches = ArrayList<ir.sabou.payroll.Punch>()
+    private val pins = HashMap<GlobalId, String>()
+    override fun shift(id: GlobalId) = shifts[id]
+    override fun shifts(scope: ir.sabou.kernel.Scope.Branch, from: ir.sabou.kernel.BusinessDate, to: ir.sabou.kernel.BusinessDate) =
+        shifts.values.filter { it.scope == scope && it.date >= from && it.date <= to }.sortedBy { it.date }
+    override fun saveShift(shift: ir.sabou.payroll.Shift) { shifts[shift.id] = shift }
+    override fun deleteShift(id: GlobalId) { shifts.remove(id) }
+    override fun punches(scope: ir.sabou.kernel.Scope.Branch, from: ir.sabou.kernel.BusinessDate, to: ir.sabou.kernel.BusinessDate) =
+        punches.filter { it.scope == scope && it.date >= from && it.date <= to }
+    override fun savePunch(punch: ir.sabou.payroll.Punch) { punches += punch }
+    override fun clockPin(employeeId: GlobalId) = pins[employeeId]
+    override fun saveClockPin(employeeId: GlobalId, hash: String?) { if (hash == null) pins.remove(employeeId) else pins[employeeId] = hash }
+}
