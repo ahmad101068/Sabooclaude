@@ -68,7 +68,7 @@ class ReportsTest {
         core.inventory.waste(RecordWaste(id(), branch, kitchen, cheese, Quantity.of(500_000), WasteReason.SPOILAGE, "", day))
         val count = core.counts.submit(ir.sabou.inventory.SubmitStockCount(id(), branch, kitchen, day, listOf(ir.sabou.inventory.CountEntry(cheese, Quantity.units(7))))).resultId
         core.counts.approve(ir.sabou.inventory.ApproveStockCount(id(), branch, count, mapOf(cheese to ir.sabou.inventory.LineReason(ir.sabou.inventory.VarianceReason.MISSING))))
-        core.salesOps.closeDay(CloseSalesDay(id(), branch, day, rial(49_000_000)))
+        core.salesOps.closeDay(CloseSalesDay(id(), branch, day, cash, rial(49_000_000)))
     }
 
     @Test fun profitAndLossAndCostRatiosComeStraightFromTheBooks() {
@@ -76,8 +76,10 @@ class ReportsTest {
         val p = core.reports.profitAndLoss(day, day)
         assertEquals(50_000_000, p.totals.revenue)
         assertEquals(6_000_000, p.totals.cogs)                       // 2 kg × 3,000,000
-        assertEquals(3_000_000, p.totals.expenses)                   // waste 1,500,000 + count loss 1,500,000
-        assertEquals(41_000_000, p.totals.profit)
+        // Waste 1,500,000 + stock count loss 1,500,000 + cash short at day close 1,000,000 (counted 49 of 50 million).
+        assertEquals(4_000_000, p.totals.expenses)
+        assertEquals(40_000_000, p.totals.profit)
+        assertEquals(1_000_000, core.reports.ledgerDetail(StandardAccounts.CASH_OVER_SHORT, day, day).sumOf { it.debit - it.credit })
         assertEquals(listOf("شعبه ونک" to p.totals), p.byBranch)
         assertEquals(listOf(day to p.totals), p.byDay)
         assertEquals(1_800, p.ratios.foodBp)                         // 9,000,000 / 50,000,000
@@ -188,8 +190,8 @@ class ReportsTest {
         val p = core.reports.profitAndLoss(d.from, day)
         assertEquals(p.totals.revenue, d.revenue)
         assertEquals(50_000_000, d.revenue)
-        assertEquals(9_000_000, d.costs)
-        assertEquals(41_000_000, d.profit)
+        assertEquals(10_000_000, d.costs)                            // includes the 1,000,000 cash short at day close
+        assertEquals(40_000_000, d.profit)
         assertEquals(d.costs, d.slices.sumOf { it.amount })             // the donut is the whole cost, nothing lost
         assertTrue(d.slices.size <= Dashboards.SLICES + 1)
         assertEquals(d.slices.sortedByDescending { it.amount }.filter { it.code != null }, d.slices.filter { it.code != null })

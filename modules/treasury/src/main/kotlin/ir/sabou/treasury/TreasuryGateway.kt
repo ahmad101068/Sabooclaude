@@ -46,6 +46,36 @@ class TreasuryGateway(
      * Records a receipt into / payment from [accountId]. [counterLines] are the owner's side of the
      * journal (for example AP debit for a supplier payment) and must balance the treasury line.
      */
+    /**
+     * A count of [accountId] (a cash box at day end, a bank against its statement): records what was counted and
+     * books the difference to the books as cash over/short, so the account then holds exactly [counted].
+     * Numbered as a cash count ([DocumentSeries.CASH_COUNT]) under [documentId]. Returns counted − book.
+     */
+    fun count(
+        context: CommandContext,
+        owner: PostingCapability,
+        accountId: GlobalId,
+        counted: Money,
+        date: BusinessDate,
+        sourceType: String,
+        documentId: GlobalId,
+        description: String,
+    ): Long {
+        ensure(account(accountId).kind.isOrdinary) { DomainError.InvalidInput("account", "صندوق و دسته‌چک شمارش نمی‌شوند؛ وضعیت هر چک را ثبت کنید.") }
+        val book = balance(accountId)
+        val difference = counted.rial - book
+        context.number(ir.sabou.platform.DocumentSeries.CASH_COUNT, date, documentId)
+        context.audit(AuditDraft("TREASURY_COUNT", "TREASURY_ACCOUNT", accountId.value, "book=$book;counted=${counted.rial}"))
+        if (difference != 0L) {
+            val amount = Money.of(kotlin.math.abs(difference))
+            val direction = if (difference > 0) Direction.RECEIPT else Direction.PAYMENT
+            val line = if (difference > 0) LineDraft(ir.sabou.ledger.StandardAccounts.CASH_OVER_SHORT, credit = amount, by = owner)
+            else LineDraft(ir.sabou.ledger.StandardAccounts.CASH_OVER_SHORT, debit = amount, by = owner)
+            settle(context, owner, accountId, direction, amount, date, sourceType, documentId, description, listOf(line))
+        }
+        return difference
+    }
+
     fun settle(
         context: CommandContext,
         owner: PostingCapability,

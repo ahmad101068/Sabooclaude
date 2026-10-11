@@ -34,6 +34,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class BuyingTest {
     private val dir = Files.createTempDirectory("sabou-buying")
@@ -74,7 +75,7 @@ class BuyingTest {
 
     @Test fun suggestedOrderCoversParAndPlannedDishesMinusStockAndOpenOrders() {
         setUp()
-        val groups = core.buying.suggestions(kitchen, listOf(PlanLine(pizza, kg(10))), day, 13 * 60)
+        val groups = core.buying.suggestions(kitchen, listOf(PlanLine(pizza, kg(10))), day, 13 * 60).groups
         val withSupplier = groups.first()
         assertEquals("لبنیات", withSupplier.supplier!!.name)
         assertEquals(day.plusDays(1), withSupplier.delivery!!.date)                 // Sunday, ordered before 14:00 today
@@ -89,7 +90,7 @@ class BuyingTest {
         assertEquals(Quantity.of(1_250_000), t.suggested)
         assertNull(t.unitPrice)
         // After the cutoff the next delivery is Wednesday.
-        assertEquals(day.plusDays(4), core.buying.suggestions(kitchen, emptyList(), day, 15 * 60).first().delivery!!.date)
+        assertEquals(day.plusDays(4), core.buying.suggestions(kitchen, emptyList(), day, 15 * 60).groups.first().delivery!!.date)
     }
 
     @Test fun priceChangesCompareWithTheSameSuppliersPreviousInvoice() {
@@ -118,4 +119,68 @@ class BuyingTest {
             assertEquals("PERMISSION_DENIED", assertFailsWith<DomainException> { read() }.error.code.substringBefore(':'))
         }
     }
+
+    @Test fun aPriceChangeIsExactForLargePricesAndAFirstPriceIsNotAZeroChange() {
+        val item = ir.sabou.inventory.Item(GlobalId.new(), "زعفران", StockUnit.GRAM, Quantity.ZERO)
+        fun change(previous: Long, now: Long) = PriceChange(item, "", GlobalId.new(), day, day, previous, now)
+        // (now − previous) × 10,000 does not fit in a Long here; the change is still +50%.
+        assertEquals(5_000, change(2_000_000_000_000_000, 3_000_000_000_000_000).changeBp)
+        assertEquals(-2_500, change(4_000_000, 3_000_000).changeBp)
+        assertEquals(333, change(3_000_000, 3_100_000).changeBp)        // 3.33…% rounds to 3.33%
+        assertNull(change(0, 5_000).changeBp)                           // no earlier price: not "0% change"
+    }
+
+    private fun prepared(name: String) = core.inventory.createItem(CreateItem(id(), name, StockUnit.KILOGRAM, kg(0), prepared = true)).resultId
+
+    @Test fun suggestionsBreakDownPreparedItemsAtAnyDepth() {
+        setUp()
+        // Seven levels of prepared items, each made 1:1 from the next; the last from tomatoes.
+        val chain = (1..7).map { prepared("آماده $it") }
+        chain.forEachIndexed { i, item ->
+            val next = chain.getOrNull(i + 1) ?: tomato
+            core.inventory.publishPrepRecipe(PublishPrepRecipe(id(), item, BusinessDate(19_000), kg(1), listOf(RecipeLine(next, kg(1)))))
+        }
+        val dish = core.inventory.defineMenuItem(DefineMenuItem(id(), "خوراک")).resultId
+        core.inventory.publishRecipe(PublishRecipe(id(), dish, BusinessDate(19_000), listOf(RecipeLine(chain.first(), kg(1)))))
+        val result = core.buying.suggestions(kitchen, listOf(PlanLine(dish, kg(3))), day, 13 * 60)
+        assertEquals(kg(3), result.groups.flatMap { it.lines }.single { it.item.id == tomato }.planned)
+        assertEquals(emptyList(), result.problems)
+    }
+
+    @Test fun aSharedPreparedItemIsBrokenDownOnceForItsWholeNeed() {
+        setUp()
+        val base = prepared("پایه")
+        val left = prepared("چپ"); val right = prepared("راست")
+        core.inventory.publishPrepRecipe(PublishPrepRecipe(id(), base, BusinessDate(19_000), kg(1), listOf(RecipeLine(tomato, kg(2)))))
+        core.inventory.publishPrepRecipe(PublishPrepRecipe(id(), left, BusinessDate(19_000), kg(1), listOf(RecipeLine(base, kg(1)))))
+        core.inventory.publishPrepRecipe(PublishPrepRecipe(id(), right, BusinessDate(19_000), kg(1), listOf(RecipeLine(base, kg(1)))))
+        val dish = core.inventory.defineMenuItem(DefineMenuItem(id(), "خوراک")).resultId
+        core.inventory.publishRecipe(PublishRecipe(id(), dish, BusinessDate(19_000), listOf(RecipeLine(left, kg(1)), RecipeLine(right, kg(1)))))
+        val result = core.buying.suggestions(kitchen, listOf(PlanLine(dish, kg(1))), day, 13 * 60)
+        assertEquals(kg(4), result.groups.flatMap { it.lines }.single { it.item.id == tomato }.planned)   // (1 + 1) kg base × 2
+    }
+
+    @Test fun whatCannotBeBrokenDownIsReportedNotSilentlyDropped() {
+        setUp()
+        val noRecipe = prepared("خمیر بی‌رسپی")
+        val dish = core.inventory.defineMenuItem(DefineMenuItem(id(), "خوراک")).resultId
+        core.inventory.publishRecipe(PublishRecipe(id(), dish, BusinessDate(19_000), listOf(RecipeLine(noRecipe, kg(1)))))
+        val dishWithoutRecipe = core.inventory.defineMenuItem(DefineMenuItem(id(), "بی‌رسپی")).resultId
+        val result = core.buying.suggestions(kitchen, listOf(PlanLine(dish, kg(1)), PlanLine(dishWithoutRecipe, kg(1))), day, 13 * 60)
+        assertEquals(setOf("خمیر بی‌رسپی", "بی‌رسپی"), result.problems.map { it.name }.toSet())
+        assertTrue(result.problems.all { it.kind == RecipeProblem.Kind.NO_RECIPE })
+    }
+
+    @Test fun aPrepRecipeThatWouldMakeACycleIsRefused() {
+        setUp()
+        val a = prepared("سس الف"); val b = prepared("سس ب"); val c = prepared("سس ج")
+        core.inventory.publishPrepRecipe(PublishPrepRecipe(id(), a, BusinessDate(19_000), kg(1), listOf(RecipeLine(b, kg(1)))))
+        core.inventory.publishPrepRecipe(PublishPrepRecipe(id(), b, BusinessDate(19_000), kg(1), listOf(RecipeLine(c, kg(1)))))
+        val e = assertFailsWith<ir.sabou.kernel.DomainException> {
+            core.inventory.publishPrepRecipe(PublishPrepRecipe(id(), c, BusinessDate(19_500), kg(1), listOf(RecipeLine(a, kg(1)))))
+        }
+        assertEquals("INVALID_INPUT:lines", e.error.code)
+        assertTrue(e.error.userMessage.contains("سس الف"), e.error.userMessage)
+    }
 }
+

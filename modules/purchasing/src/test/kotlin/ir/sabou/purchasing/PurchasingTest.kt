@@ -461,4 +461,32 @@ class PurchasingTest {
         apMatchesSubLedger()
         assertEquals("INVALID_STATE:SUPPLIER_REFUND:ALREADY_REVERSED", code { ops.reverseRefund(ReverseSupplierRefund(GlobalId.new(), branchA, cashRefund, day, "دوباره")) })
     }
+
+    // ------------------------------------------------------------ Owner self-approval policy (P0-5)
+
+    @Test fun theOwnerApprovesOwnInvoicesOnlyWithAReasonAndWithinThePolicy() {
+        approvals.saveRule(SaveApprovalRule(GlobalId.new(), null, "همه فاکتورها", null, null, null, rial(0), 1))
+        val own = invoice(no = "O1", value = 2_000_000)                       // recorded by the owner
+        assertEquals("INVALID_INPUT:reason", code { approvals.approve(ApproveInvoice(GlobalId.new(), branchA, own)) })
+        approvals.approve(ApproveInvoice(GlobalId.new(), branchA, own, "  تنها مدیر هستم  "))
+        val approval = purchases.invoice(own)!!.approvals.single()
+        assertTrue(approval.self)
+        assertEquals("تنها مدیر هستم", approval.reason)
+
+        // A cap: above it someone else must approve.
+        approvals.setSelfApproval(SetSelfApprovalPolicy(GlobalId.new(), allowed = true, maxAmount = rial(1_000_000)))
+        val big = invoice(no = "O2", value = 2_000_000)
+        assertEquals("INVALID_STATE:PURCHASE_INVOICE:SELF_APPROVAL_OVER_LIMIT", code { approvals.approve(ApproveInvoice(GlobalId.new(), branchA, big, "فوری")) })
+        approvals.approve(ApproveInvoice(GlobalId.new(), branchA, invoice(no = "O3", value = 900_000), "خرید کوچک"))
+
+        // Turned off: never, whatever the amount; another approver still can.
+        approvals.setSelfApproval(SetSelfApprovalPolicy(GlobalId.new(), allowed = false, maxAmount = null))
+        val small = invoice(no = "O4", value = 100_000)
+        assertEquals("INVALID_STATE:PURCHASE_INVOICE:SELF_APPROVAL_DISABLED", code { approvals.approve(ApproveInvoice(GlobalId.new(), branchA, small, "فوری")) })
+        session.actor = Actor(GlobalId.new(), "manager", Role.MANAGER, setOf(branchA.branchId))
+        approvals.approve(ApproveInvoice(GlobalId.new(), branchA, small))
+        assertEquals(false, purchases.invoice(small)!!.approvals.single().self)
+        assertEquals("PERMISSION_DENIED:APPROVAL_RULES", code { approvals.setSelfApproval(SetSelfApprovalPolicy(GlobalId.new(), true, null)) })
+    }
 }
+

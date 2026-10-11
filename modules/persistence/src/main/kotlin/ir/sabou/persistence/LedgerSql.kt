@@ -36,7 +36,17 @@ class SqlAccountStore(db: SqlDatabase) : SqlTable(db), AccountStore {
     )
 
     /** Adds missing chart accounts; never overwrites what is already stored. */
-    fun seed(chart: List<Account>) = chart.forEach { if (byCode(it.code) == null) upsert(it) }
+    /**
+     * Adds missing accounts of the standard chart and keeps the posting rights of existing system accounts equal to
+     * it: who may post to a control account is a rule of the code, not data (names and active flags stay as kept).
+     */
+    fun seed(chart: List<Account>) = chart.forEach { standard ->
+        val existing = byCode(standard.code)
+        when {
+            existing == null -> upsert(standard)
+            existing.isSystem && existing.postingModules != standard.postingModules -> upsert(existing.copy(postingModules = standard.postingModules))
+        }
+    }
 }
 
 /**

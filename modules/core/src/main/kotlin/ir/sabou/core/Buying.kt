@@ -1,6 +1,7 @@
 package ir.sabou.core
 
 import ir.sabou.inventory.Item
+import ir.sabou.inventory.PrepGraph
 import ir.sabou.inventory.RecipeBook
 import ir.sabou.inventory.StockUnit
 import ir.sabou.kernel.BusinessDate
@@ -49,7 +50,8 @@ data class PriceChange(
     val previousPrice: Long,
     val price: Long,
 ) {
-    val changeBp: Long get() = if (previousPrice == 0L) 0 else (price - previousPrice) * 10_000 / previousPrice
+    /** null when there was no earlier price to compare with. */
+    val changeBp: Long? get() = Ratio.changeBp(previousPrice, price)
 }
 
 data class PlanLine(val menuItemId: GlobalId, val portions: Quantity)
@@ -74,6 +76,13 @@ data class Suggestion(
 data class SuggestionGroup(val supplier: Supplier?, val delivery: Delivery?, val lines: List<Suggestion>) {
     val total: Money get() = Money.sum(lines.mapNotNull { it.value })
 }
+
+/** Something the plan needs that could not be broken down into what to buy; shown with the suggestion. */
+data class RecipeProblem(val name: String, val kind: Kind, val detail: String) {
+    enum class Kind { NO_RECIPE, CYCLE }
+}
+
+data class SuggestedOrders(val groups: List<SuggestionGroup>, val problems: List<RecipeProblem>)
 
 /**
  * Purchasing read models beyond [Overview]: orders, the review queue, price changes, suggested
@@ -153,7 +162,8 @@ class Buying internal constructor(private val core: SabouCore) {
                 val previous = last[key]
                 if (previous != null && inv.date >= from && inv.date <= to) {
                     val change = PriceChange(items[itemId] ?: return@forEach, names[inv.supplierId].orEmpty(), inv.id, inv.date, previous.first, previous.second, price)
-                    if (kotlin.math.abs(change.changeBp) >= thresholdBp) changes += change
+                    val bp = change.changeBp
+                    if (bp == null || kotlin.math.abs(bp) >= thresholdBp) changes += change
                 }
                 last[key] = inv.date to price
             }
@@ -212,7 +222,7 @@ class Buying internal constructor(private val core: SabouCore) {
      * order can still make. [plan] = dishes expected before the next delivery (prepared items in their
      * recipes are broken down into what they are made of, after using what is already prepared).
      */
-    fun suggestions(locationId: GlobalId, plan: List<PlanLine>, date: BusinessDate, minutesNow: Int): List<SuggestionGroup> {
+    fun suggestions(locationId: GlobalId, plan: List<PlanLine>, date: BusinessDate, minutesNow: Int): SuggestedOrders {
         val a = actor(Permission.PURCHASE_ORDER, Permission.PURCHASE_RECORD)
         val location = core.locations.byId(locationId) ?: throw DomainException(DomainError.NotFound("LOCATION"))
         a.require(location.scope)
@@ -221,21 +231,25 @@ class Buying internal constructor(private val core: SabouCore) {
         fun onHand(id: GlobalId) = core.stock.balance(id, locationId).quantity.micros
 
         // Planned need: dishes → ingredients; prepared items → their ingredients for the shortfall only.
-        val need = HashMap<GlobalId, Long>()
-        fun add(id: GlobalId, micros: Long) { need[id] = (need[id] ?: 0) + micros }
+        val problems = ArrayList<RecipeProblem>()
+        val dishes = HashMap<GlobalId, Long>()
         plan.filter { !it.portions.isZero }.forEach { p ->
-            book.requirements(p.menuItemId, date, p.portions).forEach { add(it.itemId, it.quantity.micros) }
+            val lines = runCatching { book.requirements(p.menuItemId, date, p.portions) }.getOrNull()
+            if (lines == null) {
+                problems += RecipeProblem(core.recipes.menuItem(p.menuItemId)?.name ?: "آیتم منو", RecipeProblem.Kind.NO_RECIPE, "رسپی این آیتم منو در این تاریخ نیست؛ مواد آن در پیشنهاد نیامده است.")
+            }
+            lines?.forEach { dishes[it.itemId] = (dishes[it.itemId] ?: 0L) + it.quantity.micros }
         }
-        val expanded = HashMap<GlobalId, Long>()   // prepared item → shortfall already broken down
-        repeat(5) {
-            need.keys.filter { items[it]?.prepared == true }.forEach { id ->
-                val shortfall = maxOf(0L, need.getValue(id) - onHand(id))
-                val todo = shortfall - (expanded[id] ?: 0L)
-                if (todo <= 0) return@forEach
-                expanded[id] = shortfall
-                runCatching { book.prepRequirements(id, date, Quantity.of(todo)) }.getOrNull()?.forEach { add(it.itemId, it.quantity.micros) }
+        val expansion = PrepGraph(core.recipes) { items[it]?.prepared == true }.expand(dishes, date, ::onHand)
+        expansion.problems.forEach { pr ->
+            problems += when (pr) {
+                is PrepGraph.Problem.NoRecipe -> RecipeProblem(items[pr.itemId]?.name ?: "کالای آماده", RecipeProblem.Kind.NO_RECIPE,
+                    "رسپی تولید ندارد؛ مواد آن در پیشنهاد نیامده است.")
+                is PrepGraph.Problem.Cycle -> RecipeProblem(items[pr.itemId]?.name ?: "کالای آماده", RecipeProblem.Kind.CYCLE,
+                    "رسپی‌ها چرخه دارند: " + pr.path.joinToString(" ← ") { items[it]?.name ?: "؟" })
             }
         }
+        val need = expansion.need
         val onOrder = HashMap<GlobalId, Long>()
         core.purchases.orders().filter { it.status == OrderStatus.OPEN && it.locationId == locationId }
             .forEach { o -> o.lines.forEach { onOrder[it.itemId] = (onOrder[it.itemId] ?: 0) + it.quantity.micros } }
@@ -262,6 +276,7 @@ class Buying internal constructor(private val core: SabouCore) {
                 SuggestionGroup(supplier, supplier?.nextDelivery(date, minutesNow), l.map { it.second }.sortedBy { it.item.shelf + "\u0000" + it.item.name })
             }
             .sortedWith(compareBy({ it.supplier == null }, { it.delivery?.orderBy?.epochDay ?: Long.MAX_VALUE }, { it.supplier?.name }))
+            .let { SuggestedOrders(it, problems) }
     }
 
     /** Countable units are bought whole. */

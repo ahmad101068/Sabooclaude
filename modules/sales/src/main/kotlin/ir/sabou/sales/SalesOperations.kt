@@ -128,16 +128,20 @@ data class ReverseCollection(
     override fun fingerprint() = "$scope|$collectionId|${date.epochDay}|$reason"
 }
 
-/** Ends the day: the sale must be posted and the cash box counted. Closed days are frozen. */
-@NoDocument
+/**
+ * Ends the day: the sale must be posted and the cash box [cashAccountId] counted. The count is a document of its
+ * own and any shortage or overage is booked (cash over/short). Closed days are frozen.
+ */
+@IssuesDocument(DocumentSeries.CASH_COUNT)
 data class CloseSalesDay(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
     val date: BusinessDate,
+    val cashAccountId: GlobalId,
     val countedCash: Money,
 ) : Command {
     override val requiredPermission = Permission.SALES_DAY_CLOSE
-    override fun fingerprint() = "$scope|${date.epochDay}|${countedCash.rial}"
+    override fun fingerprint() = "$scope|${date.epochDay}|$cashAccountId|${countedCash.rial}"
 }
 
 @NoDocument
@@ -343,9 +347,16 @@ class SalesOperations(
         requireDayOpen(cmd.scope, cmd.date)
         val sale = sales.activeSale(cmd.scope, cmd.date)
         ensure(sale == null || sale.status == SaleStatus.POSTED) { DomainError.InvalidState("DAILY_SALE", "NOT_POSTED") }
-        sales.saveDay(SalesDay(cmd.scope, cmd.date, closed = true, countedCash = cmd.countedCash))
-        ctx.audit(AuditDraft("SALES_DAY_CLOSE", "SALES_DAY", "${cmd.scope.branchId.value}:${cmd.date.epochDay}", "counted=${cmd.countedCash.rial}"))
-        sale?.id ?: GlobalId.new()
+        val box = treasury.account(cmd.cashAccountId)
+        ensure(box.scope == cmd.scope) { DomainError.InvalidInput("account", "صندوق متعلق به این شعبه نیست.") }
+        ensure(box.kind == ir.sabou.treasury.TreasuryKind.CASH || box.kind == ir.sabou.treasury.TreasuryKind.PETTY_CASH) {
+            DomainError.InvalidInput("account", "در پایان روز صندوق نقد شمرده می‌شود.")
+        }
+        val countId = GlobalId.new()
+        val difference = treasury.count(ctx, capability, box.id, cmd.countedCash, cmd.date, DAY_COUNT, countId, "شمارش صندوق پایان روز")
+        sales.saveDay(SalesDay(cmd.scope, cmd.date, closed = true, countedCash = cmd.countedCash, cashAccountId = box.id, difference = difference, countId = countId))
+        ctx.audit(AuditDraft("SALES_DAY_CLOSE", "SALES_DAY", "${cmd.scope.branchId.value}:${cmd.date.epochDay}", "counted=${cmd.countedCash.rial};difference=$difference"))
+        countId
     }
 
     fun reopenDay(c: ReopenSalesDay): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
@@ -372,5 +383,6 @@ class SalesOperations(
         const val REVENUE = "DAILY_SALE_REVENUE"
         const val SETTLEMENT = "DAILY_SALE_SETTLEMENT"
         const val COLLECTION = "RECEIVABLE_COLLECTION"
+        const val DAY_COUNT = "SALES_DAY_CASH_COUNT"
     }
 }

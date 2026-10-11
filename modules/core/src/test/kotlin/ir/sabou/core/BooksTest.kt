@@ -100,7 +100,7 @@ class BooksTest {
         assertEquals(listOf(received.id), core.books.chequesDue(day, 30).map { it.cheque.id })
         assertTrue(core.books.chequesDue(day, 10).isEmpty())
         // Our cheque to the supplier, after approval.
-        core.approvals.approve(ApproveInvoice(id(), branch, invoice))
+        core.approvals.approve(ApproveInvoice(id(), branch, invoice, "مالک تنها تأییدکننده است"))
         core.purchasing.payInvoice(PaySupplierInvoice(id(), branch, invoice, book, rial(3_000_000), day,
             cheque = ChequeDetails("900100", "ملت", "", day.plusDays(15), "لبنیات", bankAccountId = bank)))
         val issued = core.books.cheques(ChequeDirection.ISSUED).single().cheque

@@ -156,7 +156,7 @@ object OperationsScreens {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Column(Modifier.weight(1f)) {
                                             Text(item.name, style = SabouType.bodyStrong, color = Sabou.colors.ink)
-                                            val avg = if (b != null && !q.isZero) " · میانگین ${Fa.rial(b.value.rial * Quantity.SCALE / q.micros)} ریال" else ""
+                                            val avg = if (b != null && q.micros > 0 && b.value.rial >= 0) " · میانگین ${Fa.rial(ir.sabou.kernel.Ratio.mulDiv(b.value.rial, Quantity.SCALE, q.micros))} ریال" else ""
                                             Text("ارزش ${Fa.rial(b?.value?.rial ?: 0)} ریال$avg", style = SabouType.caption, color = Sabou.colors.muted)
                                         }
                                         Column(horizontalAlignment = Alignment.End) {

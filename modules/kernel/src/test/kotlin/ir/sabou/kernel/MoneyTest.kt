@@ -34,4 +34,15 @@ class MoneyTest {
         val id = GlobalId.new()
         assertEquals(id, GlobalId.parse(id.value.uppercase()))
     }
+
+    @Test fun changeIsExactSaturatingAndUndefinedWithoutABase() {
+        assertEquals(2_000L, Ratio.changeBp(300_000, 360_000))
+        assertEquals(-10_000L, Ratio.changeBp(5, 0))
+        assertEquals(5_000L, Ratio.changeBp(2_000_000_000_000_000, 3_000_000_000_000_000))
+        assertEquals(Long.MAX_VALUE, Ratio.changeBp(1, Long.MAX_VALUE))
+        assertEquals(17L, Ratio.changeBp(600, 601))                    // 16.67 bp rounds half away from zero
+        assertEquals(-17L, Ratio.changeBp(600, 599))
+        assertEquals(null, Ratio.changeBp(0, 10))
+    }
 }
+

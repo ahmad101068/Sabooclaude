@@ -183,9 +183,9 @@ class SalesTest {
     @Test fun closedDayIsFrozenAndOnlyTheOwnerReopensIt() {
         session.actor = manager
         val sale = draft(standardSettlements())
-        assertEquals("INVALID_STATE:DAILY_SALE:NOT_POSTED", code { ops.closeDay(CloseSalesDay(GlobalId.new(), branch, day, rial(400_000))) })
+        assertEquals("INVALID_STATE:DAILY_SALE:NOT_POSTED", code { ops.closeDay(CloseSalesDay(GlobalId.new(), branch, day, cash, rial(400_000))) })
         ops.post(PostDailySale(GlobalId.new(), branch, sale))
-        ops.closeDay(CloseSalesDay(GlobalId.new(), branch, day, rial(400_000)))
+        ops.closeDay(CloseSalesDay(GlobalId.new(), branch, day, cash, rial(400_000)))
         assertEquals("INVALID_STATE:SALES_DAY:CLOSED", code { ops.reverse(ReverseDailySale(GlobalId.new(), branch, sale, day, "اشتباه")) })
         assertEquals("PERMISSION_DENIED:SALES_DAY_REOPEN", code { ops.reopenDay(ReopenSalesDay(GlobalId.new(), branch, day, "اصلاح")) })
         session.actor = owner
@@ -275,4 +275,29 @@ class SalesTest {
         assertEquals(rial(1_000_000), salesStore.sale(id)!!.gross)   // the draft keeps what was recorded
         assertEquals(rial(1_400_000), salesStore.sale(save(line(2)))!!.gross)   // saving the draft again re-prices it
     }
+
+    // ------------------------------------------------------------ Day close = cash count (P0-5)
+
+    @Test fun closingTheDayCountsTheCashBoxAndBooksTheDifference() {
+        val sale = draft(standardSettlements())                     // 400,000 into the cash box
+        ops.post(PostDailySale(GlobalId.new(), branch, sale))
+        assertEquals(400_000, treasury.balance(cash))
+        // A card terminal is not counted at the till.
+        assertEquals("INVALID_INPUT:account", code { ops.closeDay(CloseSalesDay(GlobalId.new(), branch, day, card, rial(400_000))) })
+        ops.closeDay(CloseSalesDay(GlobalId.new(), branch, day, cash, rial(390_000)))
+        assertEquals(390_000, treasury.balance(cash))                // the box now holds what was counted
+        assertEquals(10_000, ledger.balance(StandardAccounts.CASH_OVER_SHORT).rial)   // the shortage is an expense
+        val closed = salesStore.day(branch, day)!!
+        assertEquals(cash, closed.cashAccountId)
+        assertEquals(-10_000, closed.difference)
+        assertEquals(1, numbers.ofDocument(closed.countId!!).count { it.number.series == ir.sabou.platform.DocumentSeries.CASH_COUNT })
+
+        // Reopened and closed again with more cash than the books: the overage is income, counted from the new balance.
+        ops.reopenDay(ReopenSalesDay(GlobalId.new(), branch, day, "اصلاح شمارش"))
+        ops.closeDay(CloseSalesDay(GlobalId.new(), branch, day, cash, rial(395_000)))
+        assertEquals(395_000, treasury.balance(cash))
+        assertEquals(5_000, ledger.balance(StandardAccounts.CASH_OVER_SHORT).rial)
+        assertEquals(5_000, salesStore.day(branch, day)!!.difference)
+    }
 }
+

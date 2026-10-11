@@ -97,7 +97,7 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
         },
         note = d.strOr("note", ""), orderId = Codec.idOrNull(d.strOrNull("order")), journalIds = d.strsOr("journals").map(Codec::id),
         recordedBy = Codec.idOrNull(d.strOrNull("recordedBy")), requiredApprovals = d.intOr("requiredApprovals", 0),
-        approvals = d.docsOr("approvals").map { Approval(Codec.id(it.str("user")), it.str("name"), it.long("at")) },
+        approvals = d.docsOr("approvals").map { Approval(Codec.id(it.str("user")), it.str("name"), it.long("at"), it.boolOr("self", false), it.strOrNull("reason")) },
     )
 
     override fun invoice(id: GlobalId) = doc("SELECT doc FROM purchase_invoices WHERE id = ?", id.value)?.let(::invoiceOf)
@@ -126,7 +126,7 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
                     },
                     "note" to invoice.note, "order" to invoice.orderId?.value, "journals" to invoice.journalIds.map { it.value },
                     "recordedBy" to invoice.recordedBy?.value, "requiredApprovals" to invoice.requiredApprovals.toLong(),
-                    "approvals" to invoice.approvals.map { mapOf("user" to it.userId.value, "name" to it.name, "at" to it.atEpochMillis) },
+                    "approvals" to invoice.approvals.map { mapOf("user" to it.userId.value, "name" to it.name, "at" to it.atEpochMillis, "self" to it.self, "reason" to it.reason) },
                 ),
             ),
         ),
@@ -226,6 +226,14 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
 }
 
 class SqlApprovalRuleStore(db: SqlDatabase) : SqlTable(db), ApprovalRuleStore {
+    private val meta = DatabaseMeta(db)
+    override fun selfApproval(): ir.sabou.purchasing.SelfApprovalPolicy = meta.get(SELF_APPROVAL)?.let { Doc.parse(it) }
+        ?.let { ir.sabou.purchasing.SelfApprovalPolicy(it.bool("allowed"), it.longOrNull("max")?.let(Codec::money)) }
+        ?: ir.sabou.purchasing.SelfApprovalPolicy()
+    override fun saveSelfApproval(policy: ir.sabou.purchasing.SelfApprovalPolicy) =
+        meta.put(SELF_APPROVAL, Json.encode(mapOf("allowed" to policy.allowed, "max" to policy.maxAmount?.rial)))
+    private companion object { const val SELF_APPROVAL = "purchasing.self_approval" }
+
     private fun read(d: Doc) = ApprovalRule(
         Codec.id(d.str("id")), d.str("name"), d.strOrNull("branch")?.let(Codec::branchOf), Codec.idOrNull(d.strOrNull("supplier")),
         d.strOrNull("category")?.let(InvoiceCategory::valueOf), Codec.money(d.long("min")), d.int("steps"), d.bool("active"),
@@ -386,13 +394,15 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
 
     override fun day(scope: Scope.Branch, date: BusinessDate) =
         doc("SELECT doc FROM sales_days WHERE scope = ? AND date = ?", Codec.scope(scope), date.epochDay)?.let {
-            SalesDay(Codec.branchOf(it.str("scope")), Codec.date(it.long("date")), it.bool("closed"), it.longOrNull("countedCash")?.let(Codec::money))
+            SalesDay(Codec.branchOf(it.str("scope")), Codec.date(it.long("date")), it.bool("closed"), it.longOrNull("countedCash")?.let(Codec::money),
+                Codec.idOrNull(it.strOrNull("cashAccount")), it.longOr("difference", 0), Codec.idOrNull(it.strOrNull("count")))
         }
     override fun saveDay(day: SalesDay) = upsert(
         "sales_days", listOf("scope", "date"),
         mapOf(
             "scope" to Codec.scope(day.scope), "date" to day.date.epochDay,
-            "doc" to Json.encode(mapOf("scope" to Codec.scope(day.scope), "date" to day.date.epochDay, "closed" to day.closed, "countedCash" to day.countedCash?.rial)),
+            "doc" to Json.encode(mapOf("scope" to Codec.scope(day.scope), "date" to day.date.epochDay, "closed" to day.closed, "countedCash" to day.countedCash?.rial,
+                "cashAccount" to day.cashAccountId?.value, "difference" to day.difference, "count" to day.countId?.value)),
         ),
     )
 }
