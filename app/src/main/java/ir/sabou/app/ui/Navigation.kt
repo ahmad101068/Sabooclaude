@@ -46,6 +46,8 @@ sealed interface Route : java.io.Serializable {
     data object Recipes : Route
     data object PrepRecipes : Route
     data object Production : Route
+    data object PrepPlan : Route
+    data object Allergens : Route
     data object Purchases : Route
     data object NewPurchase : Route
     data class PurchaseDetail(val invoiceId: GlobalId) : Route
