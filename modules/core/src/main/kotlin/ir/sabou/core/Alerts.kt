@@ -12,7 +12,7 @@ import ir.sabou.platform.Permission
  * only if it comes back.
  */
 data class Alert(val key: String, val kind: Kind, val title: String, val text: String) {
-    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL }
+    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST }
 }
 
 /**
@@ -54,6 +54,16 @@ class Alerts internal constructor(private val core: SabouCore) {
                         add(Alert("CHEQUE:${c.id.value}:${if (overdue) "late" else "due"}", Alert.Kind.CHEQUE_DUE,
                             "${if (c.direction == ir.sabou.treasury.ChequeDirection.RECEIVED) "چک دریافتی" else "چک پرداختی"} ${if (overdue) "سررسید گذشته" else "نزدیک سررسید"}",
                             "${Fa.rial(c.amount)} ریال · ${c.details.counterparty} · ${Fa.date(c.dueDate)}"))
+                    }
+                }
+                // A dish whose recipe now costs more than the target share of its price (purchase prices moved).
+                val target = core.salesOps.foodCostTarget()
+                if (target != null && (actor.role.allows(Permission.MENU_PRICE_MANAGE) || actor.role.allows(Permission.RECIPE_MANAGE))) {
+                    core.branches.all().filter { actor.canAccess(Scope.Branch(it.id)) }.forEach { b ->
+                        safe { core.reports.foodCosts(Scope.Branch(b.id), today) }.filter { it.costBp >= target }.forEach { r ->
+                            add(Alert("FOODCOST:${b.id.value.value}:${r.item.id.value}", Alert.Kind.FOOD_COST, "بهای مواد «${r.item.name}» ${Fa.percent(r.costBp)} قیمت",
+                                "هدف ${Fa.percent(target)} است: بهای مواد ${Fa.rial(r.cost)} و قیمت منو ${Fa.rial(r.price)} ریال. قیمت یا رسپی را بازبینی کنید."))
+                        }
                     }
                 }
                 if (actor.role.allows(Permission.PURCHASE_APPROVE)) {

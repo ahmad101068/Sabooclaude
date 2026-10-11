@@ -90,6 +90,7 @@ sealed interface Route : java.io.Serializable {
     data object Security : Route
     /** A day of the point-of-sale system from its Excel/CSV exports. */
     data object PosImport : Route
+    data object MenuEngineering : Route
 }
 
 /** One line of a prefilled order: item, quantity in micro-units, expected price per unit in rial. */

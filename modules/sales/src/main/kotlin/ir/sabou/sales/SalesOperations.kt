@@ -94,6 +94,15 @@ data class DiscardSaleDraft(override val commandId: GlobalId, override val scope
     override fun fingerprint() = "$scope|$saleId"
 }
 
+/** The target food cost of the menu (basis points of the price), or null to clear it (ADR-0028). */
+@NoDocument
+data class SetFoodCostTarget(override val commandId: GlobalId, val targetBp: Long?) : Command {
+    override val requiredPermission = Permission.MENU_PRICE_MANAGE
+    override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
+    override fun fingerprint() = "$targetBp"
+}
+
 /** A day imported from a point-of-sale export, posted at once (ADR-0026). */
 @IssuesDocument(DocumentSeries.DAILY_SALE)
 data class ImportPosSale(
@@ -279,6 +288,15 @@ class SalesOperations(
             ensure(!unit.isZero) { DomainError.InvalidInput("price", "قیمت واحد «${item.name}» صفر است.") }
         }
         return SaleLine.priced(item.id, input.portions, unit, list, input.overrideReason?.trim()?.takeIf { overridden })
+    }
+
+    fun foodCostTarget(): Long? = prices.foodCostTarget()
+
+    fun setFoodCostTarget(c: SetFoodCostTarget): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        ensure(cmd.targetBp == null || cmd.targetBp in 500..9_000) { DomainError.InvalidInput("target", "هدف درصد بهای غذا بین ۵ تا ۹۰ درصد است.") }
+        prices.saveFoodCostTarget(cmd.targetBp)
+        ctx.audit(AuditDraft("FOOD_COST_TARGET", "MENU", "target", "bp=${cmd.targetBp}"))
+        GlobalId.new()
     }
 
     fun setMenuPrice(c: SetMenuPrice): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->

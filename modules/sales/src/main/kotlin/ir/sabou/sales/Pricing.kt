@@ -29,6 +29,9 @@ interface MenuPriceStore {
     fun all(): List<MenuPrice>
     fun save(price: MenuPrice)
     fun nextSequence(): Long
+    /** Target food cost, basis points of the menu price (e.g. 3000 = 30 %), or null when not set. */
+    fun foodCostTarget(): Long?
+    fun saveFoodCostTarget(bp: Long?)
 }
 
 /** The price list: which price applies to a menu item, in a branch, on a day. */

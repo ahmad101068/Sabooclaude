@@ -56,6 +56,9 @@ class InMemoryMenuPriceStore : ir.sabou.sales.MenuPriceStore, Transactional {
     override fun all() = prices.toList()
     override fun save(price: ir.sabou.sales.MenuPrice) { prices += price }
     override fun nextSequence(): Long = (prices.maxOfOrNull { it.sequence } ?: 0L) + 1
+    private var target: Long? = null
+    override fun foodCostTarget() = target
+    override fun saveFoodCostTarget(bp: Long?) { target = bp }
     override fun snapshot(): Any = ArrayList(prices)
     @Suppress("UNCHECKED_CAST")
     override fun restore(snapshot: Any) { prices.clear(); prices.addAll(snapshot as List<ir.sabou.sales.MenuPrice>) }
