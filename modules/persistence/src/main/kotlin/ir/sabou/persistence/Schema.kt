@@ -215,6 +215,14 @@ object Schema {
                 "CREATE TABLE count_plans (id TEXT PRIMARY KEY, scope TEXT NOT NULL, doc TEXT NOT NULL)",
             ),
         ),
+        Migration(
+            13,
+            listOf(
+                // Bank statements and their matches with book movements (ADR-0035).
+                "CREATE TABLE bank_statements (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES treasury_accounts(id), doc TEXT NOT NULL)",
+                "CREATE INDEX bank_statements_account ON bank_statements(account_id)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

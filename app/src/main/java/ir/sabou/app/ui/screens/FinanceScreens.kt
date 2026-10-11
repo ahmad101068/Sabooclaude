@@ -167,6 +167,9 @@ object FinanceScreens {
                                 SecondaryButton("انتقال / واریز", { nav.go(Route.Transfer) }, Modifier.weight(1f), enabled = session.can(Permission.TREASURY_TRANSFER))
                                 SecondaryButton("شمارش صندوق", { nav.go(Route.Reconcile) }, Modifier.weight(1f), enabled = session.can(Permission.TREASURY_RECONCILE))
                             }
+                            if (session.can(Permission.TREASURY_RECONCILE) && balances.any { it.account.kind == ir.sabou.treasury.TreasuryKind.BANK }) {
+                                SecondaryButton("مغایرت بانکی (صورت‌حساب بانک)", { nav.go(Route.BankStatements) })
+                            }
                             SCard {
                                 Text("گردش اخیر", style = SabouType.section, color = Sabou.colors.ink)
                                 if (movements.isEmpty()) Text("هنوز گردشی ثبت نشده است.", style = SabouType.body, color = Sabou.colors.muted)
@@ -260,6 +263,7 @@ object FinanceScreens {
         Choice(PaymentPurpose.UTILITIES.name, "قبوض (آب، برق، گاز، تلفن)"),
         Choice(PaymentPurpose.OTHER_EXPENSE.name, "سایر هزینه‌ها"),
         Choice(PaymentPurpose.OWNER_WITHDRAWAL.name, "برداشت مالک"),
+        Choice(PaymentPurpose.BANK_FEES.name, "کارمزد بانکی"),
     )
 
     @Composable

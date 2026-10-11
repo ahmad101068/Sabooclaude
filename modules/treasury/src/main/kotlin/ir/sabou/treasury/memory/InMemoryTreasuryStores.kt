@@ -24,6 +24,7 @@ class InMemoryMovementStore : MovementStore, Transactional {
     override fun byId(id: GlobalId) = rows.firstOrNull { it.id == id }
     override fun reversalOf(id: GlobalId) = rows.firstOrNull { it.reversalOf == id }
     override fun bySource(type: String, id: GlobalId) = rows.filter { it.source.type == type && it.source.id == id }
+    override fun byAccount(accountId: GlobalId) = rows.filter { it.accountId == accountId }
     override fun balance(accountId: GlobalId): Long = rows.filter { it.accountId == accountId }
         .fold(0L) { acc, m -> if (m.direction == Direction.RECEIPT) Math.addExact(acc, m.amount.rial) else Math.subtractExact(acc, m.amount.rial) }
     override fun snapshot(): Any = rows.toList()

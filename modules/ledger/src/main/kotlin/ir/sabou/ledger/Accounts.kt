@@ -80,6 +80,7 @@ object StandardAccounts {
     val EMPLOYER_INSURANCE = AccountCode.of("6107")
     val CASH_OVER_SHORT = AccountCode.of("6108")
     val DEPRECIATION = AccountCode.of("6110")
+    val BANK_CHARGES = AccountCode.of("6111")
     /** Food given away: complimentary dishes, staff meals, donations (part of food cost, not waste). */
     val COMPS = AccountCode.of("6109")
 
@@ -126,6 +127,7 @@ object StandardAccounts {
             a(CASH_OVER_SHORT, "کسر و اضافه صندوق", AccountType.EXPENSE, t, s),   // counts: treasury, and sales at day close
             a(COMPS, "پذیرایی، غذای پرسنل و اهدایی", AccountType.EXPENSE, i),
             a(DEPRECIATION, "هزینه استهلاک", AccountType.EXPENSE, f),
+            a(BANK_CHARGES, "کارمزد بانکی", AccountType.EXPENSE),
         )
     }
 }

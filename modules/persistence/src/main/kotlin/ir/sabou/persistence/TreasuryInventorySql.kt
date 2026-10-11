@@ -80,6 +80,7 @@ class SqlMovementStore(db: SqlDatabase) : SqlTable(db), MovementStore {
     override fun reversalOf(id: GlobalId) = doc("SELECT doc FROM treasury_movements WHERE reversal_of = ?", id.value)?.let(::read)
     override fun bySource(type: String, id: GlobalId) =
         docs("SELECT doc FROM treasury_movements WHERE source_type = ? AND source_id = ? ORDER BY rowid", type, id.value).map(::read)
+    override fun byAccount(accountId: GlobalId) = docs("SELECT doc FROM treasury_movements WHERE account_id = ? ORDER BY rowid", accountId.value).map(::read)
 
     fun byAccount(accountId: GlobalId, limit: Int): List<TreasuryMovement> =
         docs("SELECT doc FROM treasury_movements WHERE account_id = ? ORDER BY rowid DESC LIMIT ?", accountId.value, limit).map(::read)
@@ -392,6 +393,36 @@ class SqlCountPlanStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.Coun
             "doc" to Json.encode(mapOf(
                 "id" to plan.id.value, "name" to plan.name, "scope" to Codec.scope(plan.scope), "location" to plan.locationId.value,
                 "items" to plan.itemIds.map { it.value }, "frequency" to plan.frequency.kind.name, "day" to plan.frequency.day.toLong(), "active" to plan.isActive,
+            )),
+        ),
+    )
+}
+
+/** Imported bank statements and their matches (ADR-0035). */
+class SqlBankStatementStore(db: SqlDatabase) : SqlTable(db), ir.sabou.treasury.BankStatementStore {
+    private fun read(d: Doc) = ir.sabou.treasury.BankStatement(
+        Codec.id(d.str("id")), Codec.id(d.str("account")), Codec.scopeOf(d.str("scope")), d.str("file"), Codec.date(d.long("from")), Codec.date(d.long("to")),
+        d.longOrNull("closing")?.let(Codec::money),
+        d.docs("lines").map {
+            ir.sabou.treasury.StatementLine(it.long("i").toInt(), Codec.date(it.long("date")), it.str("text"), ir.sabou.treasury.Direction.valueOf(it.str("dir")),
+                Codec.money(it.long("amount")), it.longOrNull("balance")?.let(Codec::money), it.str("ref"), Codec.idOrNull(it.strOrNull("movement")))
+        },
+        d.str("by"), d.long("at"),
+    )
+    override fun byId(id: GlobalId) = doc("SELECT doc FROM bank_statements WHERE id = ?", id.value)?.let(::read)
+    override fun of(accountId: GlobalId) = docs("SELECT doc FROM bank_statements WHERE account_id = ? ORDER BY rowid", accountId.value).map(::read)
+    override fun save(statement: ir.sabou.treasury.BankStatement) = upsert(
+        "bank_statements", "id",
+        mapOf(
+            "id" to statement.id.value, "account_id" to statement.accountId.value,
+            "doc" to Json.encode(mapOf(
+                "id" to statement.id.value, "account" to statement.accountId.value, "scope" to Codec.scope(statement.scope), "file" to statement.fileName,
+                "from" to statement.from.epochDay, "to" to statement.to.epochDay, "closing" to statement.closingBalance?.rial,
+                "lines" to statement.lines.map {
+                    mapOf("i" to it.index.toLong(), "date" to it.date.epochDay, "text" to it.description, "dir" to it.direction.name, "amount" to it.amount.rial,
+                        "balance" to it.balance?.rial, "ref" to it.reference, "movement" to it.movementId?.value)
+                },
+                "by" to statement.importedBy, "at" to statement.importedAt,
             )),
         ),
     )
