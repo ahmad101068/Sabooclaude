@@ -138,6 +138,7 @@ class InMemoryDocumentNumberStore : ir.sabou.platform.DocumentNumberStore, Trans
     override fun of(series: ir.sabou.platform.DocumentSeries, documentId: ir.sabou.kernel.GlobalId) =
         issued.firstOrNull { it.number.series == series && it.documentId == documentId }
     override fun ofDocument(documentId: ir.sabou.kernel.GlobalId) = issued.filter { it.documentId == documentId }
+    override fun bySequence(sequence: Long) = issued.filter { it.number.sequence == sequence }
     fun all(): List<ir.sabou.platform.NumberedDocument> = issued.toList()
 
     override fun snapshot(): Any = HashMap(last) to issued.toList()

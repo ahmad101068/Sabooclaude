@@ -191,6 +191,7 @@ fun HomeScreen(nav: Nav) {
                 BranchSwitcher()
             }
         }
+        item { ir.sabou.app.ui.components.NavRow(R.drawable.ic_search, "جستجو", "نام، شماره‌ی فاکتور یا سند، چک، مبلغ", onClick = { nav.go(Route.Search) }) }
         val d = data.orNull()
         item { Hero(d?.today, onClick = { nav.go(Route.Sales) }) }
         item { QuickActions(nav) }
