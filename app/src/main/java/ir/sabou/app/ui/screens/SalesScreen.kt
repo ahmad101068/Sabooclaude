@@ -330,7 +330,7 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                                 Text("نسیه ${Fa.number(i + 1L)}", style = SabouType.bodyStrong, color = Sabou.colors.onAccentSoft, modifier = Modifier.weight(1f))
                                 Text("حذف", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable { form.credits.remove(row) }.padding(6.dp))
                             }
-                            PickerOrHint("مشتری", data.customers.map { Choice(it.id, it.name, "سقف اعتبار ${Fa.toman(it.creditLimit)} تومان") }, row.customer,
+                            PickerOrHint("مشتری", data.customers.map { Choice(it.id, it.name, "سقف اعتبار ${Fa.rial(it.creditLimit)} ریال") }, row.customer,
                                 { row.customer = it }, "برای این شعبه مشتری اعتباری تعریف نشده است (من ← مشتریان).")
                             MoneyInput("مبلغ نسیه", row.amount, { row.amount = it })
                             DateInput("سررسید", row.due, { row.due = it }, session.today)
@@ -350,19 +350,19 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
                 PrimaryButton("ادامه: تأیید", { form.step = 2 }, enabled = form.settlements().isNotEmpty() && form.chequesComplete())
             }
             else -> FormCard("تأیید و ثبت") {
-                KeyValue("فروش ناخالص", Fa.toman(form.grossTotal()))
-                KeyValue("تخفیف", "− " + Fa.toman(form.discount?.rial ?: 0), Sabou.colors.danger)
-                KeyValue("حق سرویس", Fa.toman(form.service?.rial ?: 0))
-                KeyValue("مالیات و عوارض", Fa.toman(form.tax?.rial ?: 0))
+                KeyValue("فروش ناخالص", Fa.rial(form.grossTotal()))
+                KeyValue("تخفیف", "− " + Fa.rial(form.discount?.rial ?: 0), Sabou.colors.danger)
+                KeyValue("حق سرویس", Fa.rial(form.service?.rial ?: 0))
+                KeyValue("مالیات و عوارض", Fa.rial(form.tax?.rial ?: 0))
                 Divider()
-                KeyValue("قابل تسویه (تومان)", Fa.toman(form.payable()), strong = true)
+                KeyValue("قابل تسویه (ریال)", Fa.rial(form.payable()), strong = true)
                 form.settlements().forEach { s ->
                     val label = when (s) {
                         is Settlement.Liquid -> s.cheque?.let { "چک ${Fa.digits(it.number)} · ${it.bank} · سررسید ${Fa.date(it.dueDate)}" }
                             ?: data.accounts.firstOrNull { it.id == s.treasuryAccountId }?.name ?: "حساب"
                         is Settlement.Credit -> "نسیه · " + (data.customers.firstOrNull { it.id == s.customerId }?.name ?: "مشتری")
                     }
-                    KeyValue(label, Fa.toman(s.amount))
+                    KeyValue(label, Fa.rial(s.amount))
                 }
                 action.error?.let { Banner(it) }
                 val kitchen = form.kitchen
@@ -408,10 +408,10 @@ private fun Steps(step: Int, onStep: (Int) -> Unit) {
 private fun Summary(form: SaleForm) {
     val remaining = form.payable() - form.settled()
     SCard {
-        KeyValue("قابل تسویه", Fa.toman(form.payable()) + " تومان", strong = true)
+        KeyValue("قابل تسویه", Fa.rial(form.payable()) + " ریال", strong = true)
         if (form.step >= 1) {
             if (remaining == 0L && form.payable() > 0) Banner("تسویه کامل است · مانده: ۰", ChipKind.PRIMARY, R.drawable.ic_check)
-            else Banner("مانده تسویه: ${Fa.toman(remaining)} تومان", ChipKind.ACCENT)
+            else Banner("مانده تسویه: ${Fa.rial(remaining)} ریال", ChipKind.ACCENT)
         }
     }
 }
@@ -432,15 +432,15 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SCard {
             data.number?.let { KeyValue("شماره سند", Fa.digits(it), strong = true) }
-            KeyValue("فروش ناخالص", Fa.toman(sale.gross))
-            KeyValue("تخفیف", "− " + Fa.toman(sale.discount), Sabou.colors.danger)
-            KeyValue("حق سرویس", Fa.toman(sale.serviceCharge))
-            KeyValue("مالیات و عوارض", Fa.toman(sale.tax))
+            KeyValue("فروش ناخالص", Fa.rial(sale.gross))
+            KeyValue("تخفیف", "− " + Fa.rial(sale.discount), Sabou.colors.danger)
+            KeyValue("حق سرویس", Fa.rial(sale.serviceCharge))
+            KeyValue("مالیات و عوارض", Fa.rial(sale.tax))
             Divider()
-            KeyValue("جمع تسویه‌شده (تومان)", Fa.toman(sale.payable), strong = true)
-            if (sale.guests > 0) KeyValue("مهمان · میانگین هر نفر", "${Fa.number(sale.guests.toLong())} · ${Fa.toman(sale.netFood.rial / sale.guests)}")
-            if (sale.transactions > 0) KeyValue("فاکتور · میانگین هر فاکتور", "${Fa.number(sale.transactions.toLong())} · ${Fa.toman(sale.payable.rial / sale.transactions)}")
-            KeyValue("بهای تمام‌شده مواد", Fa.toman(sale.cost))
+            KeyValue("جمع تسویه‌شده (ریال)", Fa.rial(sale.payable), strong = true)
+            if (sale.guests > 0) KeyValue("مهمان · میانگین هر نفر", "${Fa.number(sale.guests.toLong())} · ${Fa.rial(sale.netFood.rial / sale.guests)}")
+            if (sale.transactions > 0) KeyValue("فاکتور · میانگین هر فاکتور", "${Fa.number(sale.transactions.toLong())} · ${Fa.rial(sale.payable.rial / sale.transactions)}")
+            KeyValue("بهای تمام‌شده مواد", Fa.rial(sale.cost))
             if (!sale.netFood.isZero) {
                 val pct = sale.cost.rial * 1000 / sale.netFood.rial
                 KeyValue("درصد بهای غذا (Food cost)", Fa.digits("${pct / 10}.${pct % 10}").replace('.', '٫') + "٪")
@@ -451,8 +451,8 @@ private fun PostedDay(branch: Scope.Branch, date: BusinessDate, data: SalesData)
             sale.settlements.forEach { s ->
                 when (s) {
                     is Settlement.Liquid -> KeyValue(s.cheque?.let { "چک ${Fa.digits(it.number)} · ${it.bank}" } ?: data.accounts.firstOrNull { it.id == s.treasuryAccountId }?.name ?: "حساب",
-                        "+ " + Fa.toman(s.amount), Sabou.colors.moneyIn)
-                    is Settlement.Credit -> KeyValue("نسیه · " + (data.customers.firstOrNull { it.id == s.customerId }?.name ?: "مشتری"), Fa.toman(s.amount), Sabou.colors.onAccentSoft)
+                        "+ " + Fa.rial(s.amount), Sabou.colors.moneyIn)
+                    is Settlement.Credit -> KeyValue("نسیه · " + (data.customers.firstOrNull { it.id == s.customerId }?.name ?: "مشتری"), Fa.rial(s.amount), Sabou.colors.onAccentSoft)
                 }
             }
         }

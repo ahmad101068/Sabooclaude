@@ -108,12 +108,12 @@ fun HomeScreen(nav: Nav) {
                 overview.invoices().filter { it.invoice.status == InvoiceStatus.POSTED && it.invoice.dueDate <= date.plusDays(7) }
                     .map { it.outstanding }.filter { !it.isZero }
             }?.takeIf { it.isNotEmpty() }?.let { due ->
-                add(Todo(R.drawable.ic_calendar, "${Fa.number(due.size.toLong())} فاکتور خرید سررسید این هفته", "جمع ${Fa.toman(Money.sum(due))} تومان", Route.Purchases, false))
+                add(Todo(R.drawable.ic_calendar, "${Fa.number(due.size.toLong())} فاکتور خرید سررسید این هفته", "جمع ${Fa.rial(Money.sum(due))} ریال", Route.Purchases, false))
             }
             safe { books.chequesDue(date, 7) }?.takeIf { it.isNotEmpty() }?.let { cheques ->
                 val overdue = cheques.count { it.cheque.dueDate < date }
                 add(Todo(R.drawable.ic_payment, "${Fa.number(cheques.size.toLong())} چک سررسید این هفته" + if (overdue > 0) " (${Fa.number(overdue.toLong())} گذشته)" else "",
-                    "جمع ${Fa.toman(cheques.sumOf { it.cheque.amount.rial })} تومان", Route.Cheques, overdue > 0))
+                    "جمع ${Fa.rial(cheques.sumOf { it.cheque.amount.rial })} ریال", Route.Cheques, overdue > 0))
             }
             if (session.actor.role.allows(Permission.PURCHASE_APPROVE)) safe { books.pendingApprovals() }?.takeIf { it.isNotEmpty() }?.let { list ->
                 add(Todo(R.drawable.ic_check, "${Fa.number(list.size.toLong())} فاکتور در انتظار تأیید شما", "پیش از پرداخت تأیید لازم است", Route.PendingApprovals, false))
@@ -186,8 +186,8 @@ private fun Hero(today: Today?, onClick: () -> Unit) {
             if (today != null) Chip(today.status, ChipKind.ACCENT)
         }
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(today?.net?.let { Fa.toman(it) } ?: "—", style = SabouType.display, color = c.onPrimary)
-            Text("تومان", style = SabouType.body, color = c.onPrimaryMuted, modifier = Modifier.padding(bottom = 8.dp))
+            Text(today?.net?.let { Fa.rial(it) } ?: "—", style = SabouType.display, color = c.onPrimary)
+            Text("ریال", style = SabouType.body, color = c.onPrimaryMuted, modifier = Modifier.padding(bottom = 8.dp))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("نقد" to today?.cash, "کارت" to today?.card, "نسیه" to today?.credit).forEach { (label, v) ->
@@ -195,7 +195,7 @@ private fun Hero(today: Today?, onClick: () -> Unit) {
                     Modifier.weight(1f).clip(SabouShapes.field).background(c.primarySurface).padding(horizontal = 10.dp, vertical = 8.dp),
                 ) {
                     Text(label, style = SabouType.caption, color = c.onPrimaryMuted)
-                    Text(v?.let(Fa::tomanShort) ?: "—", style = SabouType.bodyStrong, color = c.onPrimary)
+                    Text(v?.let(Fa::rialShort) ?: "—", style = SabouType.bodyStrong, color = c.onPrimary)
                 }
             }
         }

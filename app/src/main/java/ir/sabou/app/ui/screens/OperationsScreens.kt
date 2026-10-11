@@ -109,7 +109,7 @@ object OperationsScreens {
                 if (session.can(Permission.RECIPE_MANAGE)) item { NavRow(R.drawable.ic_recipe, "رسپی اقلام آماده", "سس، خمیر و هر چه در آشپزخانه ساخته می‌شود", onClick = { nav.go(Route.PrepRecipes) }) }
                 if (session.can(Permission.INVENTORY_PRODUCE)) item { NavRow(R.drawable.ic_recipe, "تولید اقلام آماده", "مواد از انبار کم و قلم آماده اضافه می‌شود", onClick = { nav.go(Route.Production) }) }
                 if (any(purchasePerms)) item { SectionTitle("خرید") }
-                if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "خرید و دریافت کالا", payable?.let { "بدهی ${Fa.tomanShort(it.rial)}" }, tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Purchases) }) }
+                if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "خرید و دریافت کالا", payable?.let { "بدهی ${Fa.rialShort(it.rial)}" }, tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Purchases) }) }
                 if (session.can(Permission.PURCHASE_ORDER) || session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "سفارش خرید", "پیشنهاد خرید، سفارش و تحویل", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Orders) }) }
                 if (any(purchasePerms)) item { NavRow(R.drawable.ic_supplier, "تأمین‌کنندگان", "فهرست و مانده حساب", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Suppliers) }) }
                 if (any(personnelPerms)) item { SectionTitle("پرسنل") }
@@ -156,8 +156,8 @@ object OperationsScreens {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Column(Modifier.weight(1f)) {
                                             Text(item.name, style = SabouType.bodyStrong, color = Sabou.colors.ink)
-                                            val avg = if (b != null && !q.isZero) " · میانگین ${Fa.toman(b.value.rial * Quantity.SCALE / q.micros)} تومان" else ""
-                                            Text("ارزش ${Fa.toman(b?.value?.rial ?: 0)} تومان$avg", style = SabouType.caption, color = Sabou.colors.muted)
+                                            val avg = if (b != null && !q.isZero) " · میانگین ${Fa.rial(b.value.rial * Quantity.SCALE / q.micros)} ریال" else ""
+                                            Text("ارزش ${Fa.rial(b?.value?.rial ?: 0)} ریال$avg", style = SabouType.caption, color = Sabou.colors.muted)
                                         }
                                         Column(horizontalAlignment = Alignment.End) {
                                             Text("${Fa.quantity(q)} ${unitName(item.unit)}", style = SabouType.bodyStrong, color = if (low) Sabou.colors.danger else Sabou.colors.ink)
@@ -329,7 +329,7 @@ object OperationsScreens {
                             val value = c.lines.sumOf { it.postedValue ?: 0 }
                             val sub = "${Fa.date(c.date)} · ${c.countedByName} · ${ReportTables.countStatusName(c.status)}" +
                                 (if (v.showsBook) " · ${Fa.number(c.differences.size.toLong())} اختلاف" else "")
-                            NavRow(R.drawable.ic_count, v.location, sub, if (c.status == ir.sabou.inventory.CountStatus.POSTED) Fa.tomanShort(value) else null,
+                            NavRow(R.drawable.ic_count, v.location, sub, if (c.status == ir.sabou.inventory.CountStatus.POSTED) Fa.rialShort(value) else null,
                                 tint = if (c.status == ir.sabou.inventory.CountStatus.PENDING) Sabou.colors.onAccentSoft else Sabou.colors.primary,
                                 tile = if (c.status == ir.sabou.inventory.CountStatus.PENDING) Sabou.colors.accentSoft else Sabou.colors.primarySoft,
                                 onClick = { nav.go(Route.CountDetail(c.id)) })
@@ -374,7 +374,7 @@ object OperationsScreens {
                         c.reviewedByName?.let { KeyValue(if (c.status == ir.sabou.inventory.CountStatus.REJECTED) "رد" else "تأیید", it) }
                         c.rejectReason?.let { Text("دلیل رد: $it", style = SabouType.caption, color = Sabou.colors.danger) }
                         if (c.note.isNotBlank()) Text(c.note, style = SabouType.caption, color = Sabou.colors.muted)
-                        if (c.status == ir.sabou.inventory.CountStatus.POSTED) KeyValue("ارزش کل اختلاف (تومان)", Fa.toman(c.lines.sumOf { it.postedValue ?: 0 }), strong = true)
+                        if (c.status == ir.sabou.inventory.CountStatus.POSTED) KeyValue("ارزش کل اختلاف (ریال)", Fa.rial(c.lines.sumOf { it.postedValue ?: 0 }), strong = true)
                         if (!v.showsBook) Text("تا تأیید، اختلاف‌ها فقط به بررسی‌کننده نشان داده می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
                     }
                     val shown = if (v.showsBook) c.lines.sortedBy { it.difference == 0L } else c.lines
@@ -388,7 +388,7 @@ object OperationsScreens {
                                     if (l.difference < 0) ChipKind.DANGER else ChipKind.ACCENT)
                             }
                             Text((if (v.showsBook) "دفتری ${Fa.quantity(l.bookAtCount)} · " else "") + "شمارش‌شده ${Fa.quantity(l.counted)} $unit" +
-                                (l.postedValue?.let { " · ارزش ${Fa.toman(it)}" } ?: ""), style = SabouType.caption, color = Sabou.colors.muted)
+                                (l.postedValue?.let { " · ارزش ${Fa.rial(it)}" } ?: ""), style = SabouType.caption, color = Sabou.colors.muted)
                             if (l.note.isNotBlank()) Text("یادداشت شمارنده: ${l.note}", style = SabouType.caption, color = Sabou.colors.muted)
                             l.reason?.let { Text("دلیل: ${ir.sabou.inventory.StockCountOperations.reasonName(it)}" + if (l.reasonNote.isNotBlank()) " · ${l.reasonNote}" else "",
                                 style = SabouType.caption, color = Sabou.colors.ink) }
@@ -495,7 +495,7 @@ object OperationsScreens {
                                     Text(e.name, style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
                                     if (e.endDate != null) Chip("پایان همکاری ${Fa.date(e.endDate!!)}", ChipKind.NEUTRAL)
                                 }
-                                KeyValue("حقوق ماهانه", Fa.toman(e.monthlySalary))
+                                KeyValue("حقوق ماهانه", Fa.rial(e.monthlySalary))
                                 Text("کد ملی ${Fa.digits(e.nationalId)}" + (e.startDate?.let { " · شروع کار ${Fa.date(it)}" } ?: ""),
                                     style = SabouType.caption, color = Sabou.colors.muted)
                                 if (e.endDate == null && e.isActive && session.can(Permission.PERSONNEL_MANAGE)) {
@@ -642,15 +642,15 @@ object OperationsScreens {
                                 }
                                 run.payslips.forEach { p ->
                                     Divider()
-                                    KeyValue(d.names[p.employeeId] ?: "", "خالص ${Fa.toman(p.net)}")
+                                    KeyValue(d.names[p.employeeId] ?: "", "خالص ${Fa.rial(p.net)}")
                                     p.payableDays?.let { days ->
-                                        Text("ماه ناقص: ${Fa.number(days.toLong())} روز کار · حقوق این ماه ${Fa.toman(p.baseSalary)}", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
+                                        Text("ماه ناقص: ${Fa.number(days.toLong())} روز کار · حقوق این ماه ${Fa.rial(p.baseSalary)}", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
                                     }
-                                    Text("ناخالص ${Fa.toman(p.gross)} · بیمه ${Fa.toman(p.employeeInsurance)} · مالیات ${Fa.toman(p.incomeTax)}",
+                                    Text("ناخالص ${Fa.rial(p.gross)} · بیمه ${Fa.rial(p.employeeInsurance)} · مالیات ${Fa.rial(p.incomeTax)}",
                                         style = SabouType.caption, color = Sabou.colors.muted)
                                     val unpaid = d.unpaid[run.id]?.get(p.employeeId)
                                     if (unpaid != null && !unpaid.isZero && session.can(Permission.PAYROLL_PAY)) {
-                                        SecondaryButton("پرداخت ${Fa.toman(unpaid)} تومان", {
+                                        SecondaryButton("پرداخت ${Fa.rial(unpaid)} ریال", {
                                             action.run({ payroll.pay(PaySalary(GlobalId.new(), branch, run.id, p.employeeId, payAccount!!, unpaid, session.today)) })
                                         }, enabled = payAccount != null && !action.busy)
                                     }
@@ -675,8 +675,8 @@ object OperationsScreens {
                         }
                         if (!d.insurance.isZero || !d.tax.isZero) {
                             FormCard("بیمه و مالیات پرداخت‌نشده") {
-                                KeyValue("بیمه", Fa.toman(d.insurance) + " تومان")
-                                KeyValue("مالیات حقوق", Fa.toman(d.tax) + " تومان")
+                                KeyValue("بیمه", Fa.rial(d.insurance) + " ریال")
+                                KeyValue("مالیات حقوق", Fa.rial(d.tax) + " ریال")
                                 if (session.can(Permission.PAYROLL_PAY)) {
                                     if (!d.insurance.isZero) SecondaryButton("پرداخت بیمه", {
                                         action.run({ payroll.remit(RemitLiability(GlobalId.new(), branch, LiabilityKind.INSURANCE, payAccount!!, d.insurance, session.today)) })

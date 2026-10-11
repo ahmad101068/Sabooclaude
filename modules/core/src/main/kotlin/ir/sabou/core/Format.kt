@@ -6,7 +6,7 @@ import ir.sabou.kernel.Quantity
 
 /**
  * Persian presentation rules in one tested place (the UI only calls these):
- * Persian digits, "٬" thousands separator, amounts shown in Toman while stored in Rial, and the
+ * Persian digits, "٬" thousands separator, amounts in Rial (stored, typed, shown and exported alike), and the
  * Solar Hijri (Jalali) calendar.
  */
 object Fa {
@@ -23,14 +23,10 @@ object Fa {
         return (if (negative) "−" else "") + digits(grouped)
     }
 
-    /** Toman for display: 10 Rial = 1 Toman. A leftover Rial shows as one decimal place. */
-    fun toman(rial: Long): String {
-        val whole = number(rial / 10)
-        val rest = kotlin.math.abs(rial % 10)
-        return if (rest == 0L) whole else whole + "٫" + digits(rest.toString())
-    }
+    /** An amount in Rial, the one money unit of the whole product (ADR-0018). */
+    fun rial(rial: Long): String = number(rial)
 
-    fun toman(money: Money): String = toman(money.rial)
+    fun rial(money: Money): String = number(money.rial)
 
     /** Basis points as a percentage with one decimal: 1234 → «۱۲٫۳٪». */
     fun percent(bp: Long): String {
@@ -39,15 +35,14 @@ object Fa {
         return (if (bp < 0) "−" else "") + text + "٪"
     }
 
-    /** Compact form for cards: ۱۴٫۸ م (million Toman) / ۲٫۱ ب (billion Toman). */
-    fun tomanShort(rial: Long): String {
-        val toman = rial / 10
-        val abs = kotlin.math.abs(toman)
-        val sign = if (toman < 0) "−" else ""
+    /** Compact Rial for cards: ۱۴٫۸ م (million Rial) / ۲٫۱ ب (billion Rial). */
+    fun rialShort(rial: Long): String {
+        val abs = kotlin.math.abs(rial)
+        val sign = if (rial < 0) "−" else ""
         return when {
             abs >= 1_000_000_000L -> sign + digits(oneDecimal(abs, 1_000_000_000L)) + " ب"
             abs >= 1_000_000L -> sign + digits(oneDecimal(abs, 1_000_000L)) + " م"
-            else -> number(toman)
+            else -> number(rial)
         }
     }
 
@@ -79,8 +74,8 @@ object Fa {
         return normalized.toLongOrNull()
     }
 
-    /** Toman typed by the user → Rial. */
-    fun parseToman(text: String): Money? = parseLong(text)?.let { if (it > Money.MAX_RIAL / 10) null else Money.of(it * 10) }
+    /** Rial typed by the user; null when empty, invalid or above the ceiling. */
+    fun parseRial(text: String): Money? = parseLong(text)?.let { if (it > Money.MAX_RIAL) null else Money.of(it) }
 
     /** Decimal quantity such as "۲٫۵" or "0.25" → micro-units. */
     fun parseQuantity(text: String): Quantity? {

@@ -421,7 +421,7 @@ object MeScreens {
                 val action = rememberAction()
                 Page {
                     Loaded(data) { list ->
-                        list.forEach { (c, owed) -> SCard { KeyValue(c.name, "بدهی ${Fa.toman(owed)} از سقف ${Fa.tomanShort(c.creditLimit.rial)}") } }
+                        list.forEach { (c, owed) -> SCard { KeyValue(c.name, "بدهی ${Fa.rial(owed)} از سقف ${Fa.rialShort(c.creditLimit.rial)}") } }
                     }
                     FormCard("مشتری جدید") {
                         TextInput("نام", name, { name = it })
