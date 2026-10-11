@@ -26,6 +26,10 @@ import ir.sabou.app.ui.LocalSession
 import ir.sabou.app.ui.Nav
 import ir.sabou.app.ui.Route
 import ir.sabou.app.ui.components.Banner
+import ir.sabou.app.ui.rememberAction
+import ir.sabou.app.ui.components.SecondaryButton
+import ir.sabou.app.ui.components.FormCard
+import ir.sabou.app.ui.components.TextInput
 import ir.sabou.app.ui.components.ChipKind
 import ir.sabou.app.ui.components.Choice
 import ir.sabou.app.ui.components.DateInput
@@ -70,6 +74,7 @@ object ReportsScreens {
                     SectionTitle("فروش")
                     NavRow(R.drawable.ic_sales, "گزارش پایان روز", "فروش، تسویه‌ها، بهای غذا و کسر و اضافه‌ی صندوق", onClick = { nav.go(Route.DayFlash) })
                     NavRow(R.drawable.ic_sales, "اقلام پرفروش و حاشیه‌ی سود", "سهم هر قلم از فروش و سود هر پرس", onClick = { nav.go(Route.ProductMix) })
+                    NavRow(R.drawable.ic_recipe, "مهندسی منو", "ستاره، اسب کاری، معما و سگ؛ و بهای غذا در برابر هدف", onClick = { nav.go(Route.MenuEngineering) })
                 }
                 if (session.can(Permission.INVENTORY_VIEW)) {
                     SectionTitle("انبار")
@@ -319,6 +324,71 @@ object ReportsScreens {
                         }
                     }
                     ExportButtons("اقلام-پرفروش") { listOf(ReportTables.productMix(reports.productMix(branch, from, to))) }
+                }
+            }
+        }
+    }
+
+    /** Menu engineering (ADR-0028): each dish by popularity and margin, with what to do about it. */
+    @Composable
+    fun MenuEngineering(nav: Nav) {
+        val session = LocalSession.current
+        var from by rememberSaveable { mutableStateOf(session.today.plusDays(-29)) }
+        var to by rememberSaveable { mutableStateOf(session.today) }
+        var target by rememberSaveable { mutableStateOf("") }
+        val action = rememberAction()
+        Column(Modifier.fillMaxSize()) {
+            Header("مهندسی منو", onBack = nav.back) { BranchSwitcher() }
+            WithBranch { branch ->
+                val data by load(session, branch, from, to) { reports.menuEngineering(branch, from, to) }
+                Page {
+                    PeriodPicker(from, to) { f, t -> from = f; to = t }
+                    Text("محبوب: سهم پرس‌ها دست‌کم ۷۰٪ سهم برابر. سودده: حاشیه‌ی هر پرس (قیمت − بهای امروز مواد) دست‌کم میانگین منو. بهای مواد با قیمت خرید خودش به‌روز می‌شود.",
+                        style = SabouType.caption, color = Sabou.colors.muted)
+                    Loaded(data) { e ->
+                        SCard {
+                            KeyValue("هدف بهای غذا", e.targetBp?.let(Fa::percent) ?: "تعیین نشده")
+                            e.averageMargin?.let { KeyValue("میانگین حاشیه‌ی هر پرس", Fa.rial(it) + " ریال") }
+                            KeyValue("مرز محبوبیت", Fa.percent(e.popularityBp))
+                        }
+                        if (session.can(Permission.MENU_PRICE_MANAGE)) FormCard("هدف بهای غذا") {
+                            TextInput("درصد هدف (مثلاً ۳۰)", target, { target = it }, keyboard = androidx.compose.ui.text.input.KeyboardType.Number)
+                            action.error?.let { Banner(it) }
+                            val bp = Fa.latinDigits(target).trim().toLongOrNull()?.times(100)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SecondaryButton("ذخیره", { action.run({ salesOps.setFoodCostTarget(ir.sabou.sales.SetFoodCostTarget(GlobalId.new(), bp)) }) { target = "" } },
+                                    enabled = bp != null && !action.busy)
+                                if (e.targetBp != null) SecondaryButton("برداشتن هدف", { action.run({ salesOps.setFoodCostTarget(ir.sabou.sales.SetFoodCostTarget(GlobalId.new(), null)) }) })
+                            }
+                        }
+                        if (e.rows.isEmpty()) EmptyState("در این بازه فروش ثبت نهایی نشده است.")
+                        val groups = listOf(
+                            ir.sabou.core.MenuClass.STAR to ("ستاره‌ها" to "محبوب و سودده: همین‌طور نگه دارید و جای خوب منو بدهید."),
+                            ir.sabou.core.MenuClass.PLOWHORSE to ("اسب‌های کاری" to "محبوب ولی کم‌سود: کمی قیمت یا بهای مواد (اندازه‌ی پرس، ماده‌ی ارزان‌تر) را اصلاح کنید."),
+                            ir.sabou.core.MenuClass.PUZZLE to ("معماها" to "سودده ولی کم‌فروش: معرفی کنید، جای بهتری در منو بدهید یا نامش را جذاب‌تر کنید."),
+                            ir.sabou.core.MenuClass.DOG to ("سگ‌ها" to "کم‌فروش و کم‌سود: از منو بردارید یا از نو طراحی کنید."),
+                            null to ("بدون بهای مواد" to "رسپی یا قیمت خرید مواد معلوم نیست."),
+                        )
+                        groups.forEach { (cls, label) ->
+                            val rows = e.rows.filter { it.menuClass == cls }
+                            if (rows.isEmpty()) return@forEach
+                            SectionTitle(label.first, Fa.number(rows.size.toLong()))
+                            Text(label.second, style = SabouType.caption, color = Sabou.colors.muted)
+                            rows.forEach { r ->
+                                SCard {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(r.mix.name, style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                                        r.mix.costBp?.let { Text("بهای غذا ${Fa.percent(it)}", style = SabouType.label, color = if (r.overTarget) Sabou.colors.danger else Sabou.colors.primary) }
+                                    }
+                                    Text("${Fa.quantity(r.mix.portions)} پرس (${Fa.percent(r.portionShareBp)}) · ${Fa.rial(r.mix.gross)} ریال", style = SabouType.caption, color = Sabou.colors.muted)
+                                    r.mix.unitMargin?.let { m ->
+                                        Text("قیمت ${r.mix.averagePrice?.let { Fa.rial(it) }} · مواد ${r.mix.unitCost?.let { Fa.rial(it) }} · حاشیه ${Fa.rial(m)} ریال", style = SabouType.caption, color = Sabou.colors.muted)
+                                    }
+                                    if (r.overTarget) Text("بیش از هدف بهای غذا", style = SabouType.caption, color = Sabou.colors.danger)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

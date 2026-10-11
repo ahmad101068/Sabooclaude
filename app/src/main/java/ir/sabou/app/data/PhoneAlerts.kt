@@ -125,6 +125,7 @@ object PhoneAlerts {
         Alert.Kind.CHEQUE_DUE -> "سررسید چک"
         Alert.Kind.SHORTAGE -> "کسری مصرف"
         Alert.Kind.APPROVAL -> "فاکتور در انتظار تأیید"
+        Alert.Kind.FOOD_COST -> "بهای مواد غذاها"
     }
 }
 

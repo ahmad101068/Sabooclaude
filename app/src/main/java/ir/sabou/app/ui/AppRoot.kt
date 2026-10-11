@@ -537,6 +537,7 @@ private fun Pages(route: Route, nav: Nav) {
         is Route.LedgerDetail -> ReportsScreens.LedgerDetail(nav, route)
         Route.DayFlash -> ReportsScreens.DayFlash(nav)
         Route.ProductMix -> ReportsScreens.ProductMix(nav)
+        Route.MenuEngineering -> ReportsScreens.MenuEngineering(nav)
         Route.Usage -> ReportsScreens.Usage(nav)
         Route.AttendanceReport -> ReportsScreens.AttendanceReport(nav)
         Route.Stock -> OperationsScreens.Stock(nav)

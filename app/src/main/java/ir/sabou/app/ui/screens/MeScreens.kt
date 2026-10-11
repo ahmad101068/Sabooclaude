@@ -321,6 +321,8 @@ object MeScreens {
         val items: Map<GlobalId, ir.sabou.inventory.Item>,
         val latest: Map<GlobalId, ir.sabou.inventory.RecipeVersion?>,
         val prices: Map<GlobalId, ir.sabou.core.MenuPriceView>,
+        val costs: Map<GlobalId, ir.sabou.core.FoodCostRow> = emptyMap(),
+        val target: Long? = null,
     )
 
     @Composable
@@ -331,7 +333,11 @@ object MeScreens {
         val data by load(session, branch) {
             val menu = overview.menu()
             MenuData(menu.map { it.item }, overview.items().associateBy { it.id }, menu.associate { it.item.id to it.latest },
-                if (branch != null && seesPrices) overview.menuPrices(branch, session.today).associateBy { it.item.id } else emptyMap())
+                if (branch != null && seesPrices) overview.menuPrices(branch, session.today).associateBy { it.item.id } else emptyMap(),
+                // Recipe cost today against today's price, for those who manage the menu (ADR-0028).
+                if (branch != null && (session.can(Permission.RECIPE_MANAGE) || session.can(Permission.MENU_PRICE_MANAGE)))
+                    runCatching { reports.foodCosts(branch, session.today).associateBy { it.item.id } }.getOrDefault(emptyMap()) else emptyMap(),
+                salesOps.foodCostTarget())
         }
         var name by rememberSaveable { mutableStateOf("") }
         var menuItem by rememberSaveable { mutableStateOf<GlobalId?>(null) }
@@ -357,6 +363,11 @@ object MeScreens {
                                 val price = p.price
                                 if (price == null) Text("قیمت منو ندارد — هنگام فروش قیمت واحد وارد می‌شود.", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
                                 else KeyValue(if (p.own) "قیمت (ویژه این شعبه)" else "قیمت", Fa.rial(price) + " ریال", strong = true)
+                            }
+                            d.costs[m.id]?.let { c ->
+                                val over = d.target != null && c.costBp >= d.target
+                                Text("بهای مواد هر پرس ${Fa.rial(c.cost)} ریال · ${Fa.percent(c.costBp)} قیمت" + if (over) " · بیش از هدف ${Fa.percent(d.target!!)}" else "",
+                                    style = SabouType.caption, color = if (over) Sabou.colors.danger else Sabou.colors.muted)
                             }
                             val v = latest[m.id]
                             if (v == null) Text("رسپی ندارد — فروش آن ثبت نهایی نمی‌شود.", style = SabouType.caption, color = Sabou.colors.danger)

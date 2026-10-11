@@ -95,6 +95,31 @@ data class MixRow(
 
 data class ProductMix(val from: BusinessDate, val to: BusinessDate, val branch: String, val rows: List<MixRow>, val gross: Money, val days: Int)
 
+/**
+ * Menu engineering (Kasavana & Smith): an item is *popular* when its share of portions sold reaches 70 % of an
+ * equal share, and *profitable* when its margin per portion (average price − today's recipe cost) reaches the
+ * menu's average margin weighted by portions. Star: both; plowhorse: popular only; puzzle: profitable only;
+ * dog: neither. Items without a known cost are left unclassified.
+ */
+enum class MenuClass { STAR, PLOWHORSE, PUZZLE, DOG }
+
+data class EngineeringRow(val mix: MixRow, val portionShareBp: Long, val menuClass: MenuClass?, val overTarget: Boolean)
+
+data class MenuEngineering(
+    val mix: ProductMix,
+    val rows: List<EngineeringRow>,
+    /** Popularity line: 70 % of an equal share of portions, basis points. */
+    val popularityBp: Long,
+    /** Average margin per portion weighted by portions sold (Rial), when costs are known. */
+    val averageMargin: Long?,
+    val targetBp: Long?,
+)
+
+/** Today's cost of one portion against today's menu price (ADR-0028). */
+data class FoodCostRow(val item: ir.sabou.inventory.MenuItem, val price: Money, val cost: Money) {
+    val costBp: Long get() = if (price.isZero) 0 else Ratio.mulDiv(cost.rial, 10_000, price.rial)
+}
+
 // ---------------------------------------------------------------- End of day
 
 data class DayFlash(
@@ -273,6 +298,45 @@ class Reports internal constructor(private val core: SabouCore) {
     }
 
     // ------------------------------------------------------------ Sales
+
+    fun menuEngineering(branch: Scope.Branch, from: BusinessDate, to: BusinessDate): MenuEngineering {
+        val mix = productMix(branch, from, to)
+        val target = core.salesOps.foodCostTarget()
+        val totalPortions = mix.rows.sumOf { it.portions.micros }
+        val n = mix.rows.size
+        val popularity = if (n == 0) 0 else Ratio.mulDiv(10_000, 70, 100L * n)
+        val costed = mix.rows.filter { it.unitMargin != null }
+        val averageMargin = costed.sumOf { it.portions.micros }.takeIf { it > 0 }?.let { q ->
+            java.math.BigInteger.ZERO.let { acc ->
+                costed.fold(acc) { s, r -> s + java.math.BigInteger.valueOf(r.unitMargin!!).multiply(java.math.BigInteger.valueOf(r.portions.micros)) }
+            }.divide(java.math.BigInteger.valueOf(q)).toLong()
+        }
+        val rows = mix.rows.map { r ->
+            val share = if (totalPortions <= 0) 0 else Ratio.mulDiv(r.portions.micros.coerceAtLeast(0), 10_000, totalPortions)
+            val cls = if (r.unitMargin == null || averageMargin == null) null else {
+                val popular = share >= popularity
+                val profitable = r.unitMargin!! >= averageMargin
+                when { popular && profitable -> MenuClass.STAR; popular -> MenuClass.PLOWHORSE; profitable -> MenuClass.PUZZLE; else -> MenuClass.DOG }
+            }
+            EngineeringRow(r, share, cls, target != null && (r.costBp ?: 0) >= target)
+        }
+        return MenuEngineering(mix, rows, popularity, averageMargin, target)
+    }
+
+    /**
+     * Each active menu item's recipe cost today (from current stock costs, else the last purchase price — so it
+     * follows purchase prices without anyone recalculating) against its menu price today in [branch].
+     */
+    fun foodCosts(branch: Scope.Branch, date: BusinessDate): List<FoodCostRow> {
+        val a = actor(Permission.RECIPE_MANAGE, Permission.MENU_PRICE_MANAGE, Permission.LEDGER_VIEW)
+        a.require(branch)
+        val costs = UnitCosts(branch, date)
+        return core.recipes.menuItems().filter { it.isActive }.mapNotNull { m ->
+            val price = core.salesOps.priceList.unitPriceOn(m.id, branch, date) ?: return@mapNotNull null
+            val cost = costs.portion(m.id, date) ?: return@mapNotNull null
+            FoodCostRow(m, price, cost)
+        }.sortedByDescending { it.costBp }
+    }
 
     fun productMix(branch: Scope.Branch, from: BusinessDate, to: BusinessDate): ProductMix {
         val a = actor(Permission.SALES_VIEW)

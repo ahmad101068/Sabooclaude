@@ -595,6 +595,9 @@ class SqlAssetStore(db: SqlDatabase) : SqlTable(db), ir.sabou.assets.AssetStore 
 
 /** Menu price versions (ADR-0019); append-only, the table refuses updates and deletes. */
 class SqlMenuPriceStore(db: SqlDatabase) : SqlTable(db), ir.sabou.sales.MenuPriceStore {
+    private val meta = DatabaseMeta(db)
+    override fun foodCostTarget(): Long? = meta.get("menu.food_cost_target_bp")?.toLongOrNull()?.takeIf { it > 0 }
+    override fun saveFoodCostTarget(bp: Long?) = meta.put("menu.food_cost_target_bp", (bp ?: 0L).toString())
     private fun priceOf(d: Doc) = ir.sabou.sales.MenuPrice(
         Codec.id(d.str("id")), Codec.id(d.str("menuItem")), Codec.scopeOf(d.str("scope")), Codec.date(d.long("from")),
         d.longOrNull("price")?.let(Codec::money), d.long("sequence"),
