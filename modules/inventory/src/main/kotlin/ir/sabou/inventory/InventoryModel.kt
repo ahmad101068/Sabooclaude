@@ -27,6 +27,8 @@ data class Item(
     val preferredSupplierId: GlobalId? = null,
     /** Suppliers this item may be bought from; empty = any supplier. */
     val approvedSupplierIds: Set<GlobalId> = emptySet(),
+    /** Purchase packs (sack, carton): quantities may be typed in them and are converted by [Units]. */
+    val packs: List<PackUnit> = emptyList(),
 )
 
 /** A storeroom or kitchen. Always inside one branch: stock always has an owner (AUD-011). */

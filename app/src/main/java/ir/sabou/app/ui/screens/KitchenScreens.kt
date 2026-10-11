@@ -1,9 +1,11 @@
 package ir.sabou.app.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -15,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
 import ir.sabou.app.ui.LocalSession
 import ir.sabou.app.ui.Nav
 import ir.sabou.app.ui.components.Banner
@@ -29,6 +32,7 @@ import ir.sabou.app.ui.components.KeyValue
 import ir.sabou.app.ui.components.Page
 import ir.sabou.app.ui.components.Picker
 import ir.sabou.app.ui.components.PrimaryButton
+import ir.sabou.app.ui.components.ItemQuantityInput
 import ir.sabou.app.ui.components.QuantityInput
 import ir.sabou.app.ui.components.SCard
 import ir.sabou.app.ui.components.SecondaryButton
@@ -38,6 +42,7 @@ import ir.sabou.app.ui.rememberAction
 import ir.sabou.app.ui.theme.Sabou
 import ir.sabou.app.ui.theme.SabouType
 import ir.sabou.core.Fa
+import ir.sabou.inventory.PackUnit
 import ir.sabou.inventory.PublishPrepRecipe
 import ir.sabou.inventory.RecipeLine
 import ir.sabou.inventory.RecordProduction
@@ -70,6 +75,8 @@ object KitchenScreens {
                     var shelf by rememberSaveable { mutableStateOf(item.shelf) }
                     var allergens by rememberSaveable { mutableStateOf(item.allergens) }
                     var active by rememberSaveable { mutableStateOf(item.isActive) }
+                    val packs = ir.sabou.app.ui.rememberRows<PackRow>({ listOf(it.name, it.contains) },
+                        { PackRow(it[0] as String, it[1] as Quantity?) }) { item.packs.map { PackRow(it.name, it.contains) } }
                     val id = ir.sabou.app.ui.rememberCommandId(itemId)
                     val action = rememberAction()
                     val unit = unitName(item.unit)
@@ -84,6 +91,25 @@ object KitchenScreens {
                             Checkbox(checked = active, onCheckedChange = { active = it })
                             Text("فعال (در فهرست‌ها نمایش داده شود)", style = SabouType.body, color = Sabou.colors.ink)
                         }
+                        Divider()
+                        Text("بسته‌بندی‌ها", style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                        Text("واحدهایی که کالا با آن‌ها خریده یا شمرده می‌شود، مثلاً «کیسه» = ۱۰ $unit. هنگام ثبت مقدار می‌توانید آن‌ها را انتخاب کنید؛ موجودی همیشه به $unit نگه داشته می‌شود.",
+                            style = SabouType.caption, color = Sabou.colors.muted)
+                        packs.forEach { r ->
+                            key(r) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextInput("نام", r.name, { r.name = it }, Modifier.weight(1f))
+                                    QuantityInput("هر بسته", unit, { r.contains = it }, Modifier.weight(1f), value = r.contains)
+                                    Text("حذف", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable { packs.remove(r) }.padding(6.dp))
+                                }
+                            }
+                        }
+                        if (packs.size < ir.sabou.inventory.Units.MAX_PACKS) {
+                            Text("+ افزودن بسته‌بندی", style = SabouType.label, color = Sabou.colors.primary, modifier = Modifier.clickable { packs.add(PackRow("", null)) }.padding(6.dp))
+                        }
+                        val packNames = packs.map { it.name.trim() }
+                        val packsBad = packs.any { it.name.isBlank() || it.contains == null || it.contains!!.micros <= 0L } || packNames.distinct().size != packNames.size
+                        if (packsBad) Banner("هر بسته‌بندی نام یکتا و مقدار بیشتر از صفر لازم دارد.", ChipKind.ACCENT)
                         if (suppliers.isNotEmpty() && !item.prepared) {
                             Divider()
                             Text("تأمین‌کنندگان", style = SabouType.bodyStrong, color = Sabou.colors.ink)
@@ -105,13 +131,19 @@ object KitchenScreens {
                         action.error?.let { Banner(it) }
                         PrimaryButton("ذخیره", {
                             action.run({
-                                inventory.updateItem(UpdateItem(id.value, item.id, name, minimum!!, par!!, shelf, allergens, preferred, approved.toSet(), active))
+                                inventory.updateItem(UpdateItem(id.value, item.id, name, minimum!!, par!!, shelf, allergens, preferred, approved.toSet(), active,
+                                    packs = packs.map { PackUnit(it.name.trim(), it.contains!!) }))
                             }) { nav.back() }
-                        }, enabled = session.can(Permission.INVENTORY_ITEM_MANAGE) && name.trim().length >= 2 && minimum != null && par != null && !parBad && !preferredBad, busy = action.busy)
+                        }, enabled = session.can(Permission.INVENTORY_ITEM_MANAGE) && name.trim().length >= 2 && minimum != null && par != null && !parBad && !preferredBad && !packsBad, busy = action.busy)
                     }
                 }
             }
         }
+    }
+
+    private class PackRow(name: String, contains: Quantity?) {
+        var name by mutableStateOf(name)
+        var contains by mutableStateOf(contains)
     }
 
     // ------------------------------------------------------------ Prep recipes
@@ -156,12 +188,12 @@ object KitchenScreens {
                                 style = SabouType.caption, color = Sabou.colors.muted)
                             Picker("قلم آماده", preps.map { Choice(it.first.id, it.first.name, unitName(it.first.unit)) }, target, { target = it })
                             DateInput("معتبر از", from, { from = it }, session.today)
-                            QuantityInput("مقدار خروجی هر بار تولید", target?.let { items[it] }?.let { unitName(it.unit) } ?: "", { output = it })
+                            ItemQuantityInput("مقدار خروجی هر بار تولید", target?.let { items[it] }, { output = it })
                             Divider()
                             rows.forEach { r ->
                                 key(r) {
                                     Picker("ماده اولیه", items.values.filter { it.isActive && it.id != target }.map { Choice(it.id, it.name, unitName(it.unit)) }, r.item, { r.item = it })
-                                    QuantityInput("مقدار خالص", r.item?.let { items[it] }?.let { unitName(it.unit) } ?: "", { r.qty = it }, value = r.qty)
+                                    ItemQuantityInput("مقدار خالص", r.item?.let { items[it] }, { r.qty = it }, value = r.qty)
                                     TextInput("بازده ٪ (خالی = ۱۰۰)", r.yieldText, { r.yieldText = it }, keyboard = KeyboardType.Number,
                                         error = if (r.yieldPercent == null) "بین ۱ تا ۱۰۰" else null)
                                     Divider()
@@ -208,7 +240,7 @@ object KitchenScreens {
                             FormCard {
                                 if (locations.size > 1) Picker("انبار یا آشپزخانه", locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
                                 Picker("قلم آماده", items.map { Choice(it.id, it.name, unitName(it.unit)) }, itemId, { itemId = it })
-                                QuantityInput("مقدار تولیدشده", items.firstOrNull { it.id == itemId }?.let { unitName(it.unit) } ?: "", { qty = it })
+                                ItemQuantityInput("مقدار تولیدشده", items.firstOrNull { it.id == itemId }, { qty = it })
                                 DateInput("تاریخ", date, { date = it }, session.today)
                                 val ready = loc != null && itemId != null && qty != null && !qty!!.isZero
                                 if (ready) {
