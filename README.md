@@ -18,8 +18,9 @@ This is a ground-up rebuild. The previous code base (`sabou-manager-v3-`) was au
 | `modules/payroll` | Employees, attendance, payroll runs with segregation of duties, payments, remittances, owner-entered yearly policies | treasury |
 | `modules/assets` | Fixed assets, depreciation runs, disposal | treasury |
 | `modules/backup` | Streaming AES-GCM backup container (format 4) | kernel |
-| `modules/persistence` | SQL schema v1 + forward migrations (now v6), immutability triggers, SQL stores for every port | sales, purchasing, payroll, assets |
-| `modules/core` | Single composition root, read models, Persian formatting + Jalali calendar, Persian error messages | persistence |
+| `modules/posimport` | Reading Excel/CSV exports: the POS (Sepand) day reports and bank statements, with their own totals checked | kernel |
+| `modules/persistence` | SQL schema v1 + forward migrations (now v17), immutability triggers, SQL stores for every port | sales, purchasing, payroll, assets |
+| `modules/core` | Single composition root, read models, Persian formatting + Jalali calendar, Persian error messages | persistence, posimport |
 | `app` | Android: SQLCipher adapter, Keystore keys, signed anchors, backup/restore, Compose UI (RTL, Vazirmatn) | core, backup |
 
 ## Build
@@ -33,9 +34,9 @@ python3 scripts/offline_build.py <jars-dir>        # offline fallback; enforces 
 ### Dependency verification
 Gradle checks the SHA-256 of every downloaded artifact against `gradle/verification-metadata.xml` (generated on Linux CI). Building on another OS (Windows/macOS) needs that OS's `aapt2` checksum once: run `./gradlew --write-verification-metadata sha256 :app:assembleDebug` locally and review the diff before committing. When upgrading a dependency, regenerate the file the same way.
 
-## Status (2026-10-09)
+## Status (2026-10-12)
 
-- JVM modules: **158 tests passing** offline (unit, end-to-end on a real SQLite file, restart, rollback, replay, tamper and rollback detection, factory reset, 80-year Jalali round trip). Spot mutation checks confirm key rules are guarded.
+- JVM modules: **253 tests passing** offline (unit, end-to-end on a real SQLite file, restart, rollback, replay, tamper and rollback detection, factory reset, 80-year Jalali round trip). Spot mutation checks confirm key rules are guarded.
 - CI (`.github/workflows/ci.yml`): Gradle `domainBuild` with all tests; the Android app compiles, passes lint and produces a debug APK (artifact `sabou-debug-apk`, signed with the committed debug key so updates install over each other); instrumented tests run on an Android emulator (SQLCipher, Keystore, backup/restore, rollback detection, encrypted drafts, every page).
 - Payroll legal values are not shipped: the owner enters each year's parameters (after professional review); payroll fails closed until then.
 - Unfinished forms survive the system closing the app (ADR-0010). Partial-month payroll is prorated (default ÷30).
@@ -43,4 +44,5 @@ Gradle checks the SHA-256 of every downloaded artifact against `gradle/verificat
 - Purchasing (ADR-0012): purchase orders and delivery, invoice photos/PDFs, expense lines (also for another branch), unknown lines held for review, supplier item names, return credit settling other open invoices, supplier delivery days and cut-off, approved suppliers, suggested purchases from par levels and planned dishes, price change alerts; comps booked apart from waste.
 - Stock counts (ADR-0014): blind count, review by a second person with a reason for every difference, full history.
 - Accounting (ADR-0013): cheque boxes and cheque books (received/issued cheques with Sayad id, due list, deposit, collect, bounce, settle, endorse to suppliers, leaf-sized print), multi-step invoice approval rules with separate approve/unapprove permissions, monthly budgets with budget-vs-actual, customers' cheques in the daily sale, supplier refunds of return credit, fixed assets with straight-line or declining-balance depreciation and disposal.
-- Before production: a round of hands-on testing on the restaurant's own devices, the yearly payroll values and the depreciation classes reviewed by a tax/insurance advisor, the cheque print positions checked on the bank's leaves, and a release signing key.
+- Since 2026-10-09 (ADR-0017 … 0041): purchase packs; Rial everywhere; menu prices with overrides; dashboard; several sales a day; sales beyond book stock (shortages settled later); owner recovery code and fingerprint; phone alerts; nightly encrypted backup; POS (Sepand) day import; volume benchmark; menu engineering and food-cost target; order ↔ invoice matching and possible duplicates; expiry lots (first expired, first out); count plans; par per delivery weekday; daily prep plan and allergens; daily P&L with accruals vs budget; bank statement reconciliation; month-end close checklist; tax system (Moadian) readiness — data only; shifts, labour cost and a PIN time clock; staff documents with expiry; global search; sales forecast with special days.
+- Before production: a round of hands-on testing on the restaurant's own devices, the yearly payroll values and the depreciation classes reviewed by a tax/insurance advisor, the cheque print positions checked on the bank's leaves, a release signing key, and — before anything is sent to the tax system — the tax ID algorithm verified against the official specification (ADR-0037).
