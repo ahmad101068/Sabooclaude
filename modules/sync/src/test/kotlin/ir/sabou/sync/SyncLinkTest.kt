@@ -134,6 +134,10 @@ class SyncLinkTest {
         db.query("SELECT * FROM $t").map { r -> SyncLog.columns(db, t).joinToString("|") { "${r.raw(it.name)}" } }.sorted()
     }
 
+    // The JDBC connection of these tests is not safe for use by two threads at once (Android's is): reads made here
+    // while the replication thread may be writing are taken under the core's own lock.
+    private fun <T> SabouCore.locked(block: SabouCore.() -> T): T = exclusive { block() }
+
     private fun eventually(what: String, check: () -> Boolean) {
         val until = System.currentTimeMillis() + 10_000
         while (System.currentTimeMillis() < until) { if (check()) return; Thread.sleep(50) }
@@ -151,16 +155,16 @@ class SyncLinkTest {
         val cash = phone.core.overview.treasury().single().account.id
         phone.core.treasury.receipt(RecordReceipt(GlobalId.new(), branch, cash, ReceiptPurpose.OWNER_CAPITAL, Money.of(5_000_000), BusinessDate(20_000), "آورده"))
         // Read back at once on the second phone: the command's effects are already in its copy.
-        assertEquals(5_000_000, phone.core.overview.treasury().single().balance)
+        assertEquals(5_000_000, phone.core.locked { overview.treasury().single().balance })
 
         // A change made on the main phone reaches the second phone by itself.
         hub.core.identity.login("owner", "123456".toCharArray())
         hub.core.inventory.createItem(CreateItem(GlobalId.new(), "برنج", StockUnit.KILOGRAM, Quantity.units(10)))
-        eventually("item copied") { phone.core.overview.items().any { it.name == "برنج" } }
+        eventually("item copied") { phone.core.locked { overview.items().any { it.name == "برنج" } } }
         assertTrue(phone.events.applied.get() > 0)
 
-        eventually("identical books") { dump(hub.database) == dump(phone.database) }
-        assertEquals(StartupVerdict.Healthy, phone.core.verifyAuditFull())
+        eventually("identical books") { hub.core.locked { dump(hub.database) } == phone.core.locked { dump(phone.database) } }
+        assertEquals(StartupVerdict.Healthy, phone.core.locked { verifyAuditFull() })
         assertEquals(emptyList(), phone.events.needsCopy.toList())
     }
 
@@ -225,6 +229,23 @@ class SyncLinkTest {
         val attempt = PairingAttempt.start(hub.address, GlobalId.new().value, "x")
         assertFailsWith<IOException> { attempt.confirm() }
         assertTrue(failed.await(5, TimeUnit.SECONDS))
+        assertEquals(emptyList(), hub.peers.all())
+    }
+
+    @Test fun onlyOnePhoneCanAnswerAPairingWindow() {
+        val hub = Hub()
+        val seen = CountDownLatch(1)
+        hub.server.openPairing(object : PairingListener {
+            override fun onCode(code: String, deviceName: String) = seen.countDown()
+            override fun onPaired(peer: Peer) {}
+            override fun onFailed(reason: String) {}
+        })
+        val first = PairingAttempt.start(hub.address, GlobalId.new().value, "اول")
+        assertTrue(seen.await(5, TimeUnit.SECONDS))
+        // Another phone at the same moment is turned away: the owner only ever sees one phone's code.
+        assertFailsWith<IOException> { PairingAttempt.start(hub.address, GlobalId.new().value, "دوم") }
+        hub.server.confirmPairing(false)
+        assertFailsWith<IOException> { first.confirm() }
         assertEquals(emptyList(), hub.peers.all())
     }
 

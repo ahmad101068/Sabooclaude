@@ -126,6 +126,8 @@ class SyncHub(
     private class PairingWindow(val listener: PairingListener, val until: Long) {
         @Volatile var decision: Boolean? = null
         val lock = Object()
+        /** One phone per window: a second request at the same moment is turned away, so the code the owner sees is that phone's. */
+        val claimed = java.util.concurrent.atomic.AtomicBoolean(false)
     }
 
     @Volatile private var pairing: PairingWindow? = null
@@ -147,7 +149,7 @@ class SyncHub(
     }
 
     private fun pair(socket: Socket, input: DataInputStream, output: DataOutputStream) {
-        val window = pairing?.takeIf { clock() < it.until } ?: return
+        val window = pairing?.takeIf { clock() < it.until && it.claimed.compareAndSet(false, true) } ?: return
         val clientPub = input.readShortBytes()
         val clientNonce = input.readBytes(32)
         val deviceName = String(input.readShortBytes(), Charsets.UTF_8).take(60)

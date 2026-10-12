@@ -205,7 +205,12 @@ class SyncReplica(
     /** Applies one batch; false when the copy must be replaced instead. */
     private fun applyBatch(changes: Message.Changes): Boolean = synchronized(applyLock) {
         val batch = changes.batch
-        if (batch.tooMany) { listener.onNeedsFullCopy("GAP"); running = false; return false }
+        if (batch.tooMany) {
+            // Asked from an older position while the other connection already moved this copy on (and the main
+            // phone forgot what lies before it): not a gap — ask again from where this copy is now.
+            if (batch.upTo < core.sync.cursor()) return true
+            listener.onNeedsFullCopy("GAP"); running = false; return false
+        }
         if (batch.upTo <= core.sync.cursor()) return true   // the other loop got here first
         try {
             core.sync.apply(batch)
