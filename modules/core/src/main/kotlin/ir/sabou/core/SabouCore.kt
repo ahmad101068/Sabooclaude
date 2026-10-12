@@ -163,6 +163,9 @@ class SabouCore private constructor(
     val moadian = Moadian(this)
     val labor = Labor(this)
     val search = Search(this)
+    internal val specialDays = ir.sabou.persistence.SqlSpecialDayStore(db)
+    val specialDayOps = ir.sabou.sales.SpecialDayOperations(bus, specialDays)
+    val forecasts = Forecasts(this)
     val books = Books(this)
 
     /**

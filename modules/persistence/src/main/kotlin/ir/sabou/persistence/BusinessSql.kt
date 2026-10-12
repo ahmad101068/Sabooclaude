@@ -719,3 +719,16 @@ class SqlStaffDocumentStore(db: SqlDatabase) : SqlTable(db), ir.sabou.payroll.St
             "title" to document.title, "expires" to document.expiresOn?.epochDay, "note" to document.note, "at" to document.recordedAtEpochMillis)),
     )
 }
+
+/** Special days of the sales forecast (ADR-0041). */
+class SqlSpecialDayStore(db: SqlDatabase) : SqlTable(db), ir.sabou.sales.SpecialDayStore {
+    override fun of(scope: Scope.Branch) = docs("SELECT doc FROM special_days WHERE scope = ? ORDER BY date", Codec.scope(scope)).map { d ->
+        ir.sabou.sales.SpecialDay(Codec.branchOf(d.str("scope")), Codec.date(d.long("date")), ir.sabou.sales.SpecialDay.Kind.valueOf(d.str("kind")), d.long("percent").toInt(), d.strOr("note", ""))
+    }
+    override fun save(day: ir.sabou.sales.SpecialDay) {
+        db.execute("INSERT INTO special_days (scope, date, doc) VALUES (?, ?, ?) ON CONFLICT(scope, date) DO UPDATE SET doc = excluded.doc",
+            Codec.scope(day.scope), day.date.epochDay,
+            Json.encode(mapOf("scope" to Codec.scope(day.scope), "date" to day.date.epochDay, "kind" to day.kind.name, "percent" to day.percent.toLong(), "note" to day.note)))
+    }
+    override fun remove(scope: Scope.Branch, date: BusinessDate) { db.execute("DELETE FROM special_days WHERE scope = ? AND date = ?", Codec.scope(scope), date.epochDay) }
+}

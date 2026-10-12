@@ -249,6 +249,13 @@ object Schema {
                 "CREATE INDEX staff_documents_employee ON staff_documents(employee_id)",
             ) + immutable("staff_documents"),
         ),
+        Migration(
+            17,
+            listOf(
+                // Days that will differ from the weekday pattern: closed, holiday, event (ADR-0041).
+                "CREATE TABLE special_days (scope TEXT NOT NULL, date INTEGER NOT NULL, doc TEXT NOT NULL, PRIMARY KEY(scope, date))",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

@@ -9,6 +9,7 @@ import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
 import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Quantity
+import ir.sabou.kernel.Ratio
 import ir.sabou.kernel.Scope
 import ir.sabou.platform.Actor
 import ir.sabou.platform.Permission
@@ -54,11 +55,14 @@ class Prep internal constructor(private val core: SabouCore) {
             .map { d -> core.sales.salesOn(branch, d).filter { it.status == SaleStatus.POSTED } }
             .filter { it.isNotEmpty() }
         if (days.isEmpty()) return emptyList()
+        // A day marked closed needs nothing; a holiday or event scales every dish (ADR-0041).
+        val special = core.specialDays.of(branch).firstOrNull { it.date == date }
+        val percent = when (special?.kind) { null -> 100L; ir.sabou.sales.SpecialDay.Kind.CLOSED -> return emptyList(); else -> special.percent.toLong() }
         val totals = HashMap<GlobalId, Long>()
         days.flatten().forEach { sale -> sale.lines.forEach { l -> totals[l.menuItemId] = (totals[l.menuItemId] ?: 0L) + l.portions.micros } }
         return totals.mapNotNull { (id, micros) ->
             val item = core.recipes.menuItem(id)?.takeIf { it.isActive } ?: return@mapNotNull null
-            val average = (micros + days.size - 1) / days.size
+            val average = Ratio.mulDiv((micros + days.size - 1) / days.size, percent, 100)
             DishForecast(item, Quantity.of(((average + Quantity.SCALE - 1) / Quantity.SCALE) * Quantity.SCALE), days.size)
         }.sortedByDescending { it.portions.micros }
     }
