@@ -41,7 +41,8 @@ jobs:
           git init -q && git checkout -q -b ci-logs
           git config user.name ci && git config user.email ci@users.noreply.github.com
           git add -A && git commit -qm "domain log ${{ github.run_id }}"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs
+          # Diagnostics only: retried, and never the reason a build fails (reports are also uploaded as artifacts).
+          for attempt in 1 2 3; do git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs && break; sleep $((attempt * 5)); done || true
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -82,7 +83,8 @@ jobs:
           git init -q && git checkout -q -b ci-logs
           git config user.name ci && git config user.email ci@users.noreply.github.com
           git add -A && git commit -qm "android log ${{ github.run_id }}"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs
+          # Diagnostics only: retried, and never the reason a build fails (reports are also uploaded as artifacts).
+          for attempt in 1 2 3; do git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs && break; sleep $((attempt * 5)); done || true
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -160,7 +162,8 @@ jobs:
           git init -q && git checkout -q -b ci-device
           git config user.name ci && git config user.email ci@users.noreply.github.com
           git add -A && git commit -qm "device tests ${{ github.run_id }}"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-device
+          # Diagnostics only: retried, and never the reason a build fails (reports are also uploaded as artifacts).
+          for attempt in 1 2 3; do git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-device && break; sleep $((attempt * 5)); done || true
       - name: Upload device test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -191,4 +194,5 @@ jobs:
           git init -q && git checkout -q -b ci-logs
           git config user.name ci && git config user.email ci@users.noreply.github.com
           git add -A && git commit -qm "verification metadata ${{ github.run_id }}"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs
+          # Diagnostics only: retried, and never the reason a build fails (reports are also uploaded as artifacts).
+          for attempt in 1 2 3; do git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs && break; sleep $((attempt * 5)); done || true
