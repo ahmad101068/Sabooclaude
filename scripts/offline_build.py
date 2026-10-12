@@ -25,6 +25,7 @@ MODULES = {  # module -> direct dependencies (must mirror build.gradle.kts)
     'posimport': ['kernel'],
     'persistence': ['sales', 'purchasing', 'payroll', 'assets'],
     'core': ['persistence', 'posimport'],
+    'sync': ['core'],
 }
 TEST_ONLY = ('sqlite-jdbc',)  # testImplementation jars: never visible to main code
 

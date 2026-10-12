@@ -24,7 +24,7 @@ data class TaxProfile(val sellerTaxId: String, val memoryId: String, val vatRate
     fun vatOn(date: BusinessDate): Long? = vatRates.filter { it.from <= date }.maxByOrNull { it.from }?.bp
 }
 
-data class VatRate(val from: BusinessDate, val bp: Long)
+data class VatRate(val from: BusinessDate, val bp: Long) : java.io.Serializable
 
 /** A menu item's product/service ID (شناسه کالا/خدمت, 13 digits) and the tax system's unit code. */
 data class ItemTaxCode(val menuItemId: GlobalId, val productId: String, val unitCode: String)

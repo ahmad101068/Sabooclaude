@@ -11,8 +11,9 @@ import ir.sabou.kernel.ensure
 /**
  * A state-changing request. Commands are plain data: they carry their own id (for idempotency),
  * the permission they need and the scope they touch. Handlers never check these themselves.
+ * They are serializable because a second phone sends them to the main phone to run (ADR-0042).
  */
-interface Command {
+interface Command : java.io.Serializable {
     val commandId: GlobalId
     val requiredPermission: Permission
     val scope: Scope
@@ -118,6 +119,12 @@ class CommandBus(
 ) {
     private val audit = AuditTrail(auditStore)
 
+    /**
+     * Set on a second phone (ADR-0042): after the same local checks, every command is sent to the main phone and
+     * runs there, under the same id; this phone's database changes only by replication from it.
+     */
+    @Volatile var forwarder: CommandForwarder? = null
+
     fun <C : Command> execute(module: ModuleId, command: C, handler: (C, CommandContext) -> GlobalId): CommandOutcome {
         ensure(!session.readOnly()) { DomainError.IntegrityViolation("COMMAND_IN_READ_ONLY_SESSION") }
         val actor = session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
@@ -126,6 +133,7 @@ class CommandBus(
         }
         val catalog = command.sharedCatalog && command.scope == Scope.Organization
         ensure(catalog || actor.canAccess(command.scope)) { DomainError.ScopeDenied(CommandContext.scopeLabel(command.scope)) }
+        forwarder?.let { return it.forward(module, command) }
         val type = command::class.qualifiedName ?: command::class.java.name
         val fingerprint = AuditHashing.sha256(type + "\u001F" + command.fingerprint())
         return unitOfWork.transaction {
@@ -150,4 +158,9 @@ class CommandBus(
     }
 }
 
-data class CommandOutcome(val resultId: GlobalId, val replayed: Boolean)
+data class CommandOutcome(val resultId: GlobalId, val replayed: Boolean) : java.io.Serializable
+
+/** Runs a command elsewhere (the main phone) and returns its outcome, or throws its [DomainException]. */
+fun interface CommandForwarder {
+    fun forward(module: ModuleId, command: Command): CommandOutcome
+}

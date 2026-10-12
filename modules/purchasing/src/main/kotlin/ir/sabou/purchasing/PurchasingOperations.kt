@@ -71,7 +71,7 @@ data class UpdateSupplier(
 }
 
 /** [cheque]: our new cheque from a cheque book; [chequeId]: a customer's cheque passed on from a cheque box. */
-data class ImmediatePayment(val treasuryAccountId: GlobalId, val amount: Money, val cheque: ChequeDetails? = null, val chequeId: GlobalId? = null) {
+data class ImmediatePayment(val treasuryAccountId: GlobalId, val amount: Money, val cheque: ChequeDetails? = null, val chequeId: GlobalId? = null) : java.io.Serializable {
     fun fingerprint() = "$treasuryAccountId:${amount.rial}:${cheque?.fingerprint()}:$chequeId"
 }
 

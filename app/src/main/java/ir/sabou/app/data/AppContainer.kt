@@ -54,6 +54,9 @@ class AppContainer(private val context: Context) {
     private val quarantine = File(context.noBackupFilesDir, QUARANTINE_DIR)
     private var helper: SupportSQLiteOpenHelper? = null
 
+    /** Two phones, one set of books (ADR-0042): this phone's role and its link to the other phone. */
+    val twoPhones = TwoPhones(context, this)
+
     private val mutableState = MutableStateFlow<AppState>(AppState.Opening)
     val state: StateFlow<AppState> = mutableState
 
@@ -73,6 +76,7 @@ class AppContainer(private val context: Context) {
             File(context.cacheDir, BACKUP_SEALED).delete()
             context.deleteDatabase(RESTORE_CANDIDATE)
             context.deleteDatabase(RESTORE_STAGED)
+            context.deleteDatabase(SYNC_CANDIDATE)
             open()
         }
     }
@@ -88,7 +92,7 @@ class AppContainer(private val context: Context) {
             val db = openHelper(DB_NAME, keys.databasePassphrase()).also { helper = it }.writableDatabase
             val core = SabouCore.open(AndroidSqlDatabase(db), anchors, Clock.SYSTEM, newDatabaseEpoch = epoch, deviceTime = deviceTime)
             when (val verdict = runCatching { core.verifyStartup() }.getOrElse { StartupVerdict.RollbackDetected(it.message ?: "ANCHOR") }) {
-                StartupVerdict.Healthy -> AppState.Ready(core).also { verifyInBackgroundIfDue(core) }
+                StartupVerdict.Healthy -> AppState.Ready(core).also { verifyInBackgroundIfDue(core); twoPhones.attach(core) }
                 is StartupVerdict.RollbackDetected -> AppState.Recovery(verdict.detail, core)
             }
         } catch (e: Throwable) {
@@ -187,6 +191,7 @@ class AppContainer(private val context: Context) {
     /** Internal for the device tests (they swap database files while the app is closed). */
     @Synchronized
     internal fun close() {
+        twoPhones.detach()
         helper?.close()
         helper = null
     }
@@ -303,14 +308,13 @@ class AppContainer(private val context: Context) {
      */
     @Synchronized
     fun restore(password: CharArray, source: Uri) {
+        // A second phone's data is the main phone's: replacing it here would only be undone by the next copy.
+        if (twoPhones.isReplica) throw DomainException(DomainError.InvalidState("DEVICE", "HUB_ONLY"))
         context.deleteDatabase(RESTORE_CANDIDATE)
         context.deleteDatabase(RESTORE_STAGED)
         val candidateFile = context.getDatabasePath(RESTORE_CANDIDATE).also { it.parentFile?.mkdirs() }
-        val staged = context.getDatabasePath(RESTORE_STAGED)
-        val epoch: String
-        var keyReplaced = false
+        var payloadKey = ""
         try {
-            var payloadKey = ""
             val input = context.contentResolver.openInputStream(source) ?: error("BACKUP_SOURCE_UNAVAILABLE")
             // The candidate stays encrypted on disk under the backup's own key.
             input.use { i ->
@@ -318,9 +322,34 @@ class AppContainer(private val context: Context) {
                 splitter.use { o -> StreamingBackupCodec.decrypt(password, i, o, MAX_RESTORE_BYTES) }
                 payloadKey = splitter.key
             }
+        } catch (e: Throwable) {
+            context.deleteDatabase(RESTORE_CANDIDATE)
+            throw e
+        }
+        replaceFromCandidate(candidateFile, payloadKey, expectedEpoch = null, quarantine = true, prepare = {}) { epoch -> announceReplacement(epoch, "RESTORE") }
+    }
 
+    /**
+     * The shared part of every replacement: verify the candidate (schema, full audit chain) → copy it into a new
+     * database under this device's key ([prepare] may then adjust that new file) → [announce] + seal → quarantine
+     * the current database ([quarantine]) → atomic rename → open. Nothing of the current database is touched until
+     * the candidate has passed every check.
+     */
+    private fun replaceFromCandidate(
+        candidateFile: File,
+        payloadKey: String,
+        expectedEpoch: String?,
+        quarantine: Boolean,
+        prepare: (SupportSQLiteDatabase) -> Unit,
+        announce: (String) -> Unit,
+    ) {
+        val staged = context.getDatabasePath(RESTORE_STAGED)
+        context.deleteDatabase(RESTORE_STAGED)
+        val epoch: String
+        var keyReplaced = false
+        try {
             // 1. Verify the candidate in isolation: schema version and the whole audit chain.
-            val candidateHelper = openHelper(RESTORE_CANDIDATE, payloadKey.toByteArray(Charsets.US_ASCII))
+            val candidateHelper = openHelper(candidateFile.name, payloadKey.toByteArray(Charsets.US_ASCII))
             epoch = try {
                 val candidate = SabouCore.open(AndroidSqlDatabase(candidateHelper.writableDatabase), InMemoryAnchorStore())
                 val verdict = candidate.verifyAuditFull()
@@ -329,6 +358,7 @@ class AppContainer(private val context: Context) {
             } finally {
                 candidateHelper.close()
             }
+            if (expectedEpoch != null) check(epoch == expectedEpoch) { "COPY_EPOCH_MISMATCH" }
 
             // 2. Copy into a new database encrypted with the device key. A device whose key is provably lost
             //    (the only case in which the database could not be opened at all) gets a new key.
@@ -349,6 +379,7 @@ class AppContainer(private val context: Context) {
                 } finally {
                     db.execSQL("DETACH DATABASE candidate")
                 }
+                prepare(db)
             } finally {
                 stagedHelper.close()
             }
@@ -356,12 +387,13 @@ class AppContainer(private val context: Context) {
             context.deleteDatabase(RESTORE_STAGED)   // nothing of the live database has been touched
             throw e
         } finally {
-            context.deleteDatabase(RESTORE_CANDIDATE)
+            context.deleteDatabase(candidateFile.name)
+            candidateFile.delete()
         }
 
-        // 3. Announce and seal (authorized and audited by the core). Refused → nothing happened.
+        // 3. Announce and seal (authorized by the caller). Refused → nothing happened.
         try {
-            announceReplacement(epoch, "RESTORE")
+            announce(epoch)
         } catch (e: Throwable) {
             context.deleteDatabase(RESTORE_STAGED)
             throw e
@@ -371,7 +403,7 @@ class AppContainer(private val context: Context) {
             faultPoint("announced")
             clearDrafts(); biometric.disable(); PhoneAlerts.forget(context); AutoBackup.forget(context)   // drafts belong to the replaced database
             close()
-            keepInQuarantine("RESTORE", move = false, withKey = !keyReplaced)
+            if (quarantine) keepInQuarantine("RESTORE", move = false, withKey = !keyReplaced)
             faultPoint("quarantined")
             // A leftover journal of the old file must not be applied to the new one (the file was closed cleanly).
             listOf("-journal", "-wal", "-shm").forEach { File(context.getDatabasePath(DB_NAME).path + it).delete() }
@@ -379,6 +411,87 @@ class AppContainer(private val context: Context) {
             faultPoint("swapped")
         } finally {
             open()
+        }
+    }
+
+    // ---------------------------------------------------------------- two phones (ADR-0042)
+
+    /**
+     * The main phone's full copy of the books for a second phone: the same SQLCipher export as a backup (under a
+     * fresh random key, never plaintext on disk), taken with every write held back, at log position [cursor].
+     */
+    fun exportSyncCopy(core: SabouCore): ir.sabou.sync.Snapshot {
+        val db = synchronized(this) { checkNotNull(helper) { "DATABASE_CLOSED" }.writableDatabase }
+        val file = File(context.cacheDir, "sync-copy-${java.util.UUID.randomUUID()}.db")
+        val key = randomHexKey()
+        try {
+            val cursor = core.exclusive {
+                val head = core.sync.head()
+                db.execSQL("ATTACH DATABASE ? AS export KEY '$key'", arrayOf<Any?>(file.absolutePath))
+                try {
+                    db.query("SELECT sqlcipher_export('export')").use { it.moveToFirst() }
+                } finally {
+                    db.execSQL("DETACH DATABASE export")
+                }
+                head
+            }
+            return ir.sabou.sync.Snapshot(file, key, cursor, core.epoch)
+        } catch (e: Throwable) {
+            file.delete()
+            throw e
+        }
+    }
+
+    /**
+     * Installs a full copy of the main phone's books, downloaded into [candidate] (under [key]) at log position
+     * [cursor]. [firstTime]: this phone is being paired, and its own data — if any — is replaced only with the
+     * consent of its owner (or when it has no users yet), and kept in quarantine. Otherwise this is a second
+     * phone refreshing its copy: no consent is needed, the old copy is not worth keeping.
+     * The new file records where replication continues before it is put in place, so the two can never disagree.
+     */
+    @Synchronized
+    fun installSyncCopy(candidate: File, key: String, epoch: String, cursor: Long, firstTime: Boolean) {
+        replaceFromCandidate(
+            candidate, key, expectedEpoch = epoch, quarantine = firstTime,
+            prepare = { db ->
+                db.execSQL("DELETE FROM ${ir.sabou.persistence.SyncLog.CHANGES}")
+                db.execSQL("DELETE FROM ${ir.sabou.persistence.SyncLog.STATE}")
+                db.execSQL("INSERT INTO ${ir.sabou.persistence.SyncLog.STATE}(key, value) VALUES (?, ?)", arrayOf<Any?>(ir.sabou.persistence.SyncLog.CURSOR, cursor.toString()))
+            },
+        ) { newEpoch ->
+            val core = currentCore()
+            when {
+                firstTime -> announceReplacement(newEpoch, "SYNC_PAIR")
+                core != null && core.sync.isReplica -> core.acceptSyncReplacement(newEpoch)
+                else -> announceReplacement(newEpoch, "SYNC_COPY")
+            }
+        }
+    }
+
+    /** Where the copy is downloaded to before it is verified and installed. */
+    fun syncCandidateFile(): File {
+        context.deleteDatabase(SYNC_CANDIDATE)
+        return context.getDatabasePath(SYNC_CANDIDATE).also { it.parentFile?.mkdirs() }
+    }
+
+    /**
+     * A second phone leaves: its copy is set aside and the app starts empty, as a phone of its own. The books stay
+     * on the main phone. Only its owner may do it (checked by the caller's screen and here).
+     */
+    @Synchronized
+    fun leaveAsSecondPhone() {
+        val core = currentCore()
+        check(core == null || core.session.currentActor()?.isOwner == true) { "OWNER_ONLY" }
+        val epoch = SabouCore.newEpoch()
+        if (core != null && core.sync.isReplica) core.acceptSyncReplacement(epoch) else announceReplacement(epoch, "FACTORY_RESET")
+        twoPhones.forgetRole()
+        try {
+            clearDrafts(); biometric.disable(); PhoneAlerts.forget(context); AutoBackup.forget(context)
+            close()
+            keepInQuarantine("LEAVE_SYNC", move = true)
+            keys.forgetDatabaseKey()
+        } finally {
+            open(newEpoch = epoch)
         }
     }
 
@@ -452,6 +565,7 @@ class AppContainer(private val context: Context) {
         private const val DRAFT_VERSION = "app_version"
         private const val RESTORE_CANDIDATE = "restore-candidate.db"
         private const val RESTORE_STAGED = "sabou-restore.db"
+        private const val SYNC_CANDIDATE = "sync-candidate.db"
         private const val MAX_RESTORE_BYTES = 2L * 1024 * 1024 * 1024
         private const val QUARANTINE_DIR = "quarantine"
         private const val QUARANTINE_KEEP = 3

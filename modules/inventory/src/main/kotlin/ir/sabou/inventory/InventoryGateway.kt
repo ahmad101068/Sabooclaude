@@ -21,8 +21,8 @@ import ir.sabou.platform.CommandContext
 import ir.sabou.platform.ModuleId
 
 /** [expiresOn]: the date printed on the goods, if any; without it the item's shelf life applies (ADR-0030). */
-data class ReceiptLine(val itemId: GlobalId, val quantity: Quantity, val value: Money, val expiresOn: BusinessDate? = null)
-data class IssueLine(val itemId: GlobalId, val quantity: Quantity)
+data class ReceiptLine(val itemId: GlobalId, val quantity: Quantity, val value: Money, val expiresOn: BusinessDate? = null) : java.io.Serializable
+data class IssueLine(val itemId: GlobalId, val quantity: Quantity) : java.io.Serializable
 data class IssuedCost(val itemId: GlobalId, val quantity: Quantity, val cost: Money)
 /** What a consumption took from stock at cost, and what it could not (left as open shortages, ADR-0022). */
 data class Consumption(val lines: List<IssuedCost>, val totalCost: Money, val journal: JournalEntry?, val shortages: List<StockShortage> = emptyList())

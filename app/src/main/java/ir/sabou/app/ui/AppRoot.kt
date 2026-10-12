@@ -341,6 +341,11 @@ private fun Bootstrap(core: SabouCore, container: AppContainer, onSignedIn: (ir.
         Spacer(Modifier.height(8.dp))
         Text("از قبل فایل پشتیبان سابو دارید؟ (گوشی جدید یا نصب دوباره)", style = SabouType.body, color = Sabou.colors.muted)
         RestoreCard(container, title = "بازیابی اطلاعات قبلی")
+        Spacer(Modifier.height(8.dp))
+        Text("این گوشی، گوشی دوم رستوران است؟ (داده‌ها روی گوشی اصلی است)", style = SabouType.body, color = Sabou.colors.muted)
+        var secondPhone by remember { mutableStateOf(false) }
+        if (secondPhone) ir.sabou.app.ui.screens.SyncScreens.PairAsSecondPhone(onCancel = { secondPhone = false })
+        else SecondaryButton("اتصال به گوشی اصلی", { secondPhone = true })
     }
 }
 
@@ -485,8 +490,12 @@ private fun Shell(ui: UiState, session: AppSession) {
             containerColor = Sabou.colors.surface,
         )
     }
+    val twoPhones = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ir.sabou.app.SabouApplication).container.twoPhones
+    // On the second phone, what the main phone recorded shows up here by itself (ADR-0042).
+    LaunchedEffect(session) { twoPhones.changes.collect { if (it > 0) session.changed() } }
     CompositionLocalProvider(LocalSession provides session) {
         Column(Modifier.fillMaxSize()) {
+            ir.sabou.app.ui.screens.SyncScreens.ReplicaStatusLine()
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 CompositionLocalProvider(androidx.compose.runtime.saveable.LocalSaveableStateRegistry provides registry) {
                     when (route) {
@@ -494,7 +503,7 @@ private fun Shell(ui: UiState, session: AppSession) {
                         Route.Sales -> SalesScreen(nav)
                         Route.Operations -> OperationsScreens.Hub(nav)
                         Route.Finance -> FinanceScreens.Hub(nav)
-                        Route.Me -> MeScreens.Hub(nav, onSignOut = ui::signOut)
+                        Route.Me -> MeScreens.Hub(nav, onSignOut = { twoPhones.signedOut(); ui.signOut() })
                         else -> Pages(route, nav)
                     }
                 }
@@ -605,6 +614,7 @@ private fun Pages(route: Route, nav: Nav) {
         Route.Customers -> MeScreens.Customers(nav)
         Route.Policies -> MeScreens.Policies(nav)
         Route.Backup -> MeScreens.Backup(nav)
+        Route.TwoPhones -> ir.sabou.app.ui.screens.SyncScreens.TwoPhonesPage(nav)
         Route.Security -> MeScreens.Security(nav)
         Route.PosImport -> PosImportScreen(nav)
         Route.Home, Route.Sales, Route.Operations, Route.Finance, Route.Me -> Unit

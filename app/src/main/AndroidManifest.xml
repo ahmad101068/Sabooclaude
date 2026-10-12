@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Device-first: no network permission until a server exists (ADR-0001). -->
+    <!-- Device-first (ADR-0001): no internet use. The network is used only between two phones of the same
+         restaurant on its Wi-Fi (ADR-0042): an encrypted link the owner pairs on both screens. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <!-- Fingerprint sign-in (ADR-0023): unlocks the sealed PIN; the PIN is still checked by the login. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <!-- Alerts on the phone (ADR-0024); the periodic check survives a reboot. -->
@@ -37,6 +45,18 @@
             android:name=".data.AutoBackupJobService"
             android:permission="android.permission.BIND_JOB_SERVICE"
             android:exported="false" />
+        <service
+            android:name=".data.SyncService"
+            android:foregroundServiceType="connectedDevice"
+            android:exported="false" />
+        <receiver
+            android:name=".data.SyncBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

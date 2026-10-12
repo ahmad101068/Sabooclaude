@@ -72,7 +72,9 @@ class SabouCore private constructor(
     internal val unitOfWork = SqlUnitOfWork(db)
 
     // Stores
-    private val auditStore = SqlAuditStore(db)
+    /** The audit store, refusing local records once this core is a second phone's copy (ADR-0042). */
+    internal val auditGuard = ReplicaAuditGuard(SqlAuditStore(db))
+    private val auditStore: ir.sabou.platform.AuditStore = auditGuard
     internal val events = SqlEventLog(db)
     internal val users = SqlUserStore(db)
     internal val branches = SqlBranchStore(db)
@@ -110,7 +112,7 @@ class SabouCore private constructor(
     val session = Session(users, clock)
     val identity = IdentityService(users, branches, session, unitOfWork, auditStore, clock, deviceTime) { epoch }
     internal val documentNumbers = ir.sabou.persistence.SqlDocumentNumberStore(db)
-    private val bus = CommandBus(session, unitOfWork, SqlIdempotencyStore(db), auditStore, events, clock, documentNumbers) { epoch }
+    internal val bus = CommandBus(session, unitOfWork, SqlIdempotencyStore(db), auditStore, events, clock, documentNumbers) { epoch }
     private val integrity = IntegrityGuard(anchors, auditStore)
 
     // Capabilities: issued here and nowhere else.
@@ -167,6 +169,8 @@ class SabouCore private constructor(
     val specialDayOps = ir.sabou.sales.SpecialDayOperations(bus, specialDays)
     val forecasts = Forecasts(this)
     val books = Books(this)
+    /** Two phones, one set of books (ADR-0042). */
+    val sync = Sync(this)
 
     /**
      * Startup check: the database must continue the anchored history, and the audit chain must verify
@@ -241,6 +245,16 @@ class SabouCore private constructor(
         if (!identity.needsBootstrap()) administrative(permission, "DATABASE_REPLACE", "$reason:$newEpoch")
         integrity.recordRebase(newEpoch, epoch, reason, clock.nowEpochMillis())
         unitOfWork.seal(reason)
+    }
+
+    /**
+     * On a second phone (ADR-0042): this copy is about to be replaced by a fresh full copy of the main phone's books.
+     * No permission or audit here — the copy is not this phone's to keep, and nothing may be appended to its chain.
+     */
+    fun acceptSyncReplacement(newEpoch: String) = unitOfWork.exclusive {
+        check(sync.isReplica) { "NOT_A_REPLICA" }
+        integrity.recordRebase(newEpoch, epoch, "SYNC_COPY", clock.nowEpochMillis())
+        unitOfWork.seal("SYNC_COPY")
     }
 
     /** Runs [block] (e.g. exporting the database) while no write is in progress or can start. */

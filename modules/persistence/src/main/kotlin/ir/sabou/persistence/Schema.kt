@@ -256,6 +256,15 @@ object Schema {
                 "CREATE TABLE special_days (scope TEXT NOT NULL, date INTEGER NOT NULL, doc TEXT NOT NULL, PRIMARY KEY(scope, date))",
             ),
         ),
+        Migration(
+            18,
+            listOf(
+                // Two phones (ADR-0042): every change to a table is logged by key for the second phone to copy.
+                // The triggers themselves are (re)created for every table by SyncLog.ensureTriggers after each migration.
+                "CREATE TABLE ${SyncLog.CHANGES} (seq INTEGER PRIMARY KEY AUTOINCREMENT, tbl TEXT NOT NULL, pk TEXT NOT NULL)",
+                "CREATE TABLE ${SyncLog.STATE} (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }
@@ -277,6 +286,8 @@ object Schema {
                 m.backfill?.invoke(db)
                 db.execute("INSERT INTO schema_version(version) VALUES (?)", m.version)
             }
+            // Every table, including those of future migrations, logs its changes for the second phone.
+            if (pending.any { it.version >= SyncLog.SINCE_VERSION }) SyncLog.ensureTriggers(db)
             db.commit()
         } catch (e: Throwable) {
             db.rollback()

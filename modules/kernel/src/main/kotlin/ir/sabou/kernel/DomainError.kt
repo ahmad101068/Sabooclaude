@@ -4,7 +4,7 @@ package ir.sabou.kernel
  * Every business rule violation has a stable machine code (for tests, logs and sync) and a
  * Persian message for the user. Technical exceptions are never shown to users (AUD-024).
  */
-sealed class DomainError(val code: String, val userMessage: String) {
+sealed class DomainError(val code: String, val userMessage: String) : java.io.Serializable {
     class InvalidInput(val field: String, message: String) : DomainError("INVALID_INPUT:$field", message)
     class NotFound(val entity: String) : DomainError("NOT_FOUND:$entity", "مورد درخواستی پیدا نشد.")
     data object AuthenticationRequired : DomainError("AUTHENTICATION_REQUIRED", "ابتدا وارد حساب کاربری شوید.")

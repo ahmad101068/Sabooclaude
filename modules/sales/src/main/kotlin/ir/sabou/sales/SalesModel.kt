@@ -52,9 +52,9 @@ data class SaleLineInput(
     val portions: Quantity,
     val unitPrice: Money? = null,
     val overrideReason: String? = null,
-)
+) : java.io.Serializable
 
-sealed interface Settlement {
+sealed interface Settlement : java.io.Serializable {
     val amount: Money
     /**
      * Cash, card or bank transfer into a treasury account of the same branch, or a customer's cheque

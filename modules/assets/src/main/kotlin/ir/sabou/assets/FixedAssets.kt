@@ -107,7 +107,7 @@ interface AssetStore {
 }
 
 /** How an asset was paid for. */
-sealed interface Funding {
+sealed interface Funding : java.io.Serializable {
     /** Bought now from a cash or bank account (or with a cheque from a cheque book / a held cheque). */
     data class Paid(val treasuryAccountId: GlobalId, val cheque: ChequeDetails? = null, val chequeId: GlobalId? = null) : Funding
     /** Already owned when the books started (or brought in by the owner): against capital, with depreciation so far. */

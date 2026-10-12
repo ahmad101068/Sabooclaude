@@ -13,7 +13,7 @@ enum class Dimension { MASS, VOLUME, COUNT }
  * A purchase pack of one item, e.g. «کیسه ۱۰ کیلویی» containing 10 kg, or «کارتن» containing 24 pieces.
  * [contains] is in the item's stock unit.
  */
-data class PackUnit(val name: String, val contains: Quantity)
+data class PackUnit(val name: String, val contains: Quantity) : java.io.Serializable
 
 /** The unit a quantity is typed in: the item's own unit, a metric sibling (گرم for کیلوگرم), or one of its packs. */
 sealed interface EntryUnit {

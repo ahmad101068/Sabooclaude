@@ -25,6 +25,8 @@ class SqlRow(private val values: Map<String, Any?>) {
     fun long(column: String): Long = (values[column] as Number).toLong()
     fun longOrNull(column: String): Long? = (values[column] as Number?)?.toLong()
     fun bytes(column: String): ByteArray = values[column] as ByteArray
+    /** The raw value (null, Long, String or ByteArray), for code that copies rows as they are (replication). */
+    fun raw(column: String): Any? = values[column]
 }
 
 /**
