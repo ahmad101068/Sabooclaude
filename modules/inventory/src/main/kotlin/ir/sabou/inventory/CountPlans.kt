@@ -35,7 +35,7 @@ data class CountPlan(
  * [day]: for WEEKLY the weekday (0 = Saturday … 6 = Friday); for MONTHLY the day of the Jalali month (1..31; a
  * shorter month uses its last day); unused for DAILY.
  */
-data class CountFrequency(val kind: Kind, val day: Int = 0) {
+data class CountFrequency(val kind: Kind, val day: Int = 0) : java.io.Serializable {
     enum class Kind { DAILY, WEEKLY, MONTHLY }
 
     init {

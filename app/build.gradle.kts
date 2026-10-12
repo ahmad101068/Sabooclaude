@@ -100,6 +100,7 @@ androidComponents {
 
 dependencies {
     implementation(project(":modules:core"))
+    implementation(project(":modules:sync"))
     implementation(project(":modules:backup"))
 
     implementation("androidx.core:core-ktx:1.17.0")

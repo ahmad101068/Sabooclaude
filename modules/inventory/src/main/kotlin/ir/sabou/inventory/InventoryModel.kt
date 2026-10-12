@@ -73,7 +73,7 @@ data class StockMovement(
  * [quantityPerPortion] is what ends up in the dish; [yieldPercent] is the usable share of what is taken
  * from stock (trimming, peeling, cooking loss). Stock is deducted as quantity × 100 / yield.
  */
-data class RecipeLine(val itemId: GlobalId, val quantityPerPortion: Quantity, val yieldPercent: Int = 100) {
+data class RecipeLine(val itemId: GlobalId, val quantityPerPortion: Quantity, val yieldPercent: Int = 100) : java.io.Serializable {
     /** What is taken from stock for [portions] portions. */
     fun grossFor(portions: Quantity): Quantity {
         val net = ir.sabou.kernel.Ratio.mulDiv(quantityPerPortion.micros, portions.micros, Quantity.SCALE)

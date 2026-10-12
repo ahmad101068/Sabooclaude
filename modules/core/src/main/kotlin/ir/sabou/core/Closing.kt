@@ -127,11 +127,20 @@ class Closing internal constructor(private val core: SabouCore) {
     }
 
     /** Closes the month when nothing blocks it: no document may then be dated inside it. */
-    fun close(commandId: GlobalId, year: Int, month: Int): CommandOutcome {
-        val c = checklist(year, month)
+    fun close(commandId: GlobalId, year: Int, month: Int): CommandOutcome =
+        close(ClosePeriod(commandId, JalaliCalendar.date(year, month, 1), JalaliCalendar.date(year, month, JalaliCalendar.monthLength(year, month))))
+
+    /**
+     * Closes the month [command] spans, after its checklist. This, not the ledger's own entry, is where a closing
+     * from the second phone runs on the main phone (ADR-0042), so the checklist is judged on the main phone's books.
+     */
+    fun close(command: ClosePeriod): CommandOutcome {
+        val ymd = JalaliCalendar.of(command.from)
+        val c = checklist(ymd.year, ymd.month)
+        if (command.from != c.from || command.to != c.to) throw DomainException(DomainError.InvalidInput("period", "فقط یک ماه کامل بسته می‌شود."))
         if (c.closed) throw DomainException(DomainError.InvalidState("PERIOD", "ALREADY_CLOSED"))
         c.checks.firstOrNull { it.severity == CloseCheck.Severity.BLOCK }?.let { throw DomainException(DomainError.InvalidState("PERIOD", "CHECKLIST:${it.key}")) }
-        return core.accounting.closePeriod(ClosePeriod(commandId, c.from, c.to))
+        return core.accounting.closePeriod(command)
     }
 
     fun reopen(commandId: GlobalId, year: Int, month: Int, reason: String): CommandOutcome {

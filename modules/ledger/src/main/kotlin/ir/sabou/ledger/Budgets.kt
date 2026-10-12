@@ -26,7 +26,7 @@ data class BudgetEntry(
     val amount: Money,
 )
 
-data class BudgetPeriod(val from: BusinessDate, val to: BusinessDate, val amount: Money)
+data class BudgetPeriod(val from: BusinessDate, val to: BusinessDate, val amount: Money) : java.io.Serializable
 
 interface BudgetStore {
     fun entries(): List<BudgetEntry>

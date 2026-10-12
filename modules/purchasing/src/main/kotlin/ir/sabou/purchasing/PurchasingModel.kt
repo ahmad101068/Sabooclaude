@@ -47,16 +47,16 @@ object Weekdays {
  * Goods line. [supplierItemName] is what the supplier calls it; it is remembered for next time. [expiresOn]: the
  * expiry printed on the goods, when there is one (ADR-0030).
  */
-data class InvoiceLine(val itemId: GlobalId, val quantity: Quantity, val value: Money, val supplierItemName: String = "", val expiresOn: BusinessDate? = null) {
+data class InvoiceLine(val itemId: GlobalId, val quantity: Quantity, val value: Money, val supplierItemName: String = "", val expiresOn: BusinessDate? = null) : java.io.Serializable {
     /** Rial per whole unit of the item. */
     val unitPrice: Long get() = if (quantity.isZero) 0 else Ratio.mulDiv(value.rial, Quantity.SCALE, quantity.micros)
 }
 
 /** A line booked straight to an expense account (gas bill, repairs), optionally for another branch. */
-data class AccountLine(val account: AccountCode, val amount: Money, val branch: Scope.Branch? = null, val memo: String = "")
+data class AccountLine(val account: AccountCode, val amount: Money, val branch: Scope.Branch? = null, val memo: String = "") : java.io.Serializable
 
 /** A line whose item is not known yet; held in 1302 until someone assigns it to an item or an account. */
-data class ReviewLine(val supplierItemName: String, val quantityNote: String, val amount: Money, val resolution: ReviewResolution? = null)
+data class ReviewLine(val supplierItemName: String, val quantityNote: String, val amount: Money, val resolution: ReviewResolution? = null) : java.io.Serializable
 
 data class ReviewResolution(
     val itemId: GlobalId?,
@@ -66,7 +66,7 @@ data class ReviewResolution(
     val journalId: GlobalId,
     val documentId: GlobalId,
     val date: BusinessDate,
-)
+) : java.io.Serializable
 
 enum class InvoiceStatus { POSTED, REVERSED }
 
@@ -240,7 +240,7 @@ data class SupplierRefund(
 enum class OrderStatus { OPEN, RECEIVED, CANCELLED }
 
 /** Expected quantity and price per whole unit. */
-data class OrderLine(val itemId: GlobalId, val quantity: Quantity, val unitPrice: Money) {
+data class OrderLine(val itemId: GlobalId, val quantity: Quantity, val unitPrice: Money) : java.io.Serializable {
     val value: Money get() = Money.of(Ratio.mulDiv(unitPrice.rial, quantity.micros, Quantity.SCALE))
 }
 

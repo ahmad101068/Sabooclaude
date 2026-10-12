@@ -51,7 +51,7 @@ data class ChequeDetails(
     val note: String = "",
     /** For our own cheques: the bank account they are drawn on (same branch as the cheque book). */
     val bankAccountId: GlobalId? = null,
-) {
+) : java.io.Serializable {
     fun fingerprint() = "$number|$bank|$sayadId|${dueDate.epochDay}|$counterparty|$note|$bankAccountId"
 
     fun validate() {

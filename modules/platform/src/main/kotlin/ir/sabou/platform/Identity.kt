@@ -106,6 +106,13 @@ object PinHasher {
     private fun b64(b: ByteArray) = Base64.getEncoder().encodeToString(b)
 }
 
+/** Sign-in through the main phone, for a second phone (ADR-0042). Both throw [DomainException] when refused. */
+interface RemoteIdentity {
+    /** Checks the PIN on the main phone and returns the user's id. */
+    fun login(username: String, pin: CharArray): GlobalId
+    fun confirmPin(userId: GlobalId, pin: CharArray)
+}
+
 /** The in-process session. A fresh process always starts logged out. */
 class Session(private val users: UserStore, private val clock: Clock, private val idleTimeoutMillis: Long = 30 * 60_000L) : SessionPort {
     @Volatile private var userId: GlobalId? = null
@@ -115,6 +122,19 @@ class Session(private val users: UserStore, private val clock: Clock, private va
     private val reading = ThreadLocal<Actor?>()
 
     override fun readOnly(): Boolean = reading.get() != null
+
+    /** The person a command from the second phone runs for, on this thread only (ADR-0042). */
+    private val acting = ThreadLocal<Actor?>()
+
+    /**
+     * Runs [block] on this thread for [actor], who signed in on the second phone and was verified by this phone.
+     * Commands inside are checked and audited as that person; the person signed in here is untouched.
+     */
+    fun <T> actAs(actor: Actor, block: () -> T): T {
+        val previous = acting.get()
+        acting.set(actor)
+        try { return block() } finally { acting.set(previous) }
+    }
 
     /**
      * Runs [block] on this thread as [actor], for reads only: every read model applies that person's permissions
@@ -129,6 +149,7 @@ class Session(private val users: UserStore, private val clock: Clock, private va
     @Synchronized
     override fun currentActor(): Actor? {
         reading.get()?.let { return it }
+        acting.get()?.let { return it }
         val id = userId ?: return null
         val now = clock.nowEpochMillis()
         if (now - lastActivity > idleTimeoutMillis) { userId = null; return null }
@@ -158,9 +179,18 @@ class IdentityService(
 ) {
     private val trail = AuditTrail(audit)
 
+    /**
+     * Set on a second phone (ADR-0042). PINs are checked by the main phone, which also counts wrong attempts and
+     * audits; this phone only starts the session. Managing users and PINs is done on the main phone.
+     */
+    @Volatile var remote: RemoteIdentity? = null
+
+    private fun hubOnly() = ensure(remote == null) { DomainError.InvalidState("DEVICE", "HUB_ONLY") }
+
     fun needsBootstrap(): Boolean = users.all().isEmpty()
 
     fun bootstrapOwner(username: String, displayName: String, pin: CharArray): GlobalId = unitOfWork.transaction {
+        hubOnly()
         ensure(users.all().isEmpty()) { DomainError.InvalidState("USERS", "ALREADY_BOOTSTRAPPED") }
         val user = newUser(username, displayName, Role.OWNER, emptySet(), pin)
         users.save(user)
@@ -170,6 +200,7 @@ class IdentityService(
     }
 
     fun createBranch(name: String): BranchId = asOwner { actor ->
+        hubOnly()
         val trimmed = name.trim()
         ensure(trimmed.length in 2..80 && branches.all().none { it.name == trimmed }) { DomainError.InvalidInput("name", "نام شعبه معتبر یا تکراری است.") }
         val branch = Branch(BranchId(GlobalId.new()), trimmed)
@@ -179,6 +210,7 @@ class IdentityService(
     }
 
     fun createUser(username: String, displayName: String, role: Role, grants: Set<BranchId>, pin: CharArray): GlobalId = asOwner { actor ->
+        hubOnly()
         ensure(role != Role.OWNER || grants.isEmpty()) { DomainError.InvalidInput("grants", "مالک به همه شعب دسترسی دارد.") }
         grants.forEach { ensure(branches.byId(it)?.isActive == true) { DomainError.NotFound("BRANCH") } }
         val user = newUser(username, displayName, role, grants, pin)
@@ -191,6 +223,7 @@ class IdentityService(
     fun listUsers(): List<User> = asOwner { _ -> users.all() }
 
     fun deactivateUser(id: GlobalId) = asOwner { actor ->
+        hubOnly()
         val user = users.byId(id) ?: throw DomainException(DomainError.NotFound("USER"))
         ensure(!(user.role == Role.OWNER && users.all().count { it.role == Role.OWNER && it.isActive } == 1)) { DomainError.InvalidState("USER", "LAST_OWNER") }
         users.save(user.copy(isActive = false))
@@ -203,6 +236,7 @@ class IdentityService(
      * never re-activates them and never rewrites their PIN). The last active owner keeps the owner role.
      */
     fun updateUser(id: GlobalId, role: Role, grants: Set<BranchId>) = asOwner { actor ->
+        hubOnly()
         val user = users.byId(id) ?: throw DomainException(DomainError.NotFound("USER"))
         ensure(role != Role.OWNER || grants.isEmpty()) { DomainError.InvalidInput("grants", "مالک به همه شعب دسترسی دارد.") }
         grants.forEach { ensure(branches.byId(it)?.isActive == true) { DomainError.NotFound("BRANCH") } }
@@ -213,6 +247,7 @@ class IdentityService(
     }
 
     fun reactivateUser(id: GlobalId) = asOwner { actor ->
+        hubOnly()
         val user = users.byId(id) ?: throw DomainException(DomainError.NotFound("USER"))
         users.save(user.copy(isActive = true, failedAttempts = 0, lock = null, ownerLocked = false))
         trail.append(AuditDraft("USER_REACTIVATE", "USER", id.value, user.username), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, clock.nowEpochMillis(), epochProvider())
@@ -221,6 +256,7 @@ class IdentityService(
 
     /** The owner sets a new PIN for a user who forgot theirs; it also clears a login lock. */
     fun resetPin(id: GlobalId, pin: CharArray) = asOwner { actor ->
+        hubOnly()
         val user = users.byId(id) ?: throw DomainException(DomainError.NotFound("USER"))
         users.save(user.copy(pinHash = hashValidPin(pin), failedAttempts = 0, lock = null, ownerLocked = false))
         trail.append(AuditDraft("USER_PIN_RESET", "USER", id.value, user.username), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, clock.nowEpochMillis(), epochProvider())
@@ -233,6 +269,7 @@ class IdentityService(
      * replaces the old one.
      */
     fun issueRecoveryCode(pin: CharArray): String {
+        hubOnly()
         val code = RecoveryCode.generate()
         val (ok, error) = unitOfWork.transaction {
             val actor = session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
@@ -259,9 +296,27 @@ class IdentityService(
      * keeps the PIN sealed on the device). Wrong PINs count like failed logins.
      */
     fun confirmPin(pin: CharArray) {
-        val error = unitOfWork.transaction {
-            val actor = session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
-            val user = users.byId(actor.userId)!!
+        val actor = session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
+        remote?.let { r ->
+            try { r.confirmPin(actor.userId, pin) } catch (e: DomainException) { if (e.error is DomainError.InvalidState) session.end(); throw e }
+            return
+        }
+        confirmPinOf(actor.userId, pin, actor)?.let { error ->
+            if (error is DomainError.InvalidState) session.end()
+            throw DomainException(error)
+        }
+    }
+
+    /** The main phone's side of [confirmPin] for a person signed in on the second phone (ADR-0042). */
+    fun confirmRemotePin(userId: GlobalId, pin: CharArray) {
+        hubOnly()
+        val actor = users.byId(userId)?.takeIf { it.isActive }?.toActor() ?: throw DomainException(DomainError.AuthenticationRequired)
+        confirmPinOf(userId, pin, actor)?.let { throw DomainException(it) }
+    }
+
+    private fun confirmPinOf(userId: GlobalId, pin: CharArray, actor: Actor): DomainError? {
+        return unitOfWork.transaction {
+            val user = users.byId(userId)!!
             val now = clock.nowEpochMillis()
             lockError(user, now)?.let { return@transaction it }
             if (!PinHasher.verify(pin, user.pinHash)) {
@@ -272,10 +327,6 @@ class IdentityService(
             }
             if (user.failedAttempts != 0) users.save(user.copy(failedAttempts = 0, lock = null))
             null
-        }
-        if (error != null) {
-            if (error is DomainError.InvalidState) session.end()
-            throw DomainException(error)
         }
     }
 
@@ -293,6 +344,7 @@ class IdentityService(
      * same growing lock). The code works once: a successful recovery clears it, and a new one should be issued.
      */
     fun recoverOwner(username: String, code: String, newPin: CharArray) {
+        hubOnly()
         val error = unitOfWork.transaction {
             val user = users.byUsername(username.trim().lowercase())
             if (user == null || !user.isActive || user.role != Role.OWNER || user.recoveryHash == null) return@transaction DomainError.InvalidInput("recovery", "کد بازیابی یا نام کاربری درست نیست.")
@@ -314,6 +366,7 @@ class IdentityService(
 
     /** Any signed-in user changes their own PIN by proving the current one. */
     fun changeOwnPin(current: CharArray, next: CharArray): GlobalId {
+        hubOnly()
         // Wrong guesses count like failed logins (and survive the failure), so an unlocked phone
         // cannot be used to guess the PIN; after the limit the account locks and the session ends.
         val (id, error) = unitOfWork.transaction {
@@ -368,6 +421,27 @@ class IdentityService(
     }
 
     fun login(username: String, pin: CharArray): Actor {
+        remote?.let { r ->
+            val id = r.login(username, pin)
+            val user = users.byId(id)?.takeIf { it.isActive } ?: throw DomainException(DomainError.AuthenticationRequired)
+            session.start(user.id)
+            return user.toActor()
+        }
+        val user = verifyLogin(username, pin, "")
+        session.start(user.id)
+        return user.toActor()
+    }
+
+    /**
+     * The main phone's side of a sign-in on the second phone (ADR-0042): the same PIN check, lock and audit as a
+     * sign-in here (the audit names [device]), without signing anyone in on this phone.
+     */
+    fun verifyRemoteLogin(username: String, pin: CharArray, device: String): User {
+        hubOnly()
+        return verifyLogin(username, pin, "@" + device.take(40))
+    }
+
+    private fun verifyLogin(username: String, pin: CharArray, where: String): User {
         val result = unitOfWork.transaction {
             val user = users.byUsername(username.trim().lowercase()) ?: return@transaction null to DomainError.AuthenticationRequired
             val now = clock.nowEpochMillis()
@@ -380,13 +454,12 @@ class IdentityService(
                 return@transaction null to DomainError.AuthenticationRequired
             }
             users.save(user.copy(failedAttempts = 0, lock = null))
-            trail.append(AuditDraft("LOGIN_SUCCESS", "USER", user.id.value, user.username), user.toActor(), ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
+            trail.append(AuditDraft("LOGIN_SUCCESS", "USER", user.id.value, user.username + where), user.toActor(), ModuleId.PLATFORM, "ORG", GlobalId.new().value, now, epochProvider())
             user to null
         }
         val (user, error) = result
         if (user == null) throw DomainException(error!!)
-        session.start(user.id)
-        return user.toActor()
+        return user
     }
 
     fun logout() = session.end()

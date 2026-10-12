@@ -19,7 +19,7 @@ import ir.sabou.platform.CommandOutcome
 import ir.sabou.platform.ModuleId
 import ir.sabou.platform.Permission
 
-data class ManualLine(val account: AccountCode, val debit: Money, val credit: Money, val memo: String = "")
+data class ManualLine(val account: AccountCode, val debit: Money, val credit: Money, val memo: String = "") : java.io.Serializable
 
 @IssuesDocument(DocumentSeries.JOURNAL)
 data class PostManualJournal(

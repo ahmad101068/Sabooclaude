@@ -30,7 +30,7 @@ data class StatementLine(
     val movementId: GlobalId? = null,
 )
 
-data class StatementLineInput(val date: BusinessDate, val description: String, val direction: Direction, val amount: Money, val balance: Money?, val reference: String)
+data class StatementLineInput(val date: BusinessDate, val description: String, val direction: Direction, val amount: Money, val balance: Money?, val reference: String) : java.io.Serializable
 
 /** A bank statement imported for one bank account; its lines are matched with the book movements of that account. */
 data class BankStatement(

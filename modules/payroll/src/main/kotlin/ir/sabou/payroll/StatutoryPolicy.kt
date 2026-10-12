@@ -7,7 +7,7 @@ import ir.sabou.kernel.Money
 import ir.sabou.kernel.Ratio
 import ir.sabou.kernel.Rounding
 
-data class TaxBracket(val upToMonthly: Money?, val rateBasisPoints: Int)
+data class TaxBracket(val upToMonthly: Money?, val rateBasisPoints: Int) : java.io.Serializable
 
 /**
  * Legal payroll parameters, versioned by date. The values must be confirmed by a tax/insurance
@@ -30,7 +30,7 @@ data class StatutoryPolicy(
     val taxBrackets: List<TaxBracket>,
     /** A partial month pays salary × days ÷ this (Iranian practice: 30), never more than the monthly salary. */
     val prorationDays: Int = 30,
-) {
+) : java.io.Serializable {
     init {
         require(prorationDays in 28..31) { "proration_days_out_of_range" }
         require(standardMonthlyMinutes > 0 && overtimeMultiplierPercent >= 100)

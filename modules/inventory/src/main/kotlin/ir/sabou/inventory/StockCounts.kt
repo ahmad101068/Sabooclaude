@@ -52,7 +52,7 @@ enum class VarianceReason {
     OTHER,
 }
 
-data class CountEntry(val itemId: GlobalId, val counted: Quantity, val note: String = "")
+data class CountEntry(val itemId: GlobalId, val counted: Quantity, val note: String = "") : java.io.Serializable
 
 data class CountedLine(
     val itemId: GlobalId,
@@ -90,7 +90,7 @@ data class StockCount(
     val differences: List<CountedLine> get() = lines.filter { it.difference != 0L }
 }
 
-data class LineReason(val reason: VarianceReason, val note: String = "")
+data class LineReason(val reason: VarianceReason, val note: String = "") : java.io.Serializable
 
 interface StockCountStore {
     fun byId(id: GlobalId): StockCount?
