@@ -83,6 +83,7 @@ sealed interface Route : java.io.Serializable {
     data object Schedule : Route
     data object TimeClock : Route
     data object DayTime : Route
+    data object Search : Route
     data class StaffDocuments(val employeeId: GlobalId) : Route
     data object Payroll : Route
 

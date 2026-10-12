@@ -162,6 +162,7 @@ class SabouCore private constructor(
     val taxOps = ir.sabou.sales.TaxOperations(bus, taxStore, customers) { recipes.menuItem(it) != null }
     val moadian = Moadian(this)
     val labor = Labor(this)
+    val search = Search(this)
     val books = Books(this)
 
     /**

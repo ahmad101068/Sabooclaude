@@ -39,6 +39,9 @@ class SqlDocumentNumberStore(private val db: SqlDatabase) : DocumentNumberStore 
     override fun ofDocument(documentId: GlobalId): List<NumberedDocument> =
         db.query("SELECT * FROM document_numbers WHERE document_id = ? ORDER BY rowid", documentId.value).map(::read)
 
+    override fun bySequence(sequence: Long): List<NumberedDocument> =
+        db.query("SELECT * FROM document_numbers WHERE sequence = ? ORDER BY fiscal_year DESC, rowid DESC LIMIT 50", sequence).map(::read)
+
     /** Numbers of many documents of one series in one query (lists and reports). */
     fun ofDocuments(series: DocumentSeries, ids: Collection<GlobalId>): Map<GlobalId, DocumentNumber> {
         if (ids.isEmpty()) return emptyMap()

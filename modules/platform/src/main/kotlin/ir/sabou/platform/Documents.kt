@@ -56,6 +56,8 @@ interface DocumentNumberStore {
     fun of(series: DocumentSeries, documentId: GlobalId): NumberedDocument?
     /** Every number carried by [documentId] (normally one). */
     fun ofDocument(documentId: GlobalId): List<NumberedDocument>
+    /** Every number with this sequence, in any series, year and branch (search by the number on the paper). */
+    fun bySequence(sequence: Long): List<NumberedDocument>
 }
 
 /** The fiscal year of a business date. Today the Jalali calendar year; a configurable start comes with fiscal periods. */

@@ -541,6 +541,7 @@ private fun Pages(route: Route, nav: Nav) {
         Route.Schedule -> ShiftScreens.Schedule(nav)
         Route.TimeClock -> ShiftScreens.TimeClock(nav)
         Route.DayTime -> ShiftScreens.DayTime(nav)
+        Route.Search -> ir.sabou.app.ui.screens.SearchScreen(nav)
         is Route.StaffDocuments -> StaffDocScreens.Documents(nav, route.employeeId)
         is Route.StatementDetail -> BankRecScreens.Detail(nav, route.statementId)
         Route.Receivables -> FinanceScreens.Receivables(nav)
