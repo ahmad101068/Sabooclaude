@@ -100,7 +100,9 @@ class Closing internal constructor(private val core: SabouCore) {
         val banks = core.treasuryAccounts.all().filter { it.kind == TreasuryKind.BANK && it.isActive }
         val unreconciled = banks.filter { bank ->
             val last = core.bankStatementStore.of(bank.id).maxByOrNull { it.to }
-            last == null || last.to < to || core.bankRec.reconciliation(last.id).let { r -> r.statementOnly.isNotEmpty() || (r.unexplained ?: 0L) != 0L }
+            // A role that may see the checklist but not reconcile banks counts it as not reconciled, rather than failing.
+            last == null || last.to < to || runCatching { core.bankRec.reconciliation(last.id) }.getOrNull()
+                ?.let { r -> r.statementOnly.isNotEmpty() || (r.unexplained ?: 0L) != 0L } ?: true
         }
         add("BANK_REC", unreconciled.isNotEmpty(), CloseCheck.Severity.WARN, "مغایرت بانکی",
             "صورت‌حساب ${unreconciled.joinToString("، ") { it.name }} تا پایان ماه وارد یا کامل تطبیق نشده است.", "همه‌ی حساب‌های بانکی تا پایان ماه تطبیق شده‌اند.")
@@ -110,8 +112,8 @@ class Closing internal constructor(private val core: SabouCore) {
         add("CHEQUES", overdue > 0, CloseCheck.Severity.WARN, "چک‌های سررسید گذشته", "${Fa.number(overdue.toLong())} چک سررسید شده و هنوز وصول یا پاس نشده است.", "چک سررسیدگذشته‌ای نیست.")
 
         // Tax system readiness, once the seller's tax identity has been set up.
-        if (core.taxStore.profile() != null) {
-            val readiness = core.moadian.readiness(to)
+        if (core.taxStore.profile() != null) run {
+            val readiness = runCatching { core.moadian.readiness(to) }.getOrNull() ?: return@run
             add("MOADIAN", !readiness.ready, CloseCheck.Severity.WARN, "آمادگی سامانه‌ی مودیان", readiness.problems.joinToString(" "), "اطلاعات مالیاتی کامل است.")
         }
 

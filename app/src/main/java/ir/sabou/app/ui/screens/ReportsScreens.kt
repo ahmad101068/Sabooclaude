@@ -66,6 +66,7 @@ object ReportsScreens {
             Page {
                 if (session.can(Permission.LEDGER_VIEW)) {
                     SectionTitle("مالی")
+                    NavRow(R.drawable.ic_calendar, "پیش‌بینی فروش", "دو هفته‌ی آینده، با روزهای تعطیل و مناسبت", onClick = { nav.go(Route.SalesForecast) })
                     NavRow(R.drawable.ic_finance, "سود و زیان امروز در برابر بودجه", "با برآورد حقوق و اجاره‌ی روزانه؛ و ماه تا امروز", onClick = { nav.go(Route.DailyPnl) })
                     NavRow(R.drawable.ic_finance, "سود و زیان", "روزانه، به تفکیک شعبه، درصد بهای غذا و نیروی کار", onClick = { nav.go(Route.ProfitLoss) })
                     NavRow(R.drawable.ic_finance, "تراز آزمایشی", "مانده‌ی همه‌ی حساب‌ها", onClick = { nav.go(Route.TrialBalance) })
@@ -331,6 +332,73 @@ object ReportsScreens {
     }
 
     /** Menu engineering (ADR-0028): each dish by popularity and margin, with what to do about it. */
+    @Composable
+    fun SalesForecast(nav: Nav) {
+        val session = LocalSession.current
+        var editing by rememberSaveable { mutableStateOf<Long?>(null) }
+        val action = rememberAction()
+        Column(Modifier.fillMaxSize()) {
+            Header("پیش‌بینی فروش", "خالص فروش، دو هفته‌ی آینده", onBack = nav.back) { BranchSwitcher() }
+            WithBranch { branch ->
+                val data by load(session, branch) { forecasts.sales(branch, session.today, 14) }
+                Page {
+                    Text("از میانگین همان روز هفته در ۸ هفته‌ی گذشته (هفته‌های نزدیک‌تر وزن بیشتر)؛ بازه از پراکندگی همان روزها. روز تعطیل یا مناسبت را علامت بزنید تا پیش‌بینی، برنامه‌ی شیفت و آماده‌سازی با آن جور شود.",
+                        style = SabouType.caption, color = Sabou.colors.muted)
+                    action.error?.let { Banner(it) }
+                    Loaded(data) { f ->
+                        SCard {
+                            KeyValue("روند ۴ هفته‌ی اخیر", (if (f.trendBp >= 10_000) "+" else "−") + Fa.percent(kotlin.math.abs(f.trendBp - 10_000)))
+                            KeyValue("خطای پیش‌بینی در ۴ هفته‌ی گذشته", f.errorBp?.let(Fa::percent) ?: "سابقه‌ی کافی نیست")
+                        }
+                        SCard {
+                            f.days.forEach { d ->
+                                Row(Modifier.fillMaxWidth().clickable { editing = if (editing == d.date.epochDay) null else d.date.epochDay }.padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(Fa.dayTitle(d.date), style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                                        d.special?.let { s ->
+                                            Text(when (s.kind) { ir.sabou.sales.SpecialDay.Kind.CLOSED -> "تعطیل"; ir.sabou.sales.SpecialDay.Kind.HOLIDAY -> "تعطیل رسمی ${Fa.number(s.percent.toLong())}٪"; ir.sabou.sales.SpecialDay.Kind.EVENT -> "مناسبت ${Fa.number(s.percent.toLong())}٪" } +
+                                                if (s.note.isNotBlank()) " · ${s.note}" else "", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
+                                        }
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(if (d.samples == 0) "—" else Fa.rialShort(d.expected), style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                                        if (d.samples > 0 && d.expected > 0) Text("${Fa.rialShort(d.low)} تا ${Fa.rialShort(d.high)}", style = SabouType.caption, color = Sabou.colors.muted)
+                                    }
+                                }
+                                if (editing == d.date.epochDay && session.can(Permission.SHIFT_MANAGE)) SpecialDayForm(branch, d.date, d.special, action) { editing = null }
+                                Divider()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun SpecialDayForm(branch: Scope.Branch, date: BusinessDate, current: ir.sabou.sales.SpecialDay?, action: ir.sabou.app.ui.Action, onDone: () -> Unit) {
+        var kind by rememberSaveable { mutableStateOf((current?.kind ?: ir.sabou.sales.SpecialDay.Kind.HOLIDAY).ordinal) }
+        var percent by rememberSaveable { mutableStateOf(current?.percent?.takeIf { it > 0 }?.let { Fa.number(it.toLong()) } ?: "") }
+        var note by rememberSaveable { mutableStateOf(current?.note.orEmpty()) }
+        val kinds = ir.sabou.sales.SpecialDay.Kind.entries
+        androidx.compose.foundation.layout.Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ir.sabou.app.ui.components.Segmented(listOf("تعطیل", "تعطیل رسمی", "مناسبت"), kind, { kind = it })
+            val closed = kinds[kind] == ir.sabou.sales.SpecialDay.Kind.CLOSED
+            if (!closed) TextInput("درصد فروش نسبت به روز عادی (مثلاً ۱۵۰)", percent, { percent = it }, keyboard = androidx.compose.ui.text.input.KeyboardType.Number)
+            TextInput("توضیح", note, { note = it })
+            val p = Fa.latinDigits(percent.trim()).toIntOrNull()
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SecondaryButton("ثبت", {
+                    action.run({ specialDayOps.set(ir.sabou.sales.SetSpecialDay(GlobalId.new(), branch, date, kinds[kind], if (closed) 0 else p!!, note)) }) { onDone() }
+                }, Modifier.weight(1f), enabled = (closed || p != null) && !action.busy)
+                if (current != null) SecondaryButton("حذف", {
+                    action.run({ specialDayOps.set(ir.sabou.sales.SetSpecialDay(GlobalId.new(), branch, date, current.kind, current.percent, current.note, remove = true)) }) { onDone() }
+                }, Modifier.weight(1f), danger = true)
+            }
+        }
+    }
+
     @Composable
     fun DailyPnl(nav: Nav) {
         val session = LocalSession.current

@@ -12,7 +12,6 @@ import ir.sabou.payroll.Employee
 import ir.sabou.payroll.Shift
 import ir.sabou.platform.Actor
 import ir.sabou.platform.Permission
-import ir.sabou.sales.PriceList
 
 data class ShiftView(val shift: Shift, val employee: String)
 
@@ -55,7 +54,8 @@ class Labor internal constructor(private val core: SabouCore) {
         actor(Permission.SHIFT_MANAGE, Permission.PERSONNEL_VIEW).require(branch)
         val employees = core.personnel.employees(branch).associateBy { it.id }
         val shifts = core.shiftStore.shifts(branch, start, start.plusDays(6)).groupBy { it.date }
-        val prices = PriceList(core.menuPrices)
+        // Expected sales from the sales forecast (weekday pattern × trend × special days).
+        val expected = runCatching { core.forecasts.sales(branch, start, 7).days.associate { it.date to it.expected } }.getOrDefault(emptyMap())
         return (0L..6L).map { offset ->
             val date = start.plusDays(offset)
             val policy = runCatching { core.policyRegistry.forPeriod(date, date) }.getOrNull()
@@ -63,8 +63,7 @@ class Labor internal constructor(private val core: SabouCore) {
             val cost = Money.sum(day.mapNotNull { s -> employees[s.employeeId]?.let { core.shifts.cost(it, s.minutes, policy) } })
             val budget = core.budgetStore.entries().filter { it.scope == branch && it.account in LABOR_ACCOUNTS && it.from <= date && it.to >= date }
                 .sumOf { Ratio.mulDiv(it.amount.rial, 1, it.to.epochDay - it.from.epochDay + 1) }
-            val sales = runCatching { core.prep.forecast(branch, date) }.getOrDefault(emptyList())
-                .sumOf { f -> prices.unitPriceOn(f.item.id, branch, date)?.let { Ratio.mulDiv(it.rial, f.portions.micros, ir.sabou.kernel.Quantity.SCALE) } ?: 0L }
+            val sales = expected[date] ?: 0L
             LaborDay(date, day.map { ShiftView(it, employees[it.employeeId]?.name.orEmpty()) }, day.sumOf { it.minutes }, cost, Money.of(budget), Money.of(sales))
         }
     }

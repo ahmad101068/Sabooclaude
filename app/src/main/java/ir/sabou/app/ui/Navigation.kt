@@ -104,6 +104,7 @@ sealed interface Route : java.io.Serializable {
     data object PosImport : Route
     data object MenuEngineering : Route
     data object DailyPnl : Route
+    data object SalesForecast : Route
 }
 
 /** One line of a prefilled order: item, quantity in micro-units, expected price per unit in rial. */
