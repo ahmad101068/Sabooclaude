@@ -30,6 +30,7 @@ import ir.sabou.app.ui.rememberAction
 import ir.sabou.app.ui.components.SecondaryButton
 import ir.sabou.app.ui.components.FormCard
 import ir.sabou.app.ui.components.TextInput
+import ir.sabou.app.ui.components.Chip
 import ir.sabou.app.ui.components.ChipKind
 import ir.sabou.app.ui.components.Choice
 import ir.sabou.app.ui.components.DateInput
@@ -145,7 +146,13 @@ object ReportsScreens {
                 PeriodPicker(from, to) { f, t -> from = f; to = t }
                 BranchChoice(branch, allowAll = true) { branch = it }
                 Loaded(data) { p ->
+                    if (p.provisional) Banner(
+                        "${Fa.number(p.openShortages.toLong())} کسری مصرف باز در این بازه: بهای مواد بخشی از فروش‌ها هنوز ثبت نشده، پس بهای غذا کمتر و سود بیشتر از واقع است. " +
+                            "با ثبت فاکتور خرید جامانده یا انبارگردانی، سود قطعی می‌شود.",
+                        ChipKind.ACCENT,
+                    )
                     SCard {
+                        if (p.provisional) Chip("سود موقت", ChipKind.ACCENT)
                         KeyValue("درآمد", Fa.rial(p.totals.revenue))
                         KeyValue("بهای تمام‌شده", "− " + Fa.rial(p.totals.cogs))
                         KeyValue("سود ناخالص", Fa.rial(p.totals.grossProfit))
@@ -305,6 +312,7 @@ object ReportsScreens {
                     PeriodPicker(from, to) { f, t -> from = f; to = t }
                     Loaded(data) { m ->
                         SCard { KeyValue("فروش ناخالص (ریال)", Fa.rial(m.gross), strong = true); KeyValue("روزهای فروش", Fa.number(m.days.toLong())) }
+                        Text(COST_BASIS_NOTE, style = SabouType.caption, color = Sabou.colors.muted)
                         if (m.rows.isEmpty()) EmptyState("در این بازه فروش ثبت نهایی نشده است.")
                         m.rows.forEach { r ->
                             SCard {
@@ -342,7 +350,7 @@ object ReportsScreens {
             WithBranch { branch ->
                 val data by load(session, branch) { forecasts.sales(branch, session.today, 14) }
                 Page {
-                    Text("از میانگین همان روز هفته در ۸ هفته‌ی گذشته (هفته‌های نزدیک‌تر وزن بیشتر)؛ بازه از پراکندگی همان روزها. روز تعطیل یا مناسبت را علامت بزنید تا پیش‌بینی، برنامه‌ی شیفت و آماده‌سازی با آن جور شود.",
+                    Text("از میانگین همان روز هفته در ۸ هفته‌ی گذشته (هفته‌های نزدیک‌تر وزن بیشتر؛ فقط روزهای ثبت‌شده: روزی که بی‌فروش بسته شده صفر حساب می‌شود و روز ثبت‌نشده یا تعطیل کنار می‌ماند؛ تعطیل و مناسبت گذشته به روز عادی برگردانده می‌شود)؛ بازه از پراکندگی همان روزها. روز تعطیل یا مناسبت را علامت بزنید تا پیش‌بینی، برنامه‌ی شیفت و آماده‌سازی با آن جور شود.",
                         style = SabouType.caption, color = Sabou.colors.muted)
                     action.error?.let { Banner(it) }
                     Loaded(data) { f ->
@@ -474,6 +482,7 @@ object ReportsScreens {
                     PeriodPicker(from, to) { f, t -> from = f; to = t }
                     Text("محبوب: سهم پرس‌ها دست‌کم ۷۰٪ سهم برابر. سودده: حاشیه‌ی هر پرس (قیمت − بهای امروز مواد) دست‌کم میانگین منو. بهای مواد با قیمت خرید خودش به‌روز می‌شود.",
                         style = SabouType.caption, color = Sabou.colors.muted)
+                    Text(COST_BASIS_NOTE, style = SabouType.caption, color = Sabou.colors.muted)
                     Loaded(data) { e ->
                         SCard {
                             KeyValue("هدف بهای غذا", e.targetBp?.let(Fa::percent) ?: "تعیین نشده")
@@ -550,6 +559,19 @@ object ReportsScreens {
                             KeyValue("اختلاف توضیح‌داده‌نشده", Fa.rial(u.unexplainedValue), if (u.unexplainedValue > 0) Sabou.colors.danger else Sabou.colors.ink)
                             Text("اختلاف توضیح‌داده‌نشده همان کسری انبارگردانی است؛ بدون انبارگردانی در بازه، صفر می‌ماند.", style = SabouType.caption, color = Sabou.colors.muted)
                         }
+                        SCard {
+                            KeyValue("انبارگردانی تأییدشده در این بازه", Fa.number(u.counts.toLong()))
+                            u.lastCount?.let { KeyValue("آخرین انبارگردانی", Fa.date(it)) }
+                            KeyValue("کالاهای شمرده‌شده", "${Fa.number(u.countedRows.toLong())} از ${Fa.number(u.rows.size.toLong())}")
+                        }
+                        if (!u.measuredByCount) Banner(
+                            "در این بازه انبارگردانی تأییدشده‌ای نیست؛ «مصرف واقعی» فقط عدد دفاتر است، نه اندازه‌گیری انبار. مصرفی که ثبت نشده (ضایعات یا کسری) در آن دیده نمی‌شود. " +
+                                "برای مصرف واقعی، اول و آخر بازه انبار را بشمارید.",
+                            ChipKind.ACCENT,
+                        ) else if (u.countedRows < u.rows.size) Text(
+                            "برای کالاهایی که در این بازه شمرده نشده‌اند، «واقعی» عدد دفاتر است و اختلافشان دیده نمی‌شود.",
+                            style = SabouType.caption, color = Sabou.colors.muted,
+                        )
                         if (u.rows.isEmpty()) EmptyState("در این بازه گردشی نیست.")
                         u.rows.forEach { r ->
                             val unit = ReportTables.unitName(r.item.unit)
@@ -608,3 +630,7 @@ object ReportsScreens {
 
     private fun monthStart(today: BusinessDate): BusinessDate = Fa.jalali(today).let { Fa.fromJalali(it.year, it.month, 1) }
 }
+
+/** Product mix and menu engineering use today's ingredient costs; the period's profit is the P&L (from the books). */
+internal const val COST_BASIS_NOTE =
+    "بهای مواد در این صفحه با قیمت امروز مواد حساب می‌شود (برای تصمیم قیمت و منو). سود واقعی این بازه را «سود و زیان» از دفاتر نشان می‌دهد."

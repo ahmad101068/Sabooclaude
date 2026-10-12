@@ -47,19 +47,21 @@ class Prep internal constructor(private val core: SabouCore) {
 
     /**
      * Portions per dish expected on [date]: the average of posted sales on the same weekday over the previous
-     * [weeks] weeks, counting only weeks that had sales (a closed day does not pull the average down), rounded up.
+     * [weeks] weeks, rounded up. Only recorded days count ([tradingDays]): a day that was closed (marked) or never
+     * recorded does not pull the average down, while an open day that sold nothing of a dish does. A past holiday or
+     * event is scaled back to a normal day first.
      */
     fun forecast(branch: Scope.Branch, date: BusinessDate, weeks: Int = FORECAST_WEEKS): List<DishForecast> {
         actor(Permission.INVENTORY_PRODUCE, Permission.INVENTORY_VIEW, Permission.SALES_VIEW).require(branch)
-        val days = (1..weeks).map { date.plusDays(-7L * it) }
-            .map { d -> core.sales.salesOn(branch, d).filter { it.status == SaleStatus.POSTED } }
-            .filter { it.isNotEmpty() }
+        val days = core.tradingDays(branch, (1..weeks).map { date.plusDays(-7L * it) })
         if (days.isEmpty()) return emptyList()
         // A day marked closed needs nothing; a holiday or event scales every dish (ADR-0041).
         val special = core.specialDays.of(branch).firstOrNull { it.date == date }
         val percent = when (special?.kind) { null -> 100L; ir.sabou.sales.SpecialDay.Kind.CLOSED -> return emptyList(); else -> special.percent.toLong() }
         val totals = HashMap<GlobalId, Long>()
-        days.flatten().forEach { sale -> sale.lines.forEach { l -> totals[l.menuItemId] = (totals[l.menuItemId] ?: 0L) + l.portions.micros } }
+        days.forEach { d ->
+            d.sales.forEach { sale -> sale.lines.forEach { l -> totals[l.menuItemId] = (totals[l.menuItemId] ?: 0L) + Ratio.mulDiv(l.portions.micros, 100, d.percent) } }
+        }
         return totals.mapNotNull { (id, micros) ->
             val item = core.recipes.menuItem(id)?.takeIf { it.isActive } ?: return@mapNotNull null
             val average = Ratio.mulDiv((micros + days.size - 1) / days.size, percent, 100)

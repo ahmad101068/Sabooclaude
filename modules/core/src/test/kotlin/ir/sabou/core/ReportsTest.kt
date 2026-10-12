@@ -126,6 +126,31 @@ class ReportsTest {
         // The next day opens with this day's closing and nothing used.
         val next = core.reports.actualVsTheoretical(branch, kitchen, day.plusDays(1), day.plusDays(1)).rows.single()
         assertEquals(7_000_000, next.opening.quantity); assertEquals(0, next.actual.quantity); assertNull(next.efficiencyBp)
+        // Whether «actual» was measured: the day had an approved count of the cheese; the next day had none.
+        assertTrue(usage.measuredByCount)
+        assertEquals(1, usage.counts); assertEquals(day, usage.lastCount); assertEquals(1, usage.countedRows)
+        val unmeasured = core.reports.actualVsTheoretical(branch, kitchen, day.plusDays(1), day.plusDays(1))
+        assertTrue(!unmeasured.measuredByCount)
+        assertEquals(0, unmeasured.countedRows)
+    }
+
+    /** Sales beyond the book stock leave their cost unbooked: the period's profit is marked provisional until settled. */
+    @Test fun profitIsProvisionalWhileAShortageOfThePeriodIsOpen() {
+        businessDay()
+        assertTrue(!core.reports.profitAndLoss(day, day).provisional)
+        val cash = core.overview.treasury().single().account.id
+        val pizza = core.overview.menu().single().item.id
+        val next = day.plusDays(1)
+        // 40 pizzas need 8 kg of cheese; 7 kg are in stock: 1 kg is sold beyond the books.
+        val sale = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, next, kitchen, listOf(SaleLineInput(pizza, Quantity.units(40), rial(5_000_000))),
+            rial(0), rial(0), rial(0), listOf(Settlement.Liquid(cash, rial(200_000_000))))).resultId
+        core.salesOps.post(PostDailySale(id(), branch, sale))
+        val p = core.reports.profitAndLoss(next, next)
+        assertTrue(p.provisional)
+        assertEquals(1, p.openShortages)
+        // The day before is final; the export says so for the open one.
+        assertTrue(!core.reports.profitAndLoss(day, day).provisional)
+        assertTrue(ReportTables.profitAndLoss(p, "شعبه ونک").first().notes.any { it.startsWith("سود موقت") })
     }
 
     @Test fun everyReportExportsToAValidRightToLeftWorkbook() {

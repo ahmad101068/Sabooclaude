@@ -172,7 +172,7 @@ class DocumentNumbersTest {
     private fun productClasses(): List<Class<*>> {
         val names = ArrayList<String>()
         System.getProperty("java.class.path").split(File.pathSeparator).map(::File)
-            .filter { e -> listOf("test", "Test").none { e.path.contains(it) } }
+            .filter { e -> !isTestOutput(e.path) }
             .forEach { entry ->
                 if (entry.isDirectory) {
                     entry.walkTopDown().filter { it.extension == "class" }.forEach { names += it.relativeTo(entry).path.removeSuffix(".class").replace(File.separatorChar, '.') }

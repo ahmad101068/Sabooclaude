@@ -285,7 +285,7 @@ class SyncTest {
     private val scanned: List<Class<*>> by lazy {
         val loader = javaClass.classLoader
         // Main code only: test sources declare commands of their own.
-        System.getProperty("java.class.path").split(File.pathSeparator).filter { "test" !in File(it).name && "${File.separator}test" !in it }.flatMap { entry ->
+        System.getProperty("java.class.path").split(File.pathSeparator).filter { !isTestOutput(it) }.flatMap { entry ->
             val f = File(entry)
             val names = when {
                 f.isDirectory -> f.walkTopDown().filter { it.name.endsWith(".class") }.map { it.relativeTo(f).path }.toList()
@@ -325,4 +325,15 @@ class SyncTest {
             else -> emptyList()
         }
     }
+}
+
+/**
+ * A class-path entry holding compiled tests: Gradle's `…/classes/kotlin/test` or `…/resources/test` folders, or the
+ * offline build's `*-test.jar`. Judged by whole path segments, so a checkout in a folder named e.g. «latest» or
+ * «contest» is not mistaken for one.
+ */
+internal fun isTestOutput(entry: String): Boolean {
+    val f = File(entry)
+    if (f.name.endsWith("-test.jar")) return true
+    return generateSequence(f) { it.parentFile }.any { it.name == "test" && it.parentFile?.name in setOf("kotlin", "java", "resources") }
 }

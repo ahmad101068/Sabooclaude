@@ -313,6 +313,93 @@ class SabouCoreTest {
         assertTrue(assertFailsWith<DomainException> { core.overview.payables() }.error.code.startsWith("PERMISSION_DENIED"))
     }
 
+    /**
+     * A manager of one branch, given the ids of another branch's records, reads nothing of them: every read of the
+     * core either refuses or leaves the other branch out (the write pipeline checks scope centrally; reads each do).
+     */
+    @Test fun noReadOpensAnotherBranchsRecords() {
+        val core = boot()
+        val w = setUp(core)
+        val other = Scope.Branch(core.identity.createBranch("شعبه تجریش"))
+        val cash = core.treasury.openAccount(OpenTreasuryAccount(id(), other, "صندوق تجریش", TreasuryKind.CASH)).resultId
+        core.treasury.receipt(RecordReceipt(id(), other, cash, ReceiptPurpose.OWNER_CAPITAL, rial(9_000_000), day, "آورده تجریش"))
+        val kitchen = core.inventory.createLocation(CreateLocation(id(), other, "آشپزخانه تجریش")).resultId
+        val supplier = core.overview.suppliers().first().supplier.id
+        val invoice = core.purchasing.postInvoice(
+            PostPurchaseInvoice(id(), other, supplier, "تج-۷", kitchen, day, day.plusDays(30), listOf(InvoiceLine(w.cheese, Quantity.units(1), rial(3_000_000)))),
+        ).resultId
+        val employee = core.payroll.registerEmployee(RegisterEmployee(id(), other, "کارمند تجریش", "0084575948", rial(100_000_000))).resultId
+        val customer = core.salesOps.registerCustomer(RegisterCustomer(id(), other, "مشتری تجریش", CustomerType.COMPANY, "021", rial(50_000_000))).resultId
+        val sale = core.salesOps.saveDraft(
+            SaveSaleDraft(id(), other, day, kitchen, listOf(SaleLineInput(w.pizza, Quantity.units(10), rial(600_000))), rial(0), rial(0), rial(0),
+                listOf(Settlement.Liquid(cash, rial(3_000_000)), Settlement.Credit(customer, rial(3_000_000), day.plusDays(10)))),
+        ).resultId
+        core.salesOps.post(PostDailySale(id(), other, sale))
+        val receivable = core.sales.receivablesOfSale(sale).single().id
+        val count = core.counts.submit(ir.sabou.inventory.SubmitStockCount(id(), other, kitchen, day, listOf(ir.sabou.inventory.CountEntry(w.cheese, Quantity.units(1))))).resultId
+        core.identity.createUser("mgr", "مدیر", Role.MANAGER, setOf(w.branch.branchId), "222222".toCharArray())
+        core.identity.login("mgr", "222222".toCharArray())
+
+        fun refused(what: String, block: () -> Any?) {
+            val e = runCatching { block() }.exceptionOrNull()
+            assertTrue(e is DomainException && (e.error.code.startsWith("SCOPE_DENIED") || e.error.code.startsWith("NOT_FOUND") || e.error.code.startsWith("PERMISSION_DENIED")),
+                "$what: expected a refusal, got ${e ?: "data"}")
+        }
+        // Reads by the other branch or by one of its records.
+        refused("salesDay") { core.overview.salesDay(other, day) }
+        refused("locations") { core.overview.locations(other) }
+        refused("stock") { core.overview.stock(kitchen) }
+        refused("countSheet") { core.overview.countSheet(kitchen) }
+        refused("stockCounts") { core.overview.stockCounts(other) }
+        refused("stockCount") { core.overview.stockCount(count) }
+        refused("openShortages") { core.overview.openShortages(other) }
+        refused("lots") { core.overview.lots(other, day) }
+        refused("customers") { core.overview.customers(other) }
+        refused("receivable") { core.overview.receivable(receivable) }
+        refused("invoice") { core.overview.invoice(invoice) }
+        refused("employees") { core.overview.employees(other) }
+        refused("attendance") { core.overview.attendance(other, day) }
+        refused("payroll") { core.overview.payroll(other) }
+        refused("accountHistory") { core.overview.accountHistory(cash) }
+        refused("menuPrices") { core.overview.menuPrices(other, day) }
+        refused("profitAndLoss") { core.reports.profitAndLoss(day, day, other) }
+        refused("dailyPnl") { core.reports.dailyPnl(other, day) }
+        refused("productMix") { core.reports.productMix(other, day, day) }
+        refused("menuEngineering") { core.reports.menuEngineering(other, day, day) }
+        refused("dayFlash") { core.reports.dayFlash(other, day) }
+        refused("usage") { core.reports.actualVsTheoretical(other, null, day, day) }
+        refused("reportAttendance") { core.reports.attendance(other, day, day) }
+        refused("ledgerDetail") { core.reports.ledgerDetail(StandardAccounts.CASH, day, day, other) }
+        refused("foodCosts") { core.reports.foodCosts(other, day) }
+        refused("forecast") { core.forecasts.sales(other, day) }
+        refused("prepForecast") { core.prep.forecast(other, day) }
+        refused("prepPlan") { core.prep.plan(kitchen, day, emptyList()) }
+        refused("laborWeek") { core.labor.week(other, day) }
+        refused("laborDay") { core.labor.day(other, day) }
+        refused("employee") { core.labor.employee(employee) }
+        refused("documents") { core.labor.documents(employee) }
+        refused("lastPaid") { core.buying.lastPaid(other) }
+        refused("suggestions") { core.buying.suggestions(kitchen, emptyList(), day, 600) }
+        refused("dashboard") { core.dashboards.of(day, other) }
+        refused("budgetEntries") { core.books.budgetEntries(other) }
+        refused("heldCheques") { core.books.heldCheques(other) }
+        refused("depreciation") { core.books.depreciationRuns(other) }
+
+        // Lists without a branch: nothing of the other branch is in them.
+        assertTrue(core.overview.treasury().none { it.account.id == cash })
+        assertTrue(core.overview.recentMovements().none { it.accountId == cash })
+        assertTrue(core.overview.invoices().none { it.invoice.id == invoice })
+        assertTrue(core.overview.openReceivables().none { it.receivable.id == receivable })
+        assertTrue(core.overview.today(day).none { it.branch.id == other.branchId })
+        assertTrue(core.buying.reviewQueue().none { it.invoice.id == invoice })
+        assertTrue(core.books.pendingApprovals().none { it.invoice.invoice.id == invoice })
+        assertTrue(core.books.assets().none { it.asset.scope == other })
+        assertTrue(core.search.find("تجریش").isEmpty(), "search: ${core.search.find("تجریش")}")
+        assertTrue(core.search.find("تج-۷").isEmpty())
+        val p = core.reports.profitAndLoss(day, day)
+        assertTrue(p.byBranch.none { it.first == "شعبه تجریش" })
+    }
+
     @Test fun removingTheAnchorFileDoesNotLetAnOlderCopyIn() {
         val core = boot()
         setUp(core)

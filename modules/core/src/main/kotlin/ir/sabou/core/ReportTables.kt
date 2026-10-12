@@ -34,7 +34,9 @@ object ReportTables {
                 RIAL,
                 "درصد بهای غذا: ${pct(p.ratios.foodBp).text} · درصد نیروی کار: ${pct(p.ratios.laborBp).text} · بهای اصلی: ${pct(p.ratios.primeBp).text} (نسبت به فروش غذا)",
                 "حقوق هر ماه در روز آخر همان ماه ثبت می‌شود؛ در بازه‌های کوتاه درصد نیروی کار را با احتیاط بخوانید.",
-            ),
+            ) + if (p.provisional) listOf(
+                "سود موقت: ${Fa.number(p.openShortages.toLong())} کسری مصرف باز در این بازه است؛ بهای مواد آن فروش‌ها هنوز ثبت نشده و سود بیش از واقع است.",
+            ) else emptyList(),
         )
         fun split(title: String, label: String, rows: List<Pair<String, PnlTotals>>) = ReportTable(
             title, "$place · ${period(p.from, p.to)}", listOf(label, "درآمد", "بهای تمام‌شده", "هزینه‌ها", "سود (زیان)"),
@@ -64,7 +66,8 @@ object ReportTables {
                 amount(it.unitCost?.rial), amount(it.unitMargin), pct(it.costBp))
         },
         footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.Amount(m.gross.rial), Cell.Percent(if (m.gross.isZero) 0 else 10_000), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY),
-        notes = listOf(RIAL, "بهای مواد با رسپی فعلی و میانگین بهای امروز انبارهای شعبه حساب شده است (اگر موجودی نباشد، آخرین قیمت خرید)."),
+        notes = listOf(RIAL, "بهای مواد با رسپی فعلی و میانگین بهای امروز انبارهای شعبه حساب شده است (اگر موجودی نباشد، آخرین قیمت خرید).",
+            "این بها برای تصمیم قیمت و منو است؛ سود واقعی این بازه را گزارش «سود و زیان» از دفاتر نشان می‌دهد."),
     )
 
     fun dayFlash(f: DayFlash): ReportTable {
@@ -242,6 +245,8 @@ object ReportTables {
         notes = listOf(
             "مصرف واقعی = موجودی اول + خرید + انتقال + تولید − موجودی پایان. اختلاف توضیح‌داده‌نشده همان کسری (منهای اضافه‌ی) انبارگردانی است.",
             "مقادیر به واحد هر کالا؛ ارزش‌ها به ریال.",
+            if (u.measuredByCount) "انبارگردانی تأییدشده در بازه: ${Fa.number(u.counts.toLong())}، آخرین ${u.lastCount?.let(Fa::date) ?: "—"}؛ کالاهای شمرده‌شده ${Fa.number(u.countedRows.toLong())} از ${Fa.number(u.rows.size.toLong())}. برای کالای شمرده‌نشده، «واقعی» عدد دفاتر است."
+            else "در این بازه انبارگردانی تأییدشده‌ای نیست: «مصرف واقعی» عدد دفاتر است، نه اندازه‌گیری انبار؛ مصرف ثبت‌نشده در آن دیده نمی‌شود.",
         ),
     )
 

@@ -19,8 +19,9 @@ This is a ground-up rebuild. The previous code base (`sabou-manager-v3-`) was au
 | `modules/assets` | Fixed assets, depreciation runs, disposal | treasury |
 | `modules/backup` | Streaming AES-GCM backup container (format 4) | kernel |
 | `modules/posimport` | Reading Excel/CSV exports: the POS (Sepand) day reports and bank statements, with their own totals checked | kernel |
-| `modules/persistence` | SQL schema v1 + forward migrations (now v17), immutability triggers, SQL stores for every port | sales, purchasing, payroll, assets |
+| `modules/persistence` | SQL schema v1 + forward migrations (now v18, with the change log for two phones), immutability triggers, SQL stores for every port | sales, purchasing, payroll, assets |
 | `modules/core` | Single composition root, read models, Persian formatting + Jalali calendar, Persian error messages | persistence, posimport |
+| `modules/sync` | Two phones, one set of books (ADR-0042): encrypted LAN link, pairing with code comparison, main-phone server, second-phone client and replication | core |
 | `app` | Android: SQLCipher adapter, Keystore keys, signed anchors, backup/restore, Compose UI (RTL, Vazirmatn) | core, backup |
 
 ## Build
@@ -36,7 +37,7 @@ Gradle checks the SHA-256 of every downloaded artifact against `gradle/verificat
 
 ## Status (2026-10-12)
 
-- JVM modules: **253 tests passing** offline (unit, end-to-end on a real SQLite file, restart, rollback, replay, tamper and rollback detection, factory reset, 80-year Jalali round trip). Spot mutation checks confirm key rules are guarded.
+- JVM modules: **all tests passing** offline (run `scripts/offline_build.py`; 270+ at ADR-0042) (unit, end-to-end on a real SQLite file, restart, rollback, replay, tamper and rollback detection, factory reset, 80-year Jalali round trip). Spot mutation checks confirm key rules are guarded.
 - CI (`.github/workflows/ci.yml`): Gradle `domainBuild` with all tests; the Android app compiles, passes lint and produces a debug APK (artifact `sabou-debug-apk`, signed with the committed debug key so updates install over each other); instrumented tests run on an Android emulator (SQLCipher, Keystore, backup/restore, rollback detection, encrypted drafts, every page).
 - Payroll legal values are not shipped: the owner enters each year's parameters (after professional review); payroll fails closed until then.
 - Unfinished forms survive the system closing the app (ADR-0010). Partial-month payroll is prorated (default ÷30).

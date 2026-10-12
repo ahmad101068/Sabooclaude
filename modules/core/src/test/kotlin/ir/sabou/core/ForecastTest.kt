@@ -72,4 +72,46 @@ class ForecastTest {
         assertEquals(32_166_666L, again.days.single { it.date == friday.date }.expected)
         assertEquals(emptyList(), core.prep.forecast(branch, saturday.date))
     }
+
+    /**
+     * Only recorded days count, and as they were (review of the source, 2026-10): an open day that sold nothing (its
+     * day closed with no sales) is a real zero; a day nobody recorded is unknown and left out; a past holiday is
+     * scaled back to a normal day before it is averaged.
+     */
+    @Test fun recordedZeroDaysCountUnrecordedDaysDoNotAndPastHolidaysAreScaledBack() {
+        core.bootstrap("شعبه یک", "مالک", "owner", "123456".toCharArray())
+        val branch = Scope.Branch(core.overview.branches().single().id)
+        val kitchen = core.overview.locations(branch).single().id
+        val cash = core.overview.treasury().single().account.id
+        val flour = core.inventory.createItem(CreateItem(id(), "آرد", StockUnit.KILOGRAM, Quantity.ZERO)).resultId
+        val dish = core.inventory.defineMenuItem(DefineMenuItem(id(), "غذا")).resultId
+        core.inventory.publishRecipe(PublishRecipe(id(), dish, BusinessDate(19_000), listOf(RecipeLine(flour, Quantity.of(1_000)))))
+        fun sell(d: BusinessDate, portions: Long) {
+            val amount = Money.of(portions * 1_000_000)
+            val sale = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, d, kitchen, listOf(SaleLineInput(dish, Quantity.units(portions), Money.of(1_000_000))),
+                Money.ZERO, Money.ZERO, Money.ZERO, listOf(Settlement.Liquid(cash, amount)))).resultId
+            core.salesOps.post(PostDailySale(id(), branch, sale))
+        }
+        for (w in 1..8) {
+            val d = from.plusDays(-7L * w)
+            when (w) {
+                // Last week: open, nothing sold, the day closed with the cash counted.
+                1 -> core.salesOps.closeDay(ir.sabou.sales.CloseSalesDay(id(), branch, d, cash, Money.of(core.overview.treasury().single().balance)))
+                2 -> Unit                                                                  // never recorded
+                3 -> {                                                                     // a holiday at 200 %: twice a normal day
+                    core.specialDayOps.set(SetSpecialDay(id(), branch, d, SpecialDay.Kind.HOLIDAY, 200, "عید"))
+                    sell(d, 14)
+                }
+                else -> sell(d, 7)
+            }
+        }
+        val day = core.forecasts.sales(branch, from, 1).days.single()
+        // Weights 8 (zero), 6 (holiday scaled back to 7,000,000) and 5+4+3+2+1 (7,000,000); week 2 is not a sample.
+        assertEquals(7, day.samples)
+        assertEquals(147_000_000L / 29, day.expected)
+        // Dishes over 4 weeks: (0 + 7 + 7) / 3 recorded days = 4.67 → 5 portions. Before this change: (14 + 7) / 2 → 11.
+        val dish4 = core.prep.forecast(branch, from, weeks = 4).single()
+        assertEquals(Quantity.units(5), dish4.portions)
+        assertEquals(3, dish4.weeks)
+    }
 }

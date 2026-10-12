@@ -98,6 +98,7 @@ class SyncHub(
         while (!s.isClosed) {
             val socket = try { s.accept() } catch (_: IOException) { break }
             connections += socket
+            if (s.isClosed) { runCatching { socket.close() }; break }
             Thread({ serve(socket) }, "sabou-sync-conn").apply { isDaemon = true }.start()
         }
     }
@@ -199,8 +200,9 @@ class SyncHub(
         try {
             while (true) {
                 val request = channel.receive()
-                // The peer may have been removed meanwhile: its connections stop answering.
-                if (peers.all().none { it.deviceId == deviceId }) return
+                // Stopped meanwhile (a connection accepted just as the server closed escapes the closing loop), or
+                // the peer was removed: this connection stops answering.
+                if (!isRunning || peers.all().none { it.deviceId == deviceId }) return
                 handle(request, peer, channel)
             }
         } finally {
