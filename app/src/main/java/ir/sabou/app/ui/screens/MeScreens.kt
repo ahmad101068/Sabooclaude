@@ -101,6 +101,7 @@ object MeScreens {
     @Composable
     fun Hub(nav: Nav, onSignOut: () -> Unit) {
         val session = LocalSession.current
+        val twoPhones = (LocalContext.current.applicationContext as SabouApplication).container.twoPhones
         Column(Modifier.fillMaxSize()) {
             Header("من")
             LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -125,7 +126,9 @@ object MeScreens {
                 if (session.can(Permission.APPROVAL_RULES)) item { NavRow(R.drawable.ic_check, "قانون‌های تأیید فاکتور", "چه فاکتوری پیش از پرداخت چند تأیید بخواهد", onClick = { nav.go(Route.ApprovalRules) }) }
                 if (session.can(Permission.TAX_SETTINGS)) item { NavRow(R.drawable.ic_finance, "اطلاعات مالیاتی", "شناسه‌ها و نرخ ارزش افزوده؛ آمادگی سامانه‌ی مودیان", onClick = { nav.go(Route.TaxSettings) }) }
                 if (session.can(Permission.BUDGET_MANAGE)) item { NavRow(R.drawable.ic_finance, "بودجه", "مبلغ ماهانه‌ی هر حساب درآمد و هزینه", onClick = { nav.go(Route.Budget) }) }
-                if (session.can(Permission.BACKUP_CREATE)) item { NavRow(R.drawable.ic_backup, "پشتیبان‌گیری و بازیابی", onClick = { nav.go(Route.Backup) }) }
+                // Backups are the main phone's: a second phone's data is a copy of it (ADR-0042).
+                if (session.can(Permission.BACKUP_CREATE) && !twoPhones.isReplica) item { NavRow(R.drawable.ic_backup, "پشتیبان‌گیری و بازیابی", onClick = { nav.go(Route.Backup) }) }
+                item { NavRow(R.drawable.ic_transfer, "دو گوشی، یک دفتر", "همگام‌سازی گوشی اصلی و گوشی دوم روی وای‌فای", onClick = { nav.go(Route.TwoPhones) }) }
                 item { NavRow(R.drawable.ic_lock, "امنیت و اعلان‌ها", "تغییر رمز، اثر انگشت، اعلان هشدارها" + if (session.actor.role == ir.sabou.platform.Role.OWNER) "، کد بازیابی" else "", onClick = { nav.go(Route.Security) }) }
                 item { SecondaryButton("خروج از حساب", onSignOut, danger = true) }
             }

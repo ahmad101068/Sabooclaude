@@ -11,7 +11,7 @@ import ir.sabou.platform.ModuleId
 sealed class Message : java.io.Serializable {
     // Pairing
     data object PairConfirm : Message()
-    data class PairAccepted(val hubName: String) : Message()
+    data class PairAccepted(val hubId: String, val hubName: String) : Message()
 
     // Every session starts with the app version: both phones must run the same build.
     data class Hello(val appVersion: String) : Message()

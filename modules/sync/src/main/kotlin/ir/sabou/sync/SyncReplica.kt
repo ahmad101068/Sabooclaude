@@ -24,8 +24,8 @@ fun interface HubLocator {
     fun locate(): InetSocketAddress?
 }
 
-/** The second phone's identity towards the main phone: its id and the pairing key. */
-class Pairing(val deviceId: String, val key: ByteArray)
+/** The second phone's identity towards the main phone: its id and the pairing key, and which main phone. */
+class Pairing(val deviceId: String, val key: ByteArray, val hubId: String = "", val hubName: String = "")
 
 /** One authenticated connection to the main phone. */
 internal class HubConnection private constructor(private val socket: Socket, val channel: SecureChannel, val epoch: String) : AutoCloseable {
@@ -300,7 +300,7 @@ class PairingAttempt private constructor(
         channel.send(Message.PairConfirm)
         val reply = channel.receive() as? Message.PairAccepted ?: throw IOException("not accepted")
         close()
-        return Pairing(deviceId, key)
+        return Pairing(deviceId, key, reply.hubId, reply.hubName)
     }
 
     override fun close() = runCatching { socket.close() }.let { }

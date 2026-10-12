@@ -71,7 +71,7 @@ class SyncLinkTest {
             core.bootstrap("شعبه ونک", "مالک", "owner", "123456".toCharArray())
             core.identity.createUser("cashier", "صندوقدار", Role.CASHIER, setOf(core.overview.branches().single().id), "222222".toCharArray())
             core.identity.logout()
-            server = SyncHub({ core }, peers, ::snapshot, "1.0 (7)", "گوشی اصلی")
+            server = SyncHub({ core }, peers, ::snapshot, "1.0 (7)", "hub-0001", "گوشی اصلی")
             hubs += server
             port = server.start(0)
         }
@@ -100,6 +100,7 @@ class SyncLinkTest {
             val attempt = PairingAttempt.start(address, GlobalId.new().value, name)
             assertEquals("گوشی اصلی", attempt.hubName)
             val pairing = attempt.confirm()
+            assertEquals("hub-0001", pairing.hubId)
             assertTrue(paired.await(5, TimeUnit.SECONDS))
             assertEquals(listOf(attempt.code), codes.toList())
             return pairing

@@ -53,6 +53,8 @@ class SyncHub(
     private val peers: PeerStore,
     private val snapshots: SnapshotSource,
     private val appVersion: String,
+    /** This phone's id (also in its network service name, so the second phone finds this one and no other). */
+    val hubId: String,
     private val hubName: String,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
@@ -172,7 +174,7 @@ class SyncHub(
         }
         val peer = Peer(deviceId, deviceName, key, cursor = 0, lastSeen = clock())
         peers.save(peer)
-        channel.send(Message.PairAccepted(hubName))
+        channel.send(Message.PairAccepted(hubId, hubName))
         window.listener.onPaired(peer)
     }
 

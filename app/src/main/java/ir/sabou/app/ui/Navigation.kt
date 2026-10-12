@@ -98,6 +98,8 @@ sealed interface Route : java.io.Serializable {
     data object Customers : Route
     data object Policies : Route
     data object Backup : Route
+    /** Two phones, one set of books (ADR-0042). */
+    data object TwoPhones : Route
     /** Change PIN, the owner's recovery code, fingerprint sign-in. */
     data object Security : Route
     /** A day of the point-of-sale system from its Excel/CSV exports. */
