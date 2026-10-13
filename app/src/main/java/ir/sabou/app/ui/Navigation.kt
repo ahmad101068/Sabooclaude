@@ -40,6 +40,10 @@ sealed interface Route : java.io.Serializable {
     data object AttendanceReport : Route
 
     // Operations
+    /** The three groups behind the Operations tab (reports open the reports page directly). */
+    data object InventoryHub : Route
+    data object PurchaseHub : Route
+    data object StaffHub : Route
     data object Stock : Route
     data object Waste : Route
     data object Count : Route
