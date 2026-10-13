@@ -9,7 +9,9 @@ object JalaliCalendar {
 
     private const val EPOCH_JDN = 2_440_588L   // Julian day number of 1970-01-01
 
-    fun of(date: BusinessDate): Ymd = Algorithm.fromJdn(date.epochDay + EPOCH_JDN)
+    fun of(date: BusinessDate): Ymd = of(date.epochDay)
+    /** Any day, including those before 1970 that cannot be a [BusinessDate]. */
+    fun of(epochDay: Long): Ymd = Algorithm.fromJdn(epochDay + EPOCH_JDN)
     fun date(year: Int, month: Int, day: Int): BusinessDate = BusinessDate(Algorithm.toJdn(year, month, day) - EPOCH_JDN)
     fun isLeap(year: Int): Boolean = Algorithm.isLeap(year)
     fun yearOf(date: BusinessDate): Int = of(date).year
@@ -87,4 +89,25 @@ object JalaliCalendar {
         }
     }
 
+}
+
+/**
+ * A day of the Jalali calendar as people write it, for dates that are not business days and may lie before 1970
+ * (birth dates). Business events use [BusinessDate].
+ */
+data class JalaliDay(val year: Int, val month: Int, val day: Int) : java.io.Serializable {
+    init {
+        require(year in 1200..1600 && month in 1..12 && day in 1..JalaliCalendar.monthLength(year, month)) { "jalali_day_invalid" }
+    }
+
+    /** Whole years from this day to [today] (an age). */
+    fun yearsUntil(today: JalaliCalendar.Ymd): Int =
+        today.year - year - if (today.month < month || (today.month == month && today.day < day)) 1 else 0
+
+    /** yyyymmdd, for storage. */
+    fun packed(): Long = year * 10_000L + month * 100L + day
+
+    companion object {
+        fun unpack(v: Long) = JalaliDay((v / 10_000).toInt(), (v / 100 % 100).toInt(), (v % 100).toInt())
+    }
 }

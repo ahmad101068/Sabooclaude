@@ -426,18 +426,23 @@ class SqlPersonnelStore(db: SqlDatabase) : SqlTable(db), PersonnelStore {
     private fun employeeOf(d: Doc) = Employee(
         Codec.id(d.str("id")), d.str("name"), d.str("nationalId"), Codec.branchOf(d.str("scope")), Codec.money(d.long("salary")), d.bool("active"),
         startDate = d.longOrNull("start")?.let(Codec::date), endDate = d.longOrNull("end")?.let(Codec::date),
+        birthDate = d.longOrNull("birth")?.let(ir.sabou.kernel.JalaliDay::unpack), personnelNumber = d.longOrNull("number")?.toInt() ?: 0,
     )
     override fun employee(id: GlobalId) = doc("SELECT doc FROM employees WHERE id = ?", id.value)?.let(::employeeOf)
     override fun employees(scope: Scope.Branch) = docs("SELECT doc FROM employees WHERE scope = ? ORDER BY rowid", Codec.scope(scope)).map(::employeeOf)
+    override fun nextPersonnelNumber() = db.query("SELECT COALESCE(MAX(number), 0) + 1 AS n FROM employees").single().long("n").toInt()
     override fun saveEmployee(employee: Employee) = upsert(
         "employees", "id",
         mapOf(
             "id" to employee.id.value, "scope" to Codec.scope(employee.scope),
+            // 0 = not numbered (records saved outside registration); NULLs do not collide in the unique index.
+            "number" to employee.personnelNumber.takeIf { it > 0 }?.toLong(),
             "doc" to Json.encode(
                 mapOf(
                     "id" to employee.id.value, "name" to employee.name, "nationalId" to employee.nationalId, "scope" to Codec.scope(employee.scope),
                     "salary" to employee.monthlySalary.rial, "active" to employee.isActive,
                     "start" to employee.startDate?.epochDay, "end" to employee.endDate?.epochDay,
+                    "birth" to employee.birthDate?.packed(), "number" to employee.personnelNumber.toLong(),
                 ),
             ),
         ),

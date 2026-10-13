@@ -175,6 +175,23 @@ class PayrollTest {
             code { ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "تکراری", "۰۰۸۴۵۷۵۹۴۸", rial(1_000))) })
     }
 
+    @Test fun personnelNumbersAreAssignedInOrderAcrossBranchesAndBirthDatesAreChecked() {
+        assertEquals(1, personnel.employee(chef)!!.personnelNumber)
+        // The clock of this test reads 1970-01-01 = 1348/10/11.
+        val waiter = ops.registerEmployee(RegisterEmployee(GlobalId.new(), other, "گارسون", "0499370899", rial(1_000), birthDate = ir.sabou.kernel.JalaliDay(1320, 5, 3))).resultId
+        assertEquals(2, personnel.employee(waiter)!!.personnelNumber)
+        assertEquals(ir.sabou.kernel.JalaliDay(1320, 5, 3), personnel.employee(waiter)!!.birthDate)
+        assertEquals("INVALID_INPUT:birthDate", code {
+            ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "خردسال", "0067749828", rial(1_000), birthDate = ir.sabou.kernel.JalaliDay(1345, 1, 1)))
+        })
+        ops.updateEmployeeDetails(UpdateEmployeeDetails(GlobalId.new(), branch, chef, " سرآشپز ارشد ", ir.sabou.kernel.JalaliDay(1318, 12, 29)))
+        with(personnel.employee(chef)!!) {
+            assertEquals("سرآشپز ارشد", name); assertEquals(1318, birthDate!!.year); assertEquals(1, personnelNumber)
+        }
+        assertTrue(code { ops.updateEmployeeDetails(UpdateEmployeeDetails(GlobalId.new(), branch, waiter, "x", null)) }.startsWith("INVALID"))
+        assertEquals(28, ir.sabou.kernel.JalaliDay(1320, 5, 3).yearsUntil(ir.sabou.kernel.JalaliCalendar.of(0L)))
+    }
+
     @Test fun branchScopeAppliesToPayroll() {
         session.actor = accountant
         assertTrue(code { ops.calculate(CalculatePayroll(GlobalId.new(), other, from, to)) }.startsWith("SCOPE_DENIED"))

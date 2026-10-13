@@ -265,6 +265,24 @@ object Schema {
                 "CREATE TABLE ${SyncLog.STATE} (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
             ),
         ),
+        Migration(
+            19,
+            listOf(
+                // Personnel numbers, unique across the organization; staff already registered get theirs in registration order.
+                "ALTER TABLE employees ADD COLUMN number INTEGER",
+            ),
+            backfill = { db ->
+                var n = 0L
+                db.query("SELECT id, doc FROM employees ORDER BY rowid").forEach { row ->
+                    n += 1
+                    @Suppress("UNCHECKED_CAST")
+                    val doc = LinkedHashMap(Json.decode(row.str("doc")) as Map<String, Any?>)
+                    doc["number"] = n
+                    db.execute("UPDATE employees SET number = ?, doc = ? WHERE id = ?", n, Json.encode(doc), row.str("id"))
+                }
+                db.execute("CREATE UNIQUE INDEX employees_number ON employees(number)")
+            },
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

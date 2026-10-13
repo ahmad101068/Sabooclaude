@@ -44,6 +44,8 @@ sealed interface Route : java.io.Serializable {
     data object InventoryHub : Route
     data object PurchaseHub : Route
     data object StaffHub : Route
+    /** A group of settings behind the Me tab. */
+    data class MeGroup(val group: ir.sabou.app.ui.screens.MeScreens.Group) : Route
     data object Stock : Route
     data object Waste : Route
     data object Count : Route

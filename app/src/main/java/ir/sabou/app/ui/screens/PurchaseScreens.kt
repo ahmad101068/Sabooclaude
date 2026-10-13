@@ -105,13 +105,6 @@ object PurchaseScreens {
 
     private fun minutesNow(): Int = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
     private fun clock(minutes: Int) = Fa.digits("%02d:%02d".format(minutes / 60, minutes % 60))
-    private fun parseClock(text: String): Int? {
-        val parts = Fa.latinDigits(text).trim().split(':', '.', '٫')
-        if (parts.size != 2) return null
-        val h = parts[0].toIntOrNull() ?: return null
-        val m = parts[1].toIntOrNull() ?: return null
-        return if (h in 0..23 && m in 0..59) h * 60 + m else null
-    }
 
     /** «یکشنبه ۱۸ مهر · سفارش تا امروز ساعت ۱۴:۰۰» */
     private fun deliveryText(d: ir.sabou.purchasing.Delivery, today: BusinessDate): String {
@@ -1019,12 +1012,11 @@ object PurchaseScreens {
                     var phone by rememberSaveable { mutableStateOf(s.phone) }
                     var active by rememberSaveable { mutableStateOf(s.isActive) }
                     val days = ir.sabou.app.ui.rememberValueList { s.deliveryDays.sorted() }
-                    var cutoff by rememberSaveable { mutableStateOf(s.cutoffMinutes?.let(::clock) ?: "") }
+                    var cutoffMinutes by rememberSaveable { mutableStateOf(s.cutoffMinutes) }
                     var lead by rememberSaveable { mutableStateOf(Fa.number(s.leadDays.toLong())) }
                     var note by rememberSaveable { mutableStateOf(s.note) }
                     val id = rememberCommandId(supplierId)
                     val action = rememberAction()
-                    val cutoffMinutes = if (cutoff.isBlank()) null else parseClock(cutoff)
                     val leadDays = Fa.latinDigits(lead).trim().toIntOrNull()
                     FormCard(s.name) {
                         TextInput("نام", name, { name = it })
@@ -1038,8 +1030,7 @@ object PurchaseScreens {
                             }
                         }
                         if (days.isNotEmpty()) Text(days.sorted().joinToString("، ") { weekdayNames[it] }, style = SabouType.caption, color = Sabou.colors.muted)
-                        TextInput("مهلت سفارش (ساعت)", cutoff, { cutoff = it }, placeholder = "مثلاً ۱۴:۰۰", keyboard = KeyboardType.Number,
-                            error = if (cutoff.isNotBlank() && cutoffMinutes == null) "ساعت را به شکل ۱۴:۰۰ بنویسید" else null)
+                        ir.sabou.app.ui.components.TimeInput("مهلت سفارش (ساعت)", cutoffMinutes, { cutoffMinutes = it }, optional = true, placeholder = "بدون مهلت")
                         TextInput("چند روز قبل از تحویل سفارش بدهیم", lead, { lead = it }, keyboard = KeyboardType.Number,
                             error = if (leadDays == null || leadDays !in 0..14) "عددی بین ۰ تا ۱۴" else null)
                         TextInput("توضیح", note, { note = it }, singleLine = false)
@@ -1050,7 +1041,7 @@ object PurchaseScreens {
                         action.error?.let { Banner(it) }
                         PrimaryButton("ذخیره", {
                             action.run({ purchasing.updateSupplier(UpdateSupplier(id.value, s.id, name, phone, active, days.toSet(), cutoffMinutes, leadDays!!, note)) }) { nav.back() }
-                        }, enabled = name.trim().length >= 2 && (cutoff.isBlank() || cutoffMinutes != null) && leadDays != null && leadDays in 0..14, busy = action.busy)
+                        }, enabled = name.trim().length >= 2 && leadDays != null && leadDays in 0..14, busy = action.busy)
                     }
                     if (aliases.isNotEmpty()) SCard {
                         Text("نام کالاها در فاکتورهای این تأمین‌کننده", style = SabouType.section, color = Sabou.colors.ink)
