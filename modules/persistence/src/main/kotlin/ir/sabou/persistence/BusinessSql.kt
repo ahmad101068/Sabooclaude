@@ -427,6 +427,8 @@ class SqlPersonnelStore(db: SqlDatabase) : SqlTable(db), PersonnelStore {
         Codec.id(d.str("id")), d.str("name"), d.str("nationalId"), Codec.branchOf(d.str("scope")), Codec.money(d.long("salary")), d.bool("active"),
         startDate = d.longOrNull("start")?.let(Codec::date), endDate = d.longOrNull("end")?.let(Codec::date),
         birthDate = d.longOrNull("birth")?.let(ir.sabou.kernel.JalaliDay::unpack), personnelNumber = d.longOrNull("number")?.toInt() ?: 0,
+        salaryChanges = if (d.has("salaries")) d.docs("salaries").map { ir.sabou.payroll.SalaryChange(Codec.date(it.long("from")), Codec.money(it.long("rial")), it.strOr("reason", "")) } else emptyList(),
+        pastEmployments = if (d.has("past")) d.docs("past").map { ir.sabou.payroll.Employment(it.longOrNull("start")?.let(Codec::date), Codec.date(it.long("end"))) } else emptyList(),
     )
     override fun employee(id: GlobalId) = doc("SELECT doc FROM employees WHERE id = ?", id.value)?.let(::employeeOf)
     override fun employees(scope: Scope.Branch) = docs("SELECT doc FROM employees WHERE scope = ? ORDER BY rowid", Codec.scope(scope)).map(::employeeOf)
@@ -443,6 +445,8 @@ class SqlPersonnelStore(db: SqlDatabase) : SqlTable(db), PersonnelStore {
                     "salary" to employee.monthlySalary.rial, "active" to employee.isActive,
                     "start" to employee.startDate?.epochDay, "end" to employee.endDate?.epochDay,
                     "birth" to employee.birthDate?.packed(), "number" to employee.personnelNumber.toLong(),
+                    "salaries" to employee.salaryChanges.map { mapOf("from" to it.from.epochDay, "rial" to it.monthlySalary.rial, "reason" to it.reason) },
+                    "past" to employee.pastEmployments.map { mapOf("start" to it.start?.epochDay, "end" to it.end.epochDay) },
                 ),
             ),
         ),
@@ -450,6 +454,7 @@ class SqlPersonnelStore(db: SqlDatabase) : SqlTable(db), PersonnelStore {
 
     private fun attendanceOf(d: Doc) = AttendanceRecord(
         Codec.id(d.str("id")), Codec.id(d.str("employee")), Codec.date(d.long("date")), d.int("worked"), d.int("overtime"), d.int("absent"),
+        ir.sabou.payroll.AttendanceRecord.Source.valueOf(d.strOr("source", "MANUAL")),
     )
     override fun attendance(employeeId: GlobalId, from: BusinessDate, to: BusinessDate) =
         docs("SELECT doc FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ? ORDER BY date", employeeId.value, from.epochDay, to.epochDay).map(::attendanceOf)
@@ -463,6 +468,7 @@ class SqlPersonnelStore(db: SqlDatabase) : SqlTable(db), PersonnelStore {
                 mapOf(
                     "id" to record.id.value, "employee" to record.employeeId.value, "date" to record.date.epochDay,
                     "worked" to record.workedMinutes, "overtime" to record.overtimeMinutes, "absent" to record.absentMinutes,
+                    "source" to record.source.name,
                 ),
             ),
         ),
@@ -685,7 +691,8 @@ class SqlShiftStore(db: SqlDatabase) : SqlTable(db), ir.sabou.payroll.ShiftStore
     private fun shiftOf(d: Doc) = ir.sabou.payroll.Shift(Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.id(d.str("employee")), Codec.date(d.long("date")),
         d.long("start").toInt(), d.long("end").toInt(), d.long("break").toInt(), d.strOr("station", ""))
     private fun punchOf(d: Doc) = ir.sabou.payroll.Punch(Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.id(d.str("employee")), Codec.date(d.long("date")),
-        d.long("minute").toInt(), ir.sabou.payroll.Punch.Kind.valueOf(d.str("kind")), d.long("at"))
+        d.long("minute").toInt(), ir.sabou.payroll.Punch.Kind.valueOf(d.str("kind")), d.long("at"),
+        manualBy = d.strOrNull("manualBy")?.let(Codec::id), reason = d.strOr("reason", ""), voids = d.strOrNull("voids")?.let(Codec::id))
     override fun shift(id: GlobalId) = doc("SELECT doc FROM shifts WHERE id = ?", id.value)?.let(::shiftOf)
     override fun shifts(scope: Scope.Branch, from: BusinessDate, to: BusinessDate) =
         docs("SELECT doc FROM shifts WHERE scope = ? AND date BETWEEN ? AND ? ORDER BY date, rowid", Codec.scope(scope), from.epochDay, to.epochDay).map(::shiftOf)
@@ -702,13 +709,40 @@ class SqlShiftStore(db: SqlDatabase) : SqlTable(db), ir.sabou.payroll.ShiftStore
         "INSERT INTO punches (id, scope, date, employee_id, doc) VALUES (?, ?, ?, ?, ?)",
         punch.id.value, Codec.scope(punch.scope), punch.date.epochDay, punch.employeeId.value,
         Json.encode(mapOf("id" to punch.id.value, "scope" to Codec.scope(punch.scope), "employee" to punch.employeeId.value, "date" to punch.date.epochDay,
-            "minute" to punch.minute.toLong(), "kind" to punch.kind.name, "at" to punch.atEpochMillis)),
+            "minute" to punch.minute.toLong(), "kind" to punch.kind.name, "at" to punch.atEpochMillis,
+            "manualBy" to punch.manualBy?.value, "reason" to punch.reason, "voids" to punch.voids?.value)),
     )
     override fun clockPin(employeeId: GlobalId) = db.query("SELECT hash FROM clock_pins WHERE employee_id = ?", employeeId.value).firstOrNull()?.str("hash")
     override fun saveClockPin(employeeId: GlobalId, hash: String?) {
         if (hash == null) db.execute("DELETE FROM clock_pins WHERE employee_id = ?", employeeId.value)
         else db.execute("INSERT INTO clock_pins (employee_id, hash) VALUES (?, ?) ON CONFLICT(employee_id) DO UPDATE SET hash = excluded.hash", employeeId.value, hash)
     }
+    override fun pinFailures(employeeId: GlobalId) = db.query("SELECT fails, locked_until FROM clock_pins WHERE employee_id = ?", employeeId.value).firstOrNull()
+        ?.let { ir.sabou.payroll.PinFailures(it.long("fails").toInt(), it.long("locked_until")) } ?: ir.sabou.payroll.PinFailures(0, 0L)
+    override fun savePinFailures(employeeId: GlobalId, failures: ir.sabou.payroll.PinFailures) {
+        db.execute("UPDATE clock_pins SET fails = ?, locked_until = ? WHERE employee_id = ?", failures.count.toLong(), failures.lockedUntil, employeeId.value)
+    }
+}
+
+/** The restaurant's payroll options (one JSON value in the meta table). */
+class SqlPayrollSettingsStore(db: SqlDatabase) : ir.sabou.payroll.PayrollSettingsStore {
+    private val meta = DatabaseMeta(db)
+    override fun get(): ir.sabou.payroll.PayrollSettings {
+        val d = meta.get(KEY)?.let { Doc.parse(it) } ?: return ir.sabou.payroll.PayrollSettings()
+        val defaults = ir.sabou.payroll.PayrollSettings()
+        return ir.sabou.payroll.PayrollSettings(
+            deductPlannedBreaks = d.boolOr("deductBreaks", defaults.deductPlannedBreaks),
+            overtimeMode = ir.sabou.payroll.OvertimeMode.valueOf(d.strOr("overtimeMode", defaults.overtimeMode.name)),
+            overtimeHourlyRate = Codec.money(d.longOr("overtimeRate", 0)),
+            overtimeMinimumMinutes = d.intOr("overtimeMinimum", defaults.overtimeMinimumMinutes),
+            lateGraceMinutes = d.intOr("lateGrace", defaults.lateGraceMinutes),
+        )
+    }
+    override fun save(settings: ir.sabou.payroll.PayrollSettings) = meta.put(KEY, Json.encode(mapOf(
+        "deductBreaks" to settings.deductPlannedBreaks, "overtimeMode" to settings.overtimeMode.name, "overtimeRate" to settings.overtimeHourlyRate.rial,
+        "overtimeMinimum" to settings.overtimeMinimumMinutes.toLong(), "lateGrace" to settings.lateGraceMinutes.toLong(),
+    )))
+    private companion object { const val KEY = "payroll.settings" }
 }
 
 /** Staff documents; immutable (a renewal is a new document) (ADR-0039). */

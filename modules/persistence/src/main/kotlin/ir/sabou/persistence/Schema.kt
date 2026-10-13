@@ -283,6 +283,14 @@ object Schema {
                 db.execute("CREATE UNIQUE INDEX employees_number ON employees(number)")
             },
         ),
+        Migration(
+            20,
+            listOf(
+                // Wrong clock PINs are counted in the database, so a lock survives the app restarting.
+                "ALTER TABLE clock_pins ADD COLUMN fails INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE clock_pins ADD COLUMN locked_until INTEGER NOT NULL DEFAULT 0",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

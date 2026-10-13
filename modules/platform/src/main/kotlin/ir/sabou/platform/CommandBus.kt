@@ -75,6 +75,17 @@ class CommandContext internal constructor(
     internal var audited = false
         private set
 
+    internal var failure: DomainError? = null
+        private set
+
+    /**
+     * Ends the command with [error] after keeping what the handler wrote (a wrong PIN is counted and stays counted).
+     * The handler returns normally after calling this; nothing is recorded for idempotency, so a retry runs again.
+     */
+    fun failAfterCommit(error: DomainError) {
+        failure = error
+    }
+
     fun audit(draft: AuditDraft) {
         audit.append(draft, actor, module, scopeLabel(scope), commandId.value, nowEpochMillis, epochProvider())
         audited = true
@@ -136,16 +147,17 @@ class CommandBus(
         forwarder?.let { return it.forward(module, command) }
         val type = command::class.qualifiedName ?: command::class.java.name
         val fingerprint = AuditHashing.sha256(type + "\u001F" + command.fingerprint())
-        return unitOfWork.transaction {
+        val (outcome, failure) = unitOfWork.transaction {
             idempotency.find(command.commandId.value)?.let { previous ->
                 ensure(previous.commandType == type && previous.fingerprint == fingerprint) {
                     DomainError.IdempotencyConflict(command.commandId.value)
                 }
-                return@transaction CommandOutcome(GlobalId.parse(previous.resultId), replayed = true)
+                return@transaction CommandOutcome(GlobalId.parse(previous.resultId), replayed = true) to null
             }
             val now = clock.nowEpochMillis()
             val context = CommandContext(actor, module, command.commandId, command.scope, now, audit, events, numbers, epochProvider)
             val result = handler(command, context)
+            context.failure?.let { return@transaction CommandOutcome(result, replayed = false) to it }
             // A command that issues a document must have numbered it (the whole command rolls back otherwise).
             command::class.java.getAnnotation(IssuesDocument::class.java)?.let { declared ->
                 ensure(declared.series in context.issued) { DomainError.IntegrityViolation("DOCUMENT_NOT_NUMBERED:${declared.series}:$type") }
@@ -153,8 +165,10 @@ class CommandBus(
             // Every successful command leaves at least one audit record, even if a handler wrote none itself.
             if (!context.audited) context.audit(AuditDraft("COMMAND", type.substringAfterLast('.'), result.value, ""))
             idempotency.save(IdempotencyRecord(command.commandId.value, type, fingerprint, result.value, now))
-            CommandOutcome(result, replayed = false)
+            CommandOutcome(result, replayed = false) to null
         }
+        failure?.let { throw DomainException(it) }
+        return outcome
     }
 }
 

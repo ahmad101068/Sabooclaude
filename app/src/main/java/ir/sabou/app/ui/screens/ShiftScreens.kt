@@ -1,5 +1,8 @@
 package ir.sabou.app.ui.screens
 
+import androidx.compose.runtime.remember
+import ir.sabou.payroll.VoidPunch
+import ir.sabou.payroll.AddPunch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -175,7 +178,9 @@ object ShiftScreens {
                                 }
                             }
                         } else {
-                            val punches by load(session, branch, who, done) { labor.punchesToday(branch, session.today, selected.first) }
+                            val punches by load(session, branch, who, done) {
+                                labor.punchesToday(branch, session.today, selected.first, java.time.LocalTime.now().let { it.hour * 60 + it.minute })
+                            }
                             val inside = punches.orNull()?.lastOrNull()?.kind == Punch.Kind.IN
                             FormCard(selected.second) {
                                 punches.orNull()?.forEach { p -> Text((if (p.kind == Punch.Kind.IN) "ورود " else "خروج ") + clock(p.minute), style = SabouType.caption, color = Sabou.colors.muted) }
@@ -217,25 +222,28 @@ object ShiftScreens {
     fun DayTime(nav: Nav) {
         val session = LocalSession.current
         var date by rememberSaveable { mutableStateOf(session.today) }
+        var replaceManual by rememberSaveable { mutableStateOf(false) }
+        var fixing by rememberSaveable { mutableStateOf<GlobalId?>(null) }
         val action = rememberAction()
         Column(Modifier.fillMaxSize()) {
             Header("کارکرد روز", onBack = nav.back) { BranchSwitcher() }
             WithBranch { branch ->
                 val data by load(session, branch, date) { labor.day(branch, date) }
+                val canFix = session.can(Permission.ATTENDANCE_RECORD)
                 Page {
                     DateInput("روز", date, { date = it }, session.today)
                     Loaded(data) { rows ->
                         if (rows.isEmpty()) EmptyState("برای این روز شیفت یا ساعت‌زنی‌ای نیست.")
-                        SCard {
-                            rows.forEach { r ->
-                                val t = r.time
+                        rows.forEach { r ->
+                            val t = r.time
+                            SCard {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
                                         Text(r.employee.name, style = SabouType.bodyStrong, color = Sabou.colors.ink)
-                                        Text("برنامه ${Fa.number(t.planned.toLong() / 60)}:${Fa.digits((t.planned % 60).toString().padStart(2, '0'))} · کارکرد ${Fa.number(t.worked.toLong() / 60)}:${Fa.digits((t.worked % 60).toString().padStart(2, '0'))}" +
+                                        Text("برنامه ${durationText(t.planned)} · کارکرد ${durationText(t.worked)}" +
                                             (if (t.late > 0) " · تأخیر ${Fa.number(t.late.toLong())} دقیقه" else "") +
-                                            (if (t.overtime > 0) " · اضافه‌کار ${Fa.number(t.overtime.toLong())}" else "") +
-                                            (if (t.absent > 0) " · کسر ${Fa.number(t.absent.toLong())}" else ""), style = SabouType.caption, color = Sabou.colors.muted)
+                                            (if (t.overtime > 0) " · اضافه‌کار ${durationText(t.overtime)}" else "") +
+                                            (if (t.absent > 0) " · کسر ${durationText(t.absent)}" else ""), style = SabouType.caption, color = Sabou.colors.muted)
                                     }
                                     when {
                                         t.openPunch -> Chip("خروج نزده", ChipKind.ACCENT)
@@ -244,18 +252,87 @@ object ShiftScreens {
                                         else -> Chip("درست", ChipKind.PRIMARY)
                                     }
                                 }
-                                Divider()
+                                if (r.manual) Text("کارکرد این روز دستی ثبت شده است.", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
+                                // The punches themselves, so a wrong or missing one can be fixed here.
+                                r.punches.forEach { p ->
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text((if (p.kind == Punch.Kind.IN) "ورود " else "خروج ") + clock(p.minute) + (if (p.minute >= 1_440) " (بامداد روز بعد)" else "") +
+                                            (if (p.manualBy != null) " · دستی: ${p.reason}" else ""), style = SabouType.caption, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                                        if (canFix && fixing == r.employee.id) VoidLink(branch, date, p)
+                                    }
+                                }
+                                if (canFix) {
+                                    if (fixing == r.employee.id) {
+                                        AddPunchForm(branch, date, r.employee.id, if (t.openPunch) Punch.Kind.OUT else Punch.Kind.IN)
+                                        Text("بستن", style = SabouType.label, color = Sabou.colors.muted, modifier = Modifier.clickable { fixing = null }.padding(vertical = 6.dp))
+                                    } else Text("اصلاح ساعت‌زنی", style = SabouType.label, color = Sabou.colors.primary,
+                                        modifier = Modifier.clickable { fixing = r.employee.id }.padding(vertical = 6.dp))
+                                }
                             }
                         }
                         action.error?.let { Banner(it) }
-                        if (rows.isNotEmpty() && session.can(Permission.ATTENDANCE_RECORD)) {
+                        if (rows.isNotEmpty() && canFix) {
                             Text("با تأیید، کارکرد، اضافه‌کار و کسر هر نفر در «حضور و غیاب» ثبت و در حقوق ماه حساب می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
-                            PrimaryButton("تأیید کارکرد این روز", { action.run({ shifts.confirmDay(ConfirmDayTime(GlobalId.new(), branch, date)) }) },
+                            if (rows.any { it.manual }) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { replaceManual = !replaceManual }) {
+                                androidx.compose.material3.Checkbox(checked = replaceManual, onCheckedChange = { replaceManual = it })
+                                Text("کارکرد دستی هم با ساعت‌زنی جایگزین شود", style = SabouType.body, color = Sabou.colors.ink)
+                            }
+                            PrimaryButton("تأیید کارکرد این روز", { action.run({ shifts.confirmDay(ConfirmDayTime(GlobalId.new(), branch, date, replaceManual)) }) },
                                 enabled = rows.none { it.time.openPunch } && date <= session.today && !action.busy, busy = action.busy)
+                            if (rows.any { it.time.openPunch }) Text("کسی خروج نزده است: روی «اصلاح ساعت‌زنی» او بزنید و خروجش را ثبت کنید.", style = SabouType.caption, color = Sabou.colors.danger)
                         }
                     }
                 }
             }
         }
+    }
+
+    private fun durationText(minutes: Int) = ir.sabou.app.ui.components.durationText(minutes)
+
+    @Composable
+    private fun VoidLink(branch: ir.sabou.kernel.Scope.Branch, date: ir.sabou.kernel.BusinessDate, p: Punch) {
+        var asking by remember { mutableStateOf(false) }
+        var reason by rememberSaveable(p.id) { mutableStateOf("") }
+        val action = rememberAction()
+        if (!asking) Text("لغو", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable { asking = true }.padding(6.dp))
+        if (asking) androidx.compose.material3.AlertDialog(
+            onDismissRequest = { asking = false },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    action.run({ shifts.voidPunch(VoidPunch(GlobalId.new(), branch, p.id, date, reason)) }) { asking = false }
+                }, enabled = reason.trim().length >= 3 && !action.busy) { Text("لغو این ساعت‌زنی", style = SabouType.bodyStrong, color = Sabou.colors.danger) }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { asking = false }) { Text("انصراف", style = SabouType.bodyStrong, color = Sabou.colors.muted) } },
+            containerColor = Sabou.colors.surface,
+            title = { Text((if (p.kind == Punch.Kind.IN) "ورود " else "خروج ") + clock(p.minute), style = SabouType.section) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextInput("دلیل", reason, { reason = it }, placeholder = "دو بار زده شد، به‌جای دیگری زد…")
+                    action.error?.let { Banner(it) }
+                }
+            },
+        )
+    }
+
+    @Composable
+    private fun AddPunchForm(branch: ir.sabou.kernel.Scope.Branch, date: ir.sabou.kernel.BusinessDate, employeeId: GlobalId, suggested: Punch.Kind) {
+        var kind by rememberSaveable(employeeId) { mutableStateOf(suggested) }
+        var minute by rememberSaveable(employeeId) { mutableStateOf<Int?>(null) }
+        var nextDay by rememberSaveable(employeeId) { mutableStateOf(false) }
+        var reason by rememberSaveable(employeeId) { mutableStateOf("") }
+        val action = rememberAction()
+        Picker("نوع", listOf(Choice(Punch.Kind.IN, "ورود"), Choice(Punch.Kind.OUT, "خروج")), kind, { kind = it })
+        ir.sabou.app.ui.components.TimeInput("ساعت", minute, { minute = it })
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { nextDay = !nextDay }) {
+            androidx.compose.material3.Checkbox(checked = nextDay, onCheckedChange = { nextDay = it })
+            Text("بامداد روز بعد (شیفت شب)", style = SabouType.body, color = Sabou.colors.ink)
+        }
+        TextInput("دلیل", reason, { reason = it }, placeholder = "خروج نزده بود…")
+        action.error?.let { Banner(it) }
+        PrimaryButton("ثبت ${if (kind == Punch.Kind.IN) "ورود" else "خروج"} دستی", {
+            action.run({ shifts.addPunch(AddPunch(GlobalId.new(), branch, employeeId, date, minute!! + if (nextDay) 1_440 else 0, kind, reason)) }) {
+                minute = null; reason = ""; nextDay = false
+            }
+        }, enabled = minute != null && reason.trim().length >= 3 && !action.busy, busy = action.busy)
     }
 }

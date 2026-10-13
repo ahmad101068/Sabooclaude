@@ -45,6 +45,9 @@ data class StatutoryPolicy(
         require(bounds == bounds.sorted() && bounds.distinct() == bounds)
     }
 
+    fun statutoryOvertime(monthly: Money, minutes: Long): Money =
+        Money.of(Ratio.mulDiv(monthly.rial, Math.multiplyExact(minutes, overtimeMultiplierPercent.toLong()), standardMonthlyMinutes * 100L))
+
     fun percent(base: Money, bp: Int): Money = Money.of(Ratio.mulDiv(base.rial, bp.toLong(), 10_000))
 
     fun progressiveTax(taxable: Money): Money {
@@ -64,13 +67,23 @@ data class StatutoryPolicy(
      * [salary] is the monthly salary; it also sets the minute rate for absence and overtime. With [payableDays]
      * (a partial month) the base is prorated and absence can never take more than that base.
      */
-    fun calculate(employeeId: ir.sabou.kernel.GlobalId, monthlySalary: Money, absentMinutes: Long, overtimeMinutes: Long, payableDays: Int? = null): Payslip {
+    fun calculate(
+        employeeId: ir.sabou.kernel.GlobalId,
+        monthlySalary: Money,
+        absentMinutes: Long,
+        overtimeMinutes: Long,
+        payableDays: Int? = null,
+        /** The month's base when it is not simply [monthlySalary] prorated (a salary change during the month). */
+        base: Money? = null,
+        /** Overtime priced another way than the statutory multiplier (restaurant settings); null = statutory. */
+        overtimePay: Money? = null,
+    ): Payslip {
         require(payableDays == null || payableDays >= 1)
         val monthly = monthlySalary
-        val salary = if (payableDays == null) monthly
+        val salary = base ?: if (payableDays == null) monthly
             else Money.of(minOf(monthly.rial, Ratio.mulDiv(monthly.rial, payableDays.toLong(), prorationDays.toLong())))
         val absence = Money.of(minOf(salary.rial, Ratio.mulDiv(monthly.rial, absentMinutes, standardMonthlyMinutes.toLong())))
-        val overtime = Money.of(Ratio.mulDiv(monthly.rial, Math.multiplyExact(overtimeMinutes, overtimeMultiplierPercent.toLong()), standardMonthlyMinutes * 100L))
+        val overtime = overtimePay ?: statutoryOvertime(monthly, overtimeMinutes)
         val gross = salary - absence + overtime
         val insurable = minOf(gross, maxInsurableMonthly)
         val employeeIns = percent(insurable, employeeInsuranceBp)
