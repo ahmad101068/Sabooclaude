@@ -46,17 +46,18 @@ data class RegisterEmployee(
     override fun fingerprint() = "$scope|$name|$nationalId|${monthlySalary.rial}|${startDate?.epochDay}|${birthDate?.packed()}"
 }
 
-/** Corrects a person's name and birth date (the national ID and personnel number never change). */
+/** Corrects a person's name, national ID and birth date (the personnel number never changes). */
 @NoDocument
 data class UpdateEmployeeDetails(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
     val employeeId: GlobalId,
     val name: String,
+    val nationalId: String,
     val birthDate: JalaliDay?,
 ) : Command {
     override val requiredPermission = Permission.PERSONNEL_MANAGE
-    override fun fingerprint() = "$scope|$employeeId|$name|${birthDate?.packed()}"
+    override fun fingerprint() = "$scope|$employeeId|$name|$nationalId|${birthDate?.packed()}"
 }
 
 /** Ends an employment after [lastDay]; that month is paid only up to it, later months not at all. */
@@ -197,9 +198,20 @@ class PayrollOperations(
         val employee = requireEmployee(cmd.employeeId, cmd.scope)
         val name = cmd.name.trim()
         ensure(name.length in 2..120) { DomainError.InvalidInput("name", "نام کارمند الزامی است.") }
+        ensure(NationalId.isValid(cmd.nationalId)) { DomainError.InvalidInput("nationalId", "کد ملی معتبر نیست.") }
+        val nationalId = NationalId.normalize(cmd.nationalId)
+        ensure(personnel.employees(cmd.scope).none { it.id != employee.id && NationalId.normalize(it.nationalId) == nationalId }) {
+            DomainError.InvalidState("EMPLOYEE", "DUPLICATE_NATIONAL_ID")
+        }
         cmd.birthDate?.let { validBirthDate(it, ctx.nowEpochMillis) }
-        personnel.saveEmployee(employee.copy(name = name, birthDate = cmd.birthDate))
-        ctx.audit(AuditDraft("EMPLOYEE_UPDATE", "EMPLOYEE", employee.id.value, name + (cmd.birthDate?.let { ";birth=${it.packed()}" } ?: "")))
+        personnel.saveEmployee(employee.copy(name = name, nationalId = nationalId, birthDate = cmd.birthDate))
+        // The audit keeps what changed, so a wrong correction can be traced.
+        val changes = buildList {
+            if (name != employee.name) add("name=${employee.name}->$name")
+            if (nationalId != employee.nationalId) add("nationalId=${employee.nationalId}->$nationalId")
+            if (cmd.birthDate != employee.birthDate) add("birth=${employee.birthDate?.packed()}->${cmd.birthDate?.packed()}")
+        }
+        ctx.audit(AuditDraft("EMPLOYEE_UPDATE", "EMPLOYEE", employee.id.value, changes.joinToString(";")))
         employee.id
     }
 

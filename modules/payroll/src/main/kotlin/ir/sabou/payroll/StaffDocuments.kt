@@ -19,8 +19,9 @@ import ir.sabou.platform.Permission
 
 /**
  * A staff document (ADR-0039): the health card a food worker must hold, the contract, ID, insurance record, a
- * guarantee. Documents are never edited: a renewed card is a new document, the old one stays in the history. The
- * latest of each kind is the one in force.
+ * guarantee. Records are never overwritten: a renewed card is a new document (the old one stays in the history);
+ * a correction is a new record that [replaces] the wrong one, and a removal is a [voided] record replacing it, so
+ * every earlier version stays. The latest live document of each kind is the one in force.
  */
 data class StaffDocument(
     val id: GlobalId,
@@ -30,7 +31,14 @@ data class StaffDocument(
     val title: String,
     val expiresOn: BusinessDate?,
     val note: String,
+    /** For a renewal's order: a correction keeps the time of the document it corrects. */
     val recordedAtEpochMillis: Long,
+    /** The document this record corrects or removes. */
+    val replaces: GlobalId? = null,
+    /** A removal: the replaced document was entered by mistake. */
+    val voided: Boolean = false,
+    /** Why it was removed. */
+    val reason: String = "",
 ) {
     enum class Kind(val requiredForEveryone: Boolean = false) { HEALTH_CARD(true), CONTRACT(true), ID_CARD, INSURANCE, GUARANTEE, OTHER }
 }
@@ -51,9 +59,21 @@ object StaffDocumentRules {
     /** A document expiring within this many days is flagged (time to renew a health card). */
     const val WARN_DAYS = 30L
 
-    /** The latest document of each kind for [employeeId]. */
+    /** Documents neither corrected nor removed since. */
+    fun live(documents: List<StaffDocument>): List<StaffDocument> {
+        val replaced = documents.mapNotNull { it.replaces }.toSet()
+        return documents.filter { !it.voided && it.id !in replaced }
+    }
+
+    /** [document] and every earlier version it corrected, newest first. */
+    fun versions(document: StaffDocument, documents: List<StaffDocument>): List<StaffDocument> {
+        val byId = documents.associateBy { it.id }
+        return generateSequence(document) { d -> d.replaces?.let(byId::get) }.toList()
+    }
+
+    /** The latest live document of each kind. */
     fun current(documents: List<StaffDocument>): Map<StaffDocument.Kind, StaffDocument> =
-        documents.groupBy { it.kind }.mapValues { (_, l) -> l.maxBy { it.recordedAtEpochMillis } }
+        live(documents).groupBy { it.kind }.mapValues { (_, l) -> l.maxBy { it.recordedAtEpochMillis } }
 
     fun issues(employee: Employee, documents: List<StaffDocument>, today: BusinessDate): List<DocumentIssue> {
         if (employee.employedDays(today, today) != 1) return emptyList()
@@ -81,6 +101,29 @@ data class AddStaffDocument(
     override fun fingerprint() = "$scope|$employeeId|$kind|$title|${expiresOn?.epochDay}|$note|" + files.joinToString(";") { it.fingerprint() }
 }
 
+/** Corrects a document entered wrongly (kind, title, expiry, note); [files] are added to those it already had. */
+@NoDocument
+data class CorrectStaffDocument(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val documentId: GlobalId,
+    val kind: StaffDocument.Kind,
+    val title: String,
+    val expiresOn: BusinessDate?,
+    val note: String,
+    val files: List<AttachmentInput>,
+) : Command {
+    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override fun fingerprint() = "$scope|$documentId|$kind|$title|${expiresOn?.epochDay}|$note|" + files.joinToString(";") { it.fingerprint() }
+}
+
+/** Removes a document entered by mistake; it stays in the history with the reason. */
+@NoDocument
+data class RemoveStaffDocument(override val commandId: GlobalId, override val scope: Scope.Branch, val documentId: GlobalId, val reason: String) : Command {
+    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override fun fingerprint() = "$scope|$documentId|$reason"
+}
+
 class StaffDocumentOperations(
     private val bus: CommandBus,
     private val personnel: PersonnelStore,
@@ -90,14 +133,49 @@ class StaffDocumentOperations(
     fun add(c: AddStaffDocument): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
         val employee = personnel.employee(cmd.employeeId) ?: throw DomainException(DomainError.NotFound("EMPLOYEE"))
         ensure(employee.scope == cmd.scope) { DomainError.InvalidInput("scope", "این کارمند متعلق به این شعبه نیست.") }
-        ensure(cmd.title.length <= 80 && cmd.note.length <= 300) { DomainError.InvalidInput("text", "متن بیش از حد طولانی است.") }
-        ensure(cmd.kind != StaffDocument.Kind.HEALTH_CARD || cmd.expiresOn != null) { DomainError.InvalidInput("expiresOn", "تاریخ اعتبار کارت بهداشت لازم است.") }
+        validate(cmd.kind, cmd.title, cmd.expiresOn, cmd.note)
         ensure(cmd.files.isNotEmpty() || cmd.note.isNotBlank()) { DomainError.InvalidInput("files", "عکس یا PDF مدرک، یا دست‌کم توضیحی لازم است.") }
         val document = StaffDocument(GlobalId.new(), cmd.scope, employee.id, cmd.kind, cmd.title.trim(), cmd.expiresOn, cmd.note.trim(), ctx.nowEpochMillis)
         documents.save(document)
         if (cmd.files.isNotEmpty()) Attachments.attach(ctx, attachments, OWNER, document.id, cmd.files)
         ctx.audit(AuditDraft("STAFF_DOCUMENT_ADD", "EMPLOYEE", employee.id.value, "kind=${cmd.kind};expires=${cmd.expiresOn?.epochDay};files=${cmd.files.size}"))
         document.id
+    }
+
+    fun correct(c: CorrectStaffDocument): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val old = liveDocument(cmd.documentId, cmd.scope)
+        validate(cmd.kind, cmd.title, cmd.expiresOn, cmd.note)
+        val document = StaffDocument(GlobalId.new(), cmd.scope, old.employeeId, cmd.kind, cmd.title.trim(), cmd.expiresOn, cmd.note.trim(),
+            old.recordedAtEpochMillis, replaces = old.id)
+        documents.save(document)
+        if (cmd.files.isNotEmpty()) Attachments.attach(ctx, attachments, OWNER, document.id, cmd.files)
+        ctx.audit(AuditDraft("STAFF_DOCUMENT_CORRECT", "EMPLOYEE", old.employeeId.value,
+            "doc=${old.id.value};kind=${old.kind}->${cmd.kind};expires=${old.expiresOn?.epochDay}->${cmd.expiresOn?.epochDay};files=+${cmd.files.size}"))
+        document.id
+    }
+
+    fun remove(c: RemoveStaffDocument): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val old = liveDocument(cmd.documentId, cmd.scope)
+        val reason = cmd.reason.trim()
+        ensure(reason.length in 3..200) { DomainError.InvalidInput("reason", "دلیل حذف را بنویسید.") }
+        val tombstone = StaffDocument(GlobalId.new(), cmd.scope, old.employeeId, old.kind, old.title, old.expiresOn, old.note,
+            old.recordedAtEpochMillis, replaces = old.id, voided = true, reason = reason)
+        documents.save(tombstone)
+        ctx.audit(AuditDraft("STAFF_DOCUMENT_REMOVE", "EMPLOYEE", old.employeeId.value, "doc=${old.id.value};kind=${old.kind};reason=$reason"))
+        tombstone.id
+    }
+
+    private fun validate(kind: StaffDocument.Kind, title: String, expiresOn: BusinessDate?, note: String) {
+        ensure(title.length <= 80 && note.length <= 300) { DomainError.InvalidInput("text", "متن بیش از حد طولانی است.") }
+        ensure(kind != StaffDocument.Kind.HEALTH_CARD || expiresOn != null) { DomainError.InvalidInput("expiresOn", "تاریخ اعتبار کارت بهداشت لازم است.") }
+    }
+
+    /** A document of this branch that has not been corrected or removed since (only the latest version is changed). */
+    private fun liveDocument(id: GlobalId, scope: Scope.Branch): StaffDocument {
+        val all = documents.all(scope)
+        val doc = all.firstOrNull { it.id == id } ?: throw DomainException(DomainError.NotFound("STAFF_DOCUMENT"))
+        ensure(doc in StaffDocumentRules.live(all.filter { it.employeeId == doc.employeeId })) { DomainError.InvalidState("STAFF_DOCUMENT", "ALREADY_CHANGED") }
+        return doc
     }
 
     companion object {

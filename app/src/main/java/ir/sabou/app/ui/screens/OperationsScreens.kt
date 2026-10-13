@@ -648,9 +648,14 @@ object OperationsScreens {
                                     if (e.endDate != null) Chip("پایان همکاری ${Fa.date(e.endDate!!)}", ChipKind.NEUTRAL)
                                 }
                                 KeyValue("حقوق ماهانه", Fa.rial(e.monthlySalary))
+                                // Each document that needs attention by name: which one, and what is wrong with it.
                                 val docIssues = issues.orNull().orEmpty().filter { it.employee.id == e.id }
-                                Text("مدارک" + if (docIssues.isNotEmpty()) " (${Fa.number(docIssues.size.toLong())} مورد نیاز به رسیدگی)" else "", style = SabouType.label,
-                                    color = if (docIssues.isNotEmpty()) Sabou.colors.danger else Sabou.colors.primary,
+                                docIssues.forEach { v ->
+                                    Text("⚠ " + StaffDocScreens.issueText(v.issue), style = SabouType.label,
+                                        color = if (v.issue.missing || v.issue.expired) Sabou.colors.danger else Sabou.colors.onAccentSoft,
+                                        modifier = Modifier.clickable { nav.go(Route.StaffDocuments(e.id)) }.padding(vertical = 2.dp))
+                                }
+                                Text("مدارک", style = SabouType.label, color = Sabou.colors.primary,
                                     modifier = Modifier.clickable { nav.go(Route.StaffDocuments(e.id)) }.padding(vertical = 4.dp))
                                 Text("کد ملی ${Fa.digits(e.nationalId)}" +
                                     (e.birthDate?.let { " · تولد ${Fa.digits(it.day.toString())} ${Fa.monthNames[it.month - 1]} ${Fa.digits(it.year.toString())}" } ?: " · تاریخ تولد ثبت نشده") +
@@ -658,7 +663,7 @@ object OperationsScreens {
                                     style = SabouType.caption, color = Sabou.colors.muted)
                                 if (session.can(Permission.PERSONNEL_MANAGE)) {
                                     if (editing == e.id) EmployeeDetailsForm(branch, e) { editing = null }
-                                    else Text("ویرایش نام و تاریخ تولد", style = SabouType.label, color = Sabou.colors.primary,
+                                    else Text("ویرایش مشخصات (نام، کد ملی، تاریخ تولد)", style = SabouType.label, color = Sabou.colors.primary,
                                         modifier = Modifier.clickable { editing = e.id }.padding(vertical = 4.dp))
                                 }
                                 if (e.endDate == null && e.isActive && session.can(Permission.PERSONNEL_MANAGE)) {
@@ -714,17 +719,19 @@ object OperationsScreens {
     @Composable
     private fun EmployeeDetailsForm(branch: Scope.Branch, e: ir.sabou.payroll.Employee, onDone: () -> Unit) {
         var name by rememberSaveable(e.id) { mutableStateOf(e.name) }
+        var nationalId by rememberSaveable(e.id) { mutableStateOf(Fa.digits(e.nationalId)) }
         var birth by rememberSaveable(e.id) { mutableStateOf(e.birthDate) }
         var birthOk by rememberSaveable(e.id) { mutableStateOf(true) }
         val id = rememberSaveable(e.id) { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
         TextInput("نام و نام خانوادگی", name, { name = it })
+        TextInput("کد ملی", nationalId, { nationalId = it }, keyboard = KeyboardType.Number)
         BirthDateInput("تاریخ تولد", birth) { v, ok -> birth = v; birthOk = ok }
         action.error?.let { Banner(it) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PrimaryButton("ذخیره", {
-                action.run({ payroll.updateEmployeeDetails(ir.sabou.payroll.UpdateEmployeeDetails(id.value, branch, e.id, name, birth)) }) { onDone() }
-            }, Modifier.weight(1f), enabled = name.isNotBlank() && birthOk, busy = action.busy)
+                action.run({ payroll.updateEmployeeDetails(ir.sabou.payroll.UpdateEmployeeDetails(id.value, branch, e.id, name, nationalId, birth)) }) { onDone() }
+            }, Modifier.weight(1f), enabled = name.isNotBlank() && nationalId.isNotBlank() && birthOk, busy = action.busy)
             SecondaryButton("انصراف", onDone, Modifier.weight(1f))
         }
     }
