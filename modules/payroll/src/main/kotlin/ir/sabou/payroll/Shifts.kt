@@ -120,8 +120,8 @@ data class CopyWeek(override val commandId: GlobalId, override val scope: Scope.
 @NoDocument
 data class SetClockPin(override val commandId: GlobalId, override val scope: Scope.Branch, val employeeId: GlobalId, val pin: String?) : Command {
     override val requiredPermission = Permission.PERSONNEL_MANAGE
-    // The PIN itself never enters the fingerprint (idempotency records are kept).
-    override fun fingerprint() = "$scope|$employeeId|${pin != null}|${pin?.length}"
+    // The PIN itself never enters the fingerprint (idempotency records are kept): a slow, salted digest of it does.
+    override fun fingerprint() = "$scope|$employeeId|" + (pin?.let { ir.sabou.platform.PinHasher.fingerprint(it.toCharArray(), commandId.value) } ?: "none")
 }
 
 /**
@@ -138,7 +138,7 @@ data class ClockPunch(
     val minute: Int,
 ) : Command {
     override val requiredPermission = Permission.TIME_CLOCK
-    override fun fingerprint() = "$scope|$employeeId|${date.epochDay}|$minute"
+    override fun fingerprint() = "$scope|$employeeId|${date.epochDay}|$minute|" + ir.sabou.platform.PinHasher.fingerprint(pin.toCharArray(), commandId.value)
 }
 
 /** Turns a day's punches into attendance (worked, overtime, absence) through the ordinary attendance record. */

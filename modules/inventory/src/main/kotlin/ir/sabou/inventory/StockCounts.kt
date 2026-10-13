@@ -185,6 +185,14 @@ class StockCountOperations(
             line.copy(reason = r.reason, reasonNote = r.note.trim())
         }
         val source = SourceDocument(ModuleId.INVENTORY, InventoryOperations.COUNT, count.id)
+        // A loss measured then can only be taken now if the stock is still there. When more has been consumed, wasted or
+        // moved since the count than the count left (audit F09), the count no longer describes the shelf: it is refused
+        // with a clear reason, to be rejected and counted again — never applied as negative stock.
+        lines.forEach { line ->
+            if (line.difference < 0 && gateway.balance(line.itemId, location.id).quantity.micros < -line.difference) {
+                throw DomainException(DomainError.InvalidState("STOCK_COUNT", "STALE"))
+            }
+        }
         // What was consumed beyond the book before this count is now measured by it: write those shortages off first.
         count.lines.forEach { gateway.writeOffShortages(ctx, location, it.itemId, count.date, count.id) }
         // The difference measured at count time is applied now, valued at today's average cost, so

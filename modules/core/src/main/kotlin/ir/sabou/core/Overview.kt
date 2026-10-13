@@ -99,7 +99,11 @@ data class ProductionNeed(val item: Item, val needed: Quantity, val available: Q
 data class CountSheetLine(val item: Item, val book: Quantity?)
 
 /** A stock count with its location; [showsBook] false = book quantities hidden from this reader while it is pending. */
-data class CountView(val count: ir.sabou.inventory.StockCount, val location: String, val showsBook: Boolean, val number: String? = null)
+/**
+ * [stale]: items of a pending count whose loss can no longer be taken, because more was used, wasted or moved since
+ * the count than it left on the shelf — the count must be rejected and taken again (audit F09).
+ */
+data class CountView(val count: ir.sabou.inventory.StockCount, val location: String, val showsBook: Boolean, val number: String? = null, val stale: List<String> = emptyList())
 
 data class SetupStatus(val hasAccounts: Boolean, val hasItems: Boolean, val hasMenu: Boolean)
 
@@ -266,8 +270,11 @@ class Overview internal constructor(private val core: SabouCore) {
         val reviewer = a.role.allows(Permission.INVENTORY_ADJUST)
         return core.stockCounts.all().filter { it.scope == branch }.map { c ->
             val hide = !reviewer && c.status == ir.sabou.inventory.CountStatus.PENDING
+            val stale = if (hide || c.status != ir.sabou.inventory.CountStatus.PENDING) emptyList() else c.lines.filter { l ->
+                l.difference < 0 && core.stock.balance(l.itemId, c.locationId).quantity.micros < -l.difference
+            }.map { l -> core.items.byId(l.itemId)?.name.orEmpty() }
             CountView(if (hide) c.copy(lines = c.lines.map { it.copy(bookAtCount = it.counted) }) else c, names[c.locationId].orEmpty(), !hide,
-                core.numbers.of(ir.sabou.platform.DocumentSeries.STOCK_COUNT, c.id)?.text)
+                core.numbers.of(ir.sabou.platform.DocumentSeries.STOCK_COUNT, c.id)?.text, stale)
         }
     }
 

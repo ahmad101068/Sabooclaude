@@ -52,12 +52,13 @@ class Forecasts internal constructor(private val core: SabouCore) {
         val weights = samples.map { (w, v) -> (WEEKS + 1 - w).toLong() to v }
         val total = weights.sumOf { it.first }
         // One division at the end: rounding each term would drift by a few Rial.
-        val mean = weights.sumOf { (wt, v) -> Math.multiplyExact(v, wt) } / total
+        val mean = maxOf(0, weights.sumOf { (wt, v) -> Math.multiplyExact(v, wt) } / total)
         val deviation = weights.sumOf { (wt, v) -> Math.multiplyExact(kotlin.math.abs(v - mean), wt) } / total
         val percent = when (special?.kind) { SpecialDay.Kind.CLOSED -> 0; null -> 100; else -> special.percent }
         fun scaled(v: Long) = Ratio.mulDiv(v, percent.toLong(), 100)
         val expected = scaled(mean)
-        return DayForecast(date, expected, maxOf(0, scaled(mean - deviation)), scaled(mean + deviation), samples.size, special)
+        // The range is clamped before scaling (audit F04): a very uneven history makes mean − deviation negative.
+        return DayForecast(date, expected, scaled(maxOf(0, mean - deviation)), scaled(mean + deviation), samples.size, special)
     }
 
     /** Last 28 days over the 28 before, clamped to −20 % … +25 %; flat without enough days in both. */

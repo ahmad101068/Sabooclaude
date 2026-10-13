@@ -52,3 +52,8 @@ reading and sends every change to the main phone.** Nothing is merged.
 - Backups are taken on the main phone only.
 - The protocol is the one a server would speak later: moving the main phone's role to a server (ADR-0008) reuses
   the change log, the dispatcher and the wire.
+- **Trust model:** a paired phone is trusted with the whole books — the full copy (all branches) is sent to it before
+  anyone signs in there, and sign-in only decides what that person may do. Pair only the restaurant's own phones; a
+  lost or replaced phone is removed on the main phone at once («حذف»), after which it gets nothing more.
+- The main phone serves at most 12 connections at once; anything beyond is closed before any work is done for it.
+

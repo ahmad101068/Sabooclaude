@@ -10,7 +10,8 @@ import ir.sabou.platform.Permission
 import ir.sabou.posimport.BankStatementFile
 import ir.sabou.posimport.ImportFileException
 import ir.sabou.posimport.Sheets
-import ir.sabou.treasury.AutoMatchStatement
+import ir.sabou.treasury.RecordStatementLine
+import ir.sabou.treasury.StatementPosting
 import ir.sabou.treasury.BankStatement
 import ir.sabou.treasury.Direction
 import ir.sabou.treasury.ImportBankStatement
@@ -25,7 +26,13 @@ import ir.sabou.treasury.TreasuryKind
 import ir.sabou.treasury.TreasuryMovement
 
 /** A statement file read and checked, before import. */
-data class StatementPreview(val lines: List<StatementLineInput>, val closingBalance: Long?, val problems: List<String>) {
+data class StatementPreview(
+    val lines: List<StatementLineInput>,
+    val closingBalance: Long?,
+    val problems: List<String>,
+    /** Lines of the file already imported in an earlier statement of the chosen account; they are left out. */
+    val alreadyImported: Int = 0,
+) {
     val ready: Boolean get() = lines.isNotEmpty() && problems.isEmpty()
 }
 
@@ -75,7 +82,7 @@ class BankRec internal constructor(private val core: SabouCore) {
         return account
     }
 
-    fun preview(file: PosFile): StatementPreview {
+    fun preview(file: PosFile, accountId: GlobalId? = null): StatementPreview {
         actor(Permission.TREASURY_RECONCILE)
         val parsed = try { BankStatementFile.parse(Sheets.read(file.name, file.bytes)) } catch (e: ImportFileException) {
             return StatementPreview(emptyList(), null, listOf(e.message ?: "فایل خوانده نشد."))
@@ -84,7 +91,8 @@ class BankRec internal constructor(private val core: SabouCore) {
             StatementLineInput(r.date, r.description, if (r.deposit != null) Direction.RECEIPT else Direction.PAYMENT,
                 Money.of(r.deposit ?: r.withdrawal!!), r.balance?.let(Money::of), r.reference)
         }
-        return StatementPreview(lines, parsed.closingBalance, parsed.problems)
+        val repeated = accountId?.let { id -> lines.size - core.bankStatements.newLines(bankAccount(id).id, lines).size } ?: 0
+        return StatementPreview(lines, parsed.closingBalance, parsed.problems, repeated)
     }
 
     fun import(commandId: GlobalId, accountId: GlobalId, file: PosFile): CommandOutcome {
@@ -94,45 +102,40 @@ class BankRec internal constructor(private val core: SabouCore) {
         return core.bankStatements.import(ImportBankStatement(commandId, account.scope, account.id, file.name, p.lines, p.closingBalance?.let(Money::of)))
     }
 
-    fun statements(accountId: GlobalId): List<BankStatement> = core.bankStatementStore.of(bankAccount(accountId).id).sortedByDescending { it.to }
+    fun statements(accountId: GlobalId): List<BankStatement> =
+        core.bankStatementStore.of(bankAccount(accountId).id).map(core.bankStatements::effective).sortedByDescending { it.to }
 
     fun reconciliation(statementId: GlobalId): Reconciliation {
-        val statement = core.bankStatementStore.byId(statementId) ?: throw DomainException(DomainError.NotFound("BANK_STATEMENT"))
-        bankAccount(statement.accountId)
+        val stored = core.bankStatementStore.byId(statementId) ?: throw DomainException(DomainError.NotFound("BANK_STATEMENT"))
+        bankAccount(stored.accountId)
+        val statement = core.bankStatements.effective(stored)
         val matched = core.bankStatements.matchedMovements(statement.accountId)
         val all = core.treasuryMovements.byAccount(statement.accountId)
         val bookBalance = all.filter { it.date <= statement.to }.sumOf { if (it.direction == Direction.RECEIPT) it.amount.rial else -it.amount.rial }
+        // What the books have and no statement has shown yet, up to this statement's end — including items from before
+        // it (a cheque issued last month and still not cleared is still outstanding, audit F07). Reconciliation starts
+        // with the account's first statement: movements before that are its opening, not outstanding items.
+        val start = core.bankStatementStore.of(statement.accountId).minOf { it.from }.plusDays(-ir.sabou.treasury.BankMatching.DAYS)
         val bookOnly = core.bankStatements.matchable(statement.accountId)
-            .filter { it.id !in matched && it.date <= statement.to && it.date >= statement.from.plusDays(-ir.sabou.treasury.BankMatching.DAYS) }
+            .filter { it.id !in matched && it.date <= statement.to && it.date >= start }
             .sortedBy { it.date }
             .map { BookItem(it, core.journals.byId(it.journalId)?.description.orEmpty()) }
         return Reconciliation(statement, statement.lines.size - statement.unmatched.size, statement.unmatched, bookOnly, bookBalance)
     }
 
-    /** Records a statement-only line in the books (a payment, a receipt or a transfer) and matches the statement again. */
+    /**
+     * Records a statement-only line in the books (a payment, a receipt or a transfer) and matches it with that very
+     * line, in one command (audit F01).
+     */
     fun record(commandId: GlobalId, statementId: GlobalId, index: Int, action: StatementAction): CommandOutcome {
         val statement = core.bankStatementStore.byId(statementId) ?: throw DomainException(DomainError.NotFound("BANK_STATEMENT"))
-        val account = bankAccount(statement.accountId)
-        val line = statement.lines.getOrNull(index) ?: throw DomainException(DomainError.NotFound("STATEMENT_LINE"))
-        if (line.movementId != null) throw DomainException(DomainError.InvalidState("STATEMENT_LINE", "ALREADY_MATCHED"))
-        val text = line.description.ifBlank { "سطر صورت‌حساب" }.take(200)
-        val outcome = when (action) {
-            is StatementAction.Pay -> {
-                if (line.direction != Direction.PAYMENT) throw DomainException(DomainError.InvalidInput("action", "این سطر واریز است، نه برداشت."))
-                core.treasury.payment(RecordPayment(commandId, account.scope, account.id, action.purpose, line.amount, line.date, text))
-            }
-            is StatementAction.Receive -> {
-                if (line.direction != Direction.RECEIPT) throw DomainException(DomainError.InvalidInput("action", "این سطر برداشت است، نه واریز."))
-                core.treasury.receipt(RecordReceipt(commandId, account.scope, account.id, action.purpose, line.amount, line.date, text))
-            }
-            is StatementAction.Transfer -> {
-                val other = core.treasuryAccounts.byId(action.otherAccountId) ?: throw DomainException(DomainError.NotFound("TREASURY_ACCOUNT"))
-                val (from, to) = if (line.direction == Direction.RECEIPT) other to account else account to other
-                core.treasury.transfer(TransferFunds(commandId, from.scope, from.id, to.id, line.amount, line.date, text))
-            }
+        bankAccount(statement.accountId)
+        val posting = when (action) {
+            is StatementAction.Pay -> StatementPosting.Pay(action.purpose)
+            is StatementAction.Receive -> StatementPosting.Receive(action.purpose)
+            is StatementAction.Transfer -> StatementPosting.Transfer(action.otherAccountId)
         }
-        core.bankStatements.autoMatch(AutoMatchStatement(GlobalId.new(), statement.scope, statement.id))
-        return outcome
+        return core.bankStatements.recordLine(RecordStatementLine(commandId, statement.scope, statement.id, index, posting))
     }
 
     /** Unmatched book movements of the statement's account that could be this line (same direction and amount). */

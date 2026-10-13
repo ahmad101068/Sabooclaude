@@ -454,6 +454,7 @@ object OperationsScreens {
                         if (c.note.isNotBlank()) Text(c.note, style = SabouType.caption, color = Sabou.colors.muted)
                         if (c.status == ir.sabou.inventory.CountStatus.POSTED) KeyValue("ارزش کل اختلاف (ریال)", Fa.rial(c.lines.sumOf { it.postedValue ?: 0 }), strong = true)
                         if (!v.showsBook) Text("تا تأیید، اختلاف‌ها فقط به بررسی‌کننده نشان داده می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
+                        if (v.stale.isNotEmpty()) Banner("از زمان این شمارش، از ${v.stale.joinToString("، ")} بیش از آنچه شمرده شد مصرف یا جابه‌جا شده است؛ این شمارش دیگر قابل تأیید نیست. آن را رد کنید و دوباره بشمارید.")
                     }
                     val shown = if (v.showsBook) c.lines.sortedBy { it.difference == 0L } else c.lines
                     shown.forEach { l ->

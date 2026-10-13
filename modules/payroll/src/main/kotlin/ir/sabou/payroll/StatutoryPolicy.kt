@@ -36,7 +36,9 @@ data class StatutoryPolicy(
         require(standardMonthlyMinutes > 0 && overtimeMultiplierPercent >= 100)
         require(listOf(employeeInsuranceBp, employerInsuranceBp, unemploymentInsuranceBp).all { it in 0..10_000 })
         require(insuranceTaxExemptDenominator > 0 && insuranceTaxExemptNumerator in 0..insuranceTaxExemptDenominator)
-        require(taxBrackets.isNotEmpty() && taxBrackets.last().upToMonthly == null)
+        // Exactly one open-ended band, the last (audit F03): an open band in the middle would end the table there.
+        require(taxBrackets.isNotEmpty() && taxBrackets.last().upToMonthly == null) { "last_tax_band_must_be_open" }
+        require(taxBrackets.dropLast(1).all { it.upToMonthly != null && it.upToMonthly.rial > 0 }) { "only_the_last_tax_band_may_be_open" }
         require(taxBrackets.all { it.rateBasisPoints in 0..10_000 }) { "tax_rate_out_of_range" }
         require(employeeInsuranceBp + taxBrackets.maxOf { it.rateBasisPoints } <= 10_000) { "deductions_exceed_gross" }
         val bounds = taxBrackets.mapNotNull { it.upToMonthly?.rial }

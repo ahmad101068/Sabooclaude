@@ -28,10 +28,11 @@ import ir.sabou.treasury.TreasuryKind
 
 /** Revenue, cost of sales and expenses of a period. Amounts are positive in their natural direction. */
 data class PnlTotals(val revenue: Long, val cogs: Long, val expenses: Long) {
-    val grossProfit: Long get() = revenue - cogs
-    val profit: Long get() = revenue - cogs - expenses
+    val grossProfit: Long get() = Math.subtractExact(revenue, cogs)
+    val profit: Long get() = Math.subtractExact(grossProfit, expenses)
 
-    operator fun plus(o: PnlTotals) = PnlTotals(revenue + o.revenue, cogs + o.cogs, expenses + o.expenses)
+    // Exact arithmetic (audit F12): a sum beyond the range fails loudly instead of turning negative.
+    operator fun plus(o: PnlTotals) = PnlTotals(Math.addExact(revenue, o.revenue), Math.addExact(cogs, o.cogs), Math.addExact(expenses, o.expenses))
 
     companion object { val ZERO = PnlTotals(0, 0, 0) }
 }
