@@ -91,7 +91,15 @@ data class ProfitAndLoss(
     val byBranch: List<Pair<String, PnlTotals>>,
     val byDay: List<Pair<BusinessDate, PnlTotals>>,
     val ratios: CostRatios,
-)
+    /**
+     * Sales in the period that consumed more than the book stock and whose ingredient cost is not booked yet
+     * (ADR-0022): until a purchase or a count settles them, food cost is too low and the profit too high.
+     */
+    val openShortages: Int = 0,
+) {
+    /** The profit is final only when no shortage of the period is still open. */
+    val provisional: Boolean get() = openShortages > 0
+}
 
 /** One journal line behind a P&L figure. */
 data class LedgerDetail(
@@ -217,7 +225,22 @@ data class UsageRow(
     val efficiencyBp: Long? get() = if (actual.quantity <= 0 || theoretical.quantity < 0) null else Ratio.mulDiv(theoretical.quantity, 10_000, actual.quantity)
 }
 
-data class UsageReport(val from: BusinessDate, val to: BusinessDate, val place: String, val rows: List<UsageRow>) {
+/**
+ * [counts]: approved stock counts in the period at these places; [lastCount] the latest; [countedRows] how many of
+ * the report's items were counted in one of them. «Actual» usage is measured only where counts were taken: without
+ * a count it is the books' own figure, and usage nobody recorded (theft, unrecorded waste) cannot show.
+ */
+data class UsageReport(
+    val from: BusinessDate,
+    val to: BusinessDate,
+    val place: String,
+    val rows: List<UsageRow>,
+    val counts: Int = 0,
+    val lastCount: BusinessDate? = null,
+    val countedRows: Int = 0,
+) {
+    /** True when no approved count in the period: the actual figure is not a physical measurement. */
+    val measuredByCount: Boolean get() = counts > 0
     val theoreticalValue: Long get() = rows.sumOf { it.theoretical.value }
     val actualValue: Long get() = rows.sumOf { it.actual.value }
     val wasteValue: Long get() = rows.sumOf { it.waste.value }
@@ -299,7 +322,10 @@ class Reports internal constructor(private val core: SabouCore) {
             if (kind(code) == null || amount == 0L) null else Triple(kind(code)!!, accounts.getValue(code), amount)
         }.sortedBy { it.second.code.value }
         fun sumOf(codes: List<AccountCode>) = codes.sumOf { c -> byAccount.firstOrNull { it.second.code == c }?.third ?: 0 }
+        val places = core.locations.all().filter { l -> if (branch != null) l.scope == branch else a.canAccess(l.scope) }.map { it.id }.toSet()
+        val openShortages = core.inventoryGateway.openShortages(places).count { it.date in from..to }
         return ProfitAndLoss(
+            openShortages = openShortages,
             from = from, to = to,
             revenue = byAccount.filter { it.first == 0 }.map { PnlLine(it.second, it.third) },
             costOfSales = byAccount.filter { it.first == 1 }.map { PnlLine(it.second, it.third) },
@@ -528,7 +554,10 @@ class Reports internal constructor(private val core: SabouCore) {
             else UsageRow(item, r.opening, r.purchases, r.transfers, r.production, closing, r.theoretical, r.waste, r.unexplained, r.comps)
         }.sortedBy { it.item.name }
         val place = if (locationId != null) locations.single().name else "همه‌ی انبارهای ${scopeName(branch)}"
-        return UsageReport(from, to, place, rows)
+        val placeIds = locations.map { it.id }.toSet()
+        val counts = core.stockCounts.all().filter { it.status == ir.sabou.inventory.CountStatus.POSTED && it.locationId in placeIds && it.date in from..to }
+        val countedItems = counts.flatMap { c -> c.lines.map { it.itemId } }.toSet()
+        return UsageReport(from, to, place, rows, counts.size, counts.maxOfOrNull { it.date }, rows.count { it.item.id in countedItems })
     }
 
     // ------------------------------------------------------------ Attendance and overtime

@@ -40,7 +40,7 @@ class Forecasts internal constructor(private val core: SabouCore) {
         return SalesForecast(forecast, trend, backtest(branch, from))
     }
 
-    /** The forecast of one day from [history] (net sales by day, only days that had sales). */
+    /** The forecast of one day from [history] (net sales of each recorded day, see [tradingDays]). */
     /**
      * The weighted mean already follows a recent change of level (last week weighs 8 times the eighth), so the trend
      * is shown, not multiplied in again.
@@ -70,29 +70,53 @@ class Forecasts internal constructor(private val core: SabouCore) {
         return Ratio.mulDiv(r, 10_000, b).coerceIn(8_000, 12_500)
     }
 
-    /** How far the same method was off over the last 28 days with sales, forecasting each day from what came before. */
+    /**
+     * How far the same method was off over the last 28 recorded days, forecasting each day from what came before
+     * and with that day's own mark (holiday, event). A day that sold nothing cannot be scored as a percentage and
+     * is skipped here, though it counts in the history.
+     */
     private fun backtest(branch: Scope.Branch, from: BusinessDate): Long? {
-        val all = dailyNet(branch, from.plusDays(-28L - HISTORY_DAYS), from.plusDays(-1))
-        val errors = (1..28).mapNotNull { back ->
-            val date = from.plusDays(-back.toLong())
-            val actual = all[date] ?: return@mapNotNull null
-            val past = all.filterKeys { it < date }
-            val f = day(date, past, null)
+        val days = core.tradingDays(branch, (from.epochDay - 28 - HISTORY_DAYS until from.epochDay).map { BusinessDate(it) })
+        val history = normalized(days)
+        val special = core.specialDays.of(branch).associateBy { it.date }
+        val errors = days.filter { it.date >= from.plusDays(-28) }.mapNotNull { d ->
+            val actual = d.sales.sumOf { it.netFood.rial }
+            val f = day(d.date, history.filterKeys { it < d.date }, special[d.date])
             if (f.samples == 0 || actual <= 0) null else Ratio.mulDiv(kotlin.math.abs(actual - f.expected), 10_000, actual)
         }
         return if (errors.size < 7) null else errors.sum() / errors.size
     }
 
-    /** Net sales (before service and tax) of each day with posted sales. */
+    /** Net sales (before service and tax) of each recorded day, scaled to a normal day where the day was marked. */
     private fun dailyNet(branch: Scope.Branch, from: BusinessDate, to: BusinessDate): Map<BusinessDate, Long> =
-        (from.epochDay..to.epochDay).map { BusinessDate(it) }.mapNotNull { d ->
-            val posted = core.sales.salesOn(branch, d).filter { it.status == SaleStatus.POSTED }
-            if (posted.isEmpty()) null else d to posted.sumOf { it.netFood.rial }
-        }.toMap()
+        normalized(core.tradingDays(branch, (from.epochDay..to.epochDay).map { BusinessDate(it) }))
+
+    private fun normalized(days: List<TradingDay>): Map<BusinessDate, Long> =
+        days.associate { d -> d.date to Ratio.mulDiv(d.sales.sumOf { it.netFood.rial }, 100, d.percent) }
 
     companion object {
         const val WEEKS = 8
         const val HISTORY_DAYS = WEEKS * 7
+    }
+}
+
+/**
+ * The days of [branch] in [from]…[to] that tell something about demand, with their posted sales (ADR-0041):
+ * a day with posted sales, or a day whose sales were closed (counted) without any — the restaurant was open and
+ * sold nothing, a real zero. A day with neither was not recorded (the app was not used yet, or the sales were
+ * never entered): it is unknown, not zero, and left out. A day the owner marked closed is left out too.
+ * [percent] is how that day was expected to compare with a normal one (100, or a holiday's or event's own).
+ */
+internal class TradingDay(val date: BusinessDate, val sales: List<ir.sabou.sales.DailySale>, val percent: Long)
+
+internal fun SabouCore.tradingDays(branch: Scope.Branch, dates: List<BusinessDate>): List<TradingDay> {
+    val special = specialDays.of(branch).associateBy { it.date }
+    return dates.mapNotNull { d ->
+        val mark = special[d]
+        if (mark?.kind == SpecialDay.Kind.CLOSED) return@mapNotNull null
+        val posted = sales.salesOn(branch, d).filter { it.status == SaleStatus.POSTED }
+        if (posted.isEmpty() && sales.day(branch, d)?.closed != true) return@mapNotNull null
+        TradingDay(d, posted, (mark?.percent ?: 100).toLong().coerceAtLeast(1))
     }
 }
 
