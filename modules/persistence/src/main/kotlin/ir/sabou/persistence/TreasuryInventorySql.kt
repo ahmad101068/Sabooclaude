@@ -9,6 +9,9 @@ import ir.sabou.inventory.Item
 import ir.sabou.inventory.ItemStore
 import ir.sabou.inventory.Location
 import ir.sabou.inventory.PackUnit
+import ir.sabou.inventory.StockLevels
+import ir.sabou.kernel.BusinessDate
+import ir.sabou.kernel.Scope
 import ir.sabou.inventory.LocationStore
 import ir.sabou.inventory.MenuItem
 import ir.sabou.inventory.MovementKind
@@ -137,6 +140,8 @@ class SqlItemStore(db: SqlDatabase) : SqlTable(db), ItemStore {
         packs = d.docsOr("packs").map { PackUnit(it.str("name"), Codec.qty(it.long("contains"))) },
         shelfLifeDays = d.longOrNull("shelfLife")?.toInt(),
         parByWeekday = d.docsOr("parByDay").associate { it.long("day").toInt() to Codec.qty(it.long("par")) },
+        category = d.strOr("category", ""), code = d.strOr("code", ""),
+        locationLevels = d.docsOr("levels").associate { Codec.id(it.str("location")) to StockLevels(Codec.qty(it.long("min")), Codec.qty(it.long("par"))) },
     )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM items WHERE id = ?", id.value)?.let(::read)
     override fun all() = docs("SELECT doc FROM items ORDER BY rowid").map(::read)
@@ -152,10 +157,24 @@ class SqlItemStore(db: SqlDatabase) : SqlTable(db), ItemStore {
                     "packs" to item.packs.map { mapOf("name" to it.name, "contains" to it.contains.micros) },
                     "shelfLife" to item.shelfLifeDays?.toLong(),
                     "parByDay" to item.parByWeekday.entries.sortedBy { it.key }.map { mapOf("day" to it.key.toLong(), "par" to it.value.micros) },
+                    "category" to item.category, "code" to item.code,
+                    "levels" to item.locationLevels.entries.sortedBy { it.key.value.toString() }.map { mapOf("location" to it.key.value, "min" to it.value.minimum.micros, "par" to it.value.par.micros) },
                 ),
             ),
         ),
     )
+
+    override fun delete(id: GlobalId) { db.execute("DELETE FROM items WHERE id = ?", id.value) }
+
+    /** Whether any record other than the item itself names it (documents, recipes, prices, plans, balances). */
+    fun isReferenced(id: GlobalId): Boolean {
+        val tables = db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").map { it.str("name") }
+            .filter { it != "items" && it != "sync_changes" && it != "audit_log" }
+        return tables.any { t ->
+            val cols = db.query("PRAGMA table_info($t)").map { it.str("name") }.filter { it == "doc" || it == "item_id" }
+            cols.any { c -> db.query("SELECT 1 AS x FROM $t WHERE $c LIKE ? LIMIT 1", "%${id.value}%").isNotEmpty() }
+        }
+    }
 }
 
 class SqlLocationStore(db: SqlDatabase) : SqlTable(db), LocationStore {
@@ -233,6 +252,7 @@ class SqlStockStore(db: SqlDatabase) : SqlTable(db), StockStore {
     override fun movementsBySource(type: String, id: GlobalId) =
         docs("SELECT doc FROM stock_movements WHERE source_type = ? AND source_id = ? ORDER BY rowid", type, id.value).map(::read)
     override fun reversalOf(id: GlobalId) = doc("SELECT doc FROM stock_movements WHERE reversal_of = ?", id.value)?.let(::read)
+    override fun hasMovements(itemId: GlobalId) = db.query("SELECT 1 AS x FROM stock_movement_index WHERE item_id = ? LIMIT 1", itemId.value).isNotEmpty()
     override fun lastInboundUnitCost(itemId: GlobalId): Long? =
         db.query("SELECT qty, value FROM stock_movement_index WHERE item_id = ? AND kind = 'RECEIPT' AND qty > 0 AND value > 0 ORDER BY date DESC, rowid DESC LIMIT 1", itemId.value)
             .firstOrNull()?.let { ir.sabou.kernel.Ratio.mulDiv(it.long("value"), Quantity.SCALE, it.long("qty")) }
@@ -426,4 +446,22 @@ class SqlBankStatementStore(db: SqlDatabase) : SqlTable(db), ir.sabou.treasury.B
             )),
         ),
     )
+}
+
+/** Reason, note and planned batch of inventory documents (ADR-0044). */
+class SqlInventoryDocumentStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.InventoryDocumentStore {
+    private fun read(d: Doc) = ir.sabou.inventory.InventoryDocument(
+        Codec.id(d.str("id")), d.str("type"), Codec.branchOf(d.str("scope")), Codec.date(d.long("date")), d.strOr("note", ""), d.strOr("reason", ""),
+        d.longOrNull("planned")?.let(Codec::qty), d.strOr("dish", ""), d.strOr("reversed", ""),
+    )
+    override fun byId(id: GlobalId) = doc("SELECT doc FROM inventory_documents WHERE id = ?", id.value)?.let(::read)
+    override fun of(scope: Scope.Branch, from: BusinessDate, to: BusinessDate) =
+        docs("SELECT doc FROM inventory_documents WHERE scope = ? AND date BETWEEN ? AND ? ORDER BY date DESC, rowid DESC", Codec.scope(scope), from.epochDay, to.epochDay).map(::read)
+    override fun save(document: ir.sabou.inventory.InventoryDocument) = upsert("inventory_documents", "id", mapOf(
+        "id" to document.id.value, "scope" to Codec.scope(document.scope), "date" to document.date.epochDay,
+        "doc" to Json.encode(mapOf(
+            "id" to document.id.value, "type" to document.type, "scope" to Codec.scope(document.scope), "date" to document.date.epochDay,
+            "note" to document.note, "reason" to document.reason, "planned" to document.planned?.micros, "dish" to document.dish, "reversed" to document.reversedReason,
+        )),
+    ))
 }

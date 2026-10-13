@@ -58,6 +58,7 @@ import ir.sabou.app.ui.screens.TaxScreens
 import ir.sabou.app.ui.screens.ShiftScreens
 import ir.sabou.app.ui.screens.StaffDocScreens
 import ir.sabou.app.ui.screens.EmployeeScreens
+import ir.sabou.app.ui.screens.InventoryScreens
 import ir.sabou.app.ui.screens.CountPlanScreens
 import ir.sabou.app.ui.screens.PrepScreens
 import ir.sabou.app.ui.screens.FinanceScreens
@@ -554,6 +555,8 @@ private fun Pages(route: Route, nav: Nav) {
         Route.Search -> ir.sabou.app.ui.screens.SearchScreen(nav)
         is Route.StaffDocuments -> StaffDocScreens.Documents(nav, route.employeeId)
         is Route.Employee -> EmployeeScreens.Detail(nav, route.employeeId)
+        is Route.StockCard -> InventoryScreens.StockCard(nav, route.itemId, route.locationId)
+        Route.StockDocuments -> InventoryScreens.Documents(nav)
         Route.PayrollSettings -> EmployeeScreens.Settings(nav)
         Route.PayElements -> EmployeeScreens.Elements(nav)
         is Route.MeGroup -> MeScreens.GroupPage(nav, route.group)

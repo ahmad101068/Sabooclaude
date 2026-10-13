@@ -288,9 +288,10 @@ class Overview internal constructor(private val core: SabouCore) {
         val items = core.items.all().associateBy { it.id }
         return core.locations.all().filter { it.isActive && a.canAccess(it.scope) }.flatMap { location ->
             val stocked = core.stock.balances(location.id).associateBy { it.itemId }
-            items.values.filter { it.isActive && !it.minimumStock.isZero }.mapNotNull { item ->
+            // Only where the item is kept: the locations given their own levels, or (none given) those that ever held it.
+            items.values.filter { it.isActive && it.watchedAt(location.id, stocked.containsKey(it.id)) }.mapNotNull { item ->
                 val q = stocked[item.id]?.quantity ?: Quantity.ZERO
-                if (q < item.minimumStock) LowStock(item, location, q) else null
+                if (q < item.minimumAt(location.id)) LowStock(item, location, q) else null
             }
         }
     }

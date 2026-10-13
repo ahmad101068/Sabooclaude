@@ -28,7 +28,7 @@ class UiSmokeTest {
         Route.Home, Route.Sales, Route.Operations, Route.Finance, Route.Me,
         Route.Receipt, Route.Payment, Route.Transfer, Route.Reconcile, Route.Receivables, Route.TrialBalance,
         Route.InventoryHub, Route.PurchaseHub, Route.StaffHub,
-        Route.PayrollSettings, Route.PayElements,
+        Route.PayrollSettings, Route.PayElements, Route.StockDocuments,
         *ir.sabou.app.ui.screens.MeScreens.Group.entries.map { Route.MeGroup(it) }.toTypedArray(),
         Route.Stock, Route.Waste, Route.Count, Route.StockTransfer, Route.Recipes, Route.Purchases, Route.NewPurchase,
         Route.Suppliers, Route.Personnel, Route.Attendance, Route.Payroll,
@@ -76,7 +76,7 @@ class UiSmokeTest {
         core.salesOps.setMenuPrice(ir.sabou.sales.SetMenuPrice(GlobalId.new(), ir.sabou.kernel.Scope.Organization, pizza, ir.sabou.kernel.BusinessDate(today), ir.sabou.kernel.Money.of(4_500_000)))
         val employee = core.payroll.registerEmployee(ir.sabou.payroll.RegisterEmployee(GlobalId.new(), scope, "رضا", "0012345679", ir.sabou.kernel.Money.of(100_000_000))).resultId
         val allPages = pages + listOf(
-            Route.Employee(employee), Route.StaffDocuments(employee), Route.DayTime, Route.TimeClock,
+            Route.Employee(employee), Route.StaffDocuments(employee), Route.DayTime, Route.TimeClock, Route.StockCard(itemId, location),
             Route.ChequeDetail(cheque), Route.AssetDetail(asset), Route.SupplierAccount(supplier),
             Route.CountDetail(core.counts.submit(ir.sabou.inventory.SubmitStockCount(GlobalId.new(), scope, location, ir.sabou.kernel.BusinessDate(today),
                 listOf(ir.sabou.inventory.CountEntry(itemId, Quantity.units(2)), ir.sabou.inventory.CountEntry(itemId2, Quantity.ZERO)))).resultId),

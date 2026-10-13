@@ -43,6 +43,8 @@ import ir.sabou.app.ui.theme.Sabou
 import ir.sabou.app.ui.theme.SabouType
 import ir.sabou.core.Fa
 import ir.sabou.inventory.PackUnit
+import ir.sabou.inventory.StockUnit
+import ir.sabou.app.ui.orNull
 import ir.sabou.inventory.PublishPrepRecipe
 import ir.sabou.inventory.RecipeLine
 import ir.sabou.inventory.RecordProduction
@@ -82,10 +84,23 @@ object KitchenScreens {
                         { PackRow(it[0] as String, it[1] as Quantity?) }) { item.packs.map { PackRow(it.name, it.contains) } }
                     val id = ir.sabou.app.ui.rememberCommandId(itemId)
                     val action = rememberAction()
-                    val unit = unitName(item.unit)
+                    var category by rememberSaveable { mutableStateOf(item.category) }
+                    var code by rememberSaveable { mutableStateOf(item.code) }
+                    var stockUnit by rememberSaveable { mutableStateOf(item.unit) }
+                    val levelMin = ir.sabou.app.ui.rememberValueMap<GlobalId, Quantity?>()
+                    val levelPar = ir.sabou.app.ui.rememberValueMap<GlobalId, Quantity?>()
+                    var showLevels by rememberSaveable { mutableStateOf(item.locationLevels.isNotEmpty()) }
+                    var deleting by rememberSaveable { mutableStateOf(false) }
+                    val places by load(session) { overview.branches().flatMap { b -> overview.locations(ir.sabou.kernel.Scope.Branch(b.id)).filter { it.isActive }.map { it to b.name } } }
+                    val unit = unitName(stockUnit)
                     FormCard(item.name) {
                         Text("واحد: $unit" + if (item.prepared) " · تولید داخلی" else "", style = SabouType.caption, color = Sabou.colors.muted)
                         TextInput("نام کالا", name, { name = it })
+                        TextInput("گروه", category, { category = it }, placeholder = "لبنیات، گوشت، سبزی…")
+                        TextInput("کد یا بارکد", code, { code = it }, keyboard = androidx.compose.ui.text.input.KeyboardType.Number)
+                        Picker("واحد", StockUnit.entries.map { Choice(it, unitName(it)) }, stockUnit, { stockUnit = it })
+                        if (stockUnit != item.unit) Text("واحد فقط وقتی عوض می‌شود که با این کالا هنوز هیچ گردش، رسپی یا بسته‌بندی‌ای ثبت نشده باشد.",
+                            style = SabouType.caption, color = Sabou.colors.onAccentSoft)
                         QuantityInput("حداقل موجودی (نقطه‌ی سفارش)", unit, { minimum = it }, blankAs = Quantity.ZERO, value = item.minimumStock)
                         QuantityInput("سطح مطلوب (سفارش تا این مقدار)", unit, { par = it }, blankAs = Quantity.ZERO, value = item.parLevel)
                         if (!item.prepared) {
@@ -112,6 +127,23 @@ object KitchenScreens {
                         Row(Modifier.clickable { active = !active }, verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = active, onCheckedChange = { active = it })
                             Text("فعال (در فهرست‌ها نمایش داده شود)", style = SabouType.body, color = Sabou.colors.ink)
+                        }
+                        Divider()
+                        Text(if (showLevels) "حداقل و سطح مطلوب هر انبار" else "+ حداقل و سطح مطلوب جدا برای هر انبار یا شعبه",
+                            style = if (showLevels) SabouType.bodyStrong else SabouType.label, color = if (showLevels) Sabou.colors.ink else Sabou.colors.primary,
+                            modifier = Modifier.clickable { showLevels = true }.padding(vertical = 4.dp))
+                        if (showLevels) {
+                            Text("اگر برای انبارهایی مقدار بگذارید، فقط همان انبارها برای کمبود بررسی می‌شوند. خالی یعنی آن انبار این کالا را نگه نمی‌دارد.",
+                                style = SabouType.caption, color = Sabou.colors.muted)
+                            places.orNull().orEmpty().forEach { (l, branchName) ->
+                                key(l.id) {
+                                    Text("${l.name} · $branchName", style = SabouType.body, color = Sabou.colors.ink)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        QuantityInput("حداقل", unit, { levelMin[l.id] = it }, Modifier.weight(1f), value = levelMin[l.id] ?: item.locationLevels[l.id]?.minimum)
+                                        QuantityInput("سطح مطلوب", unit, { levelPar[l.id] = it }, Modifier.weight(1f), value = levelPar[l.id] ?: item.locationLevels[l.id]?.par)
+                                    }
+                                }
+                            }
                         }
                         Divider()
                         Text("بسته‌بندی‌ها", style = SabouType.bodyStrong, color = Sabou.colors.ink)
@@ -155,9 +187,27 @@ object KitchenScreens {
                             action.run({
                                 inventory.updateItem(UpdateItem(id.value, item.id, name, minimum!!, par!!, shelf, allergens, preferred, approved.toSet(), active,
                                     packs = packs.map { PackUnit(it.name.trim(), it.contains!!) }, shelfLifeDays = shelfDays,
-                                    parByWeekday = (0..6).mapNotNull { d -> (if (parByDay.containsKey(d)) parByDay[d] else item.parByWeekday[d])?.takeIf { !it.isZero }?.let { d to it } }.toMap()))
+                                    parByWeekday = (0..6).mapNotNull { d -> (if (parByDay.containsKey(d)) parByDay[d] else item.parByWeekday[d])?.takeIf { !it.isZero }?.let { d to it } }.toMap(),
+                                    category = category, code = Fa.latinDigits(code), unit = stockUnit,
+                                    locationLevels = places.orNull().orEmpty().mapNotNull { (l, _) ->
+                                        val mn = if (levelMin.containsKey(l.id)) levelMin[l.id] else item.locationLevels[l.id]?.minimum
+                                        val pr = if (levelPar.containsKey(l.id)) levelPar[l.id] else item.locationLevels[l.id]?.par
+                                        if ((mn == null || mn.isZero) && (pr == null || pr.isZero)) null else l.id to ir.sabou.inventory.StockLevels(mn ?: Quantity.ZERO, pr ?: Quantity.ZERO)
+                                    }.toMap()))
                             }) { nav.back() }
                         }, enabled = session.can(Permission.INVENTORY_ITEM_MANAGE) && name.trim().length >= 2 && minimum != null && par != null && !parBad && !preferredBad && !packsBad && !shelfBad, busy = action.busy)
+                        if (session.can(Permission.INVENTORY_ITEM_MANAGE)) {
+                            if (!deleting) Text("حذف کالا (اگر اشتباهی تعریف شده)", style = SabouType.label, color = Sabou.colors.danger,
+                                modifier = Modifier.clickable { deleting = true }.padding(vertical = 6.dp))
+                            else {
+                                Text("فقط کالایی حذف می‌شود که هیچ سند، رسپی، قیمت یا برنامه‌ای به آن اشاره نکند؛ وگرنه غیرفعالش کنید.", style = SabouType.caption, color = Sabou.colors.muted)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    PrimaryButton("حذف قطعی", { action.run({ inventory.deleteItem(ir.sabou.inventory.DeleteItem(GlobalId.new(), item.id)) }) { nav.back() } },
+                                        Modifier.weight(1f), busy = action.busy)
+                                    SecondaryButton("انصراف", { deleting = false }, Modifier.weight(1f))
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -253,6 +303,7 @@ object KitchenScreens {
                 var itemId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
                 var qty by rememberSaveable { mutableStateOf<Quantity?>(null) }
                 var date by rememberSaveable { mutableStateOf(session.today) }
+                var actual by rememberSaveable { mutableStateOf<Quantity?>(null) }
                 val id = ir.sabou.app.ui.rememberCommandId()
                 val action = rememberAction()
                 Page {
@@ -263,7 +314,10 @@ object KitchenScreens {
                             FormCard {
                                 if (locations.size > 1) Picker("انبار یا آشپزخانه", locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
                                 Picker("قلم آماده", items.map { Choice(it.id, it.name, unitName(it.unit)) }, itemId, { itemId = it })
-                                ItemQuantityInput("مقدار تولیدشده", items.firstOrNull { it.id == itemId }, { qty = it })
+                                ItemQuantityInput("مقدار برنامه (مواد برای این مقدار برداشته می‌شود)", items.firstOrNull { it.id == itemId }, { qty = it })
+                                ItemQuantityInput("مقدار به‌دست‌آمده (اگر فرق داشت)", items.firstOrNull { it.id == itemId }, { actual = it })
+                                Text("اگر کمتر یا بیشتر از برنامه درآمد، مقدار واقعی را بنویسید؛ همه‌ی هزینه‌ی مواد روی همان مقدار می‌آید و بهای هر واحد، بازده واقعی را نشان می‌دهد.",
+                                    style = SabouType.caption, color = Sabou.colors.muted)
                                 DateInput("تاریخ", date, { date = it }, session.today)
                                 val ready = loc != null && itemId != null && qty != null && !qty!!.isZero
                                 if (ready) {
@@ -279,7 +333,7 @@ object KitchenScreens {
                                 }
                                 action.error?.let { Banner(it) }
                                 PrimaryButton("ثبت تولید", {
-                                    action.run({ inventory.produce(RecordProduction(id.value, branch, loc!!, itemId!!, qty!!, date)) }) { nav.back() }
+                                    action.run({ inventory.produce(RecordProduction(id.value, branch, loc!!, itemId!!, qty!!, date, actualOutput = actual?.takeIf { !it.isZero && it != qty })) }) { nav.back() }
                                 }, enabled = ready && session.can(Permission.INVENTORY_PRODUCE), busy = action.busy)
                                 Text("مواد به بهای میانگین از انبار کم و قلم آماده با همان ارزش به انبار اضافه می‌شود؛ سندی ثبت نمی‌شود چون ارزش موجودی تغییر نمی‌کند.",
                                     style = SabouType.caption, color = Sabou.colors.muted)

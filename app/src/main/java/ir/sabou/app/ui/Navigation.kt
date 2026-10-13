@@ -53,6 +53,9 @@ sealed interface Route : java.io.Serializable {
     data object CountPlans : Route
     data class CountDetail(val countId: GlobalId) : Route
     data object StockTransfer : Route
+    /** کاردکس: one item's movements at one location. */
+    data class StockCard(val itemId: GlobalId, val locationId: GlobalId) : Route
+    data object StockDocuments : Route
     data object Recipes : Route
     data object PrepRecipes : Route
     data object Production : Route

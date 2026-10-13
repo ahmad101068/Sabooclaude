@@ -22,6 +22,7 @@ class InMemoryItemStore : Table<GlobalId, Item>(), ItemStore {
     override fun byId(id: GlobalId) = get(id)
     override fun all() = values()
     override fun save(item: Item) = put(item.id, item)
+    override fun delete(id: GlobalId) { rows.remove(id) }
 }
 
 class InMemoryLocationStore : Table<GlobalId, Location>(), LocationStore {
@@ -40,6 +41,8 @@ class InMemoryStockStore : StockStore, Transactional {
     override fun lastInboundUnitCost(itemId: GlobalId): Long? = movements.lastOrNull {
         it.itemId == itemId && it.kind == ir.sabou.inventory.MovementKind.RECEIPT && it.quantityDelta > 0 && it.valueDelta > 0
     }?.let { ir.sabou.kernel.Ratio.mulDiv(it.valueDelta, Quantity.SCALE, it.quantityDelta) }
+
+    override fun hasMovements(itemId: GlobalId) = movements.any { it.itemId == itemId }
 
     override fun replace(expected: StockBalance, next: StockBalance) {
         if (balance(expected.itemId, expected.locationId) != expected) throw DomainException(DomainError.ConcurrentModification("STOCK_BALANCE"))
@@ -116,4 +119,11 @@ class InMemoryCountPlanStore : ir.sabou.platform.memory.Table<GlobalId, ir.sabou
     override fun byId(id: GlobalId) = get(id)
     override fun all() = values()
     override fun save(plan: ir.sabou.inventory.CountPlan) = put(plan.id, plan)
+}
+
+class InMemoryInventoryDocumentStore : Table<GlobalId, ir.sabou.inventory.InventoryDocument>(), ir.sabou.inventory.InventoryDocumentStore {
+    override fun byId(id: GlobalId) = get(id)
+    override fun of(scope: ir.sabou.kernel.Scope.Branch, from: ir.sabou.kernel.BusinessDate, to: ir.sabou.kernel.BusinessDate) =
+        values().filter { it.scope == scope && it.date >= from && it.date <= to }
+    override fun save(document: ir.sabou.inventory.InventoryDocument) = put(document.id, document)
 }

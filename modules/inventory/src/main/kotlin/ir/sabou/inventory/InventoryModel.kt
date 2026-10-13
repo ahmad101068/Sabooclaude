@@ -36,10 +36,32 @@ data class Item(
      * Thursday delivery must last through the weekend (ADR-0032).
      */
     val parByWeekday: Map<Int, Quantity> = emptyMap(),
+    /** Group for lists, count sheets and reports (لبنیات، گوشت، سبزی…). */
+    val category: String = "",
+    /** The item's own code or the barcode on the package; unique when given. */
+    val code: String = "",
+    /**
+     * Reorder point and par of each storeroom or kitchen that keeps the item. When any are set, only those locations
+     * are watched for low stock; the item-wide figures apply where none is set.
+     */
+    val locationLevels: Map<GlobalId, StockLevels> = emptyMap(),
 ) {
     /** The par a delivery on [date] should restore ([parLevel] when that weekday has none of its own). */
     fun parFor(date: BusinessDate?): Quantity = date?.let { parByWeekday[ir.sabou.kernel.JalaliCalendar.weekdayIndex(it)] } ?: parLevel
+
+    /** The reorder point at [locationId]. */
+    fun minimumAt(locationId: GlobalId): Quantity = locationLevels[locationId]?.minimum ?: minimumStock
+
+    /** The par at [locationId] for a delivery on [date]. */
+    fun parAt(locationId: GlobalId, date: BusinessDate?): Quantity = locationLevels[locationId]?.par?.takeIf { !it.isZero } ?: parFor(date)
+
+    /** Whether [locationId] is watched for low stock: the locations with their own levels, or (none set) any that holds it. */
+    fun watchedAt(locationId: GlobalId, holdsIt: Boolean): Boolean =
+        if (locationLevels.isNotEmpty()) locationId in locationLevels && !minimumAt(locationId).isZero else holdsIt && !minimumStock.isZero
 }
+
+/** Reorder point and par of one item at one location. */
+data class StockLevels(val minimum: Quantity, val par: Quantity) : java.io.Serializable
 
 /** A storeroom or kitchen. Always inside one branch: stock always has an owner (AUD-011). */
 data class Location(val id: GlobalId, val name: String, val scope: Scope.Branch, val isActive: Boolean = true)
@@ -112,6 +134,8 @@ interface ItemStore {
     fun byId(id: GlobalId): Item?
     fun all(): List<Item>
     fun save(item: Item)
+    /** Only for an item nothing refers to (see DeleteItem). */
+    fun delete(id: GlobalId)
 }
 
 interface LocationStore {
@@ -134,6 +158,8 @@ interface StockStore {
     fun totalsBefore(locationId: GlobalId, date: BusinessDate): List<MovementTotal>
     /** Rial per stock unit of the item's most recent purchase receipt anywhere, or null. */
     fun lastInboundUnitCost(itemId: GlobalId): Long?
+    /** Whether the item ever moved anywhere. */
+    fun hasMovements(itemId: GlobalId): Boolean
 }
 
 interface RecipeStore {
@@ -146,4 +172,28 @@ interface RecipeStore {
     fun saveVersion(version: RecipeVersion)
     fun prepVersions(itemId: GlobalId): List<PrepRecipe>
     fun savePrepVersion(version: PrepRecipe)
+}
+
+/**
+ * What a waste, transfer, production or opening document says beyond its movements: reason, note, the planned batch
+ * of a production, the dishes of a dish waste. For the document list; the movements stay the record of stock.
+ */
+data class InventoryDocument(
+    val id: GlobalId,
+    val type: String,
+    val scope: ir.sabou.kernel.Scope.Branch,
+    val date: BusinessDate,
+    val note: String = "",
+    val reason: String = "",
+    /** Production: the planned batch (the movements hold what came out). */
+    val planned: Quantity? = null,
+    /** Dish waste: «پیتزا × ۲». */
+    val dish: String = "",
+    val reversedReason: String = "",
+)
+
+interface InventoryDocumentStore {
+    fun byId(id: GlobalId): InventoryDocument?
+    fun of(scope: ir.sabou.kernel.Scope.Branch, from: BusinessDate, to: BusinessDate): List<InventoryDocument>
+    fun save(document: InventoryDocument)
 }

@@ -46,7 +46,7 @@ class Alerts internal constructor(private val core: SabouCore) {
                 if (actor.role.allows(Permission.INVENTORY_VIEW)) {
                     safe { core.overview.lowStock() }.forEach { low ->
                         add(Alert("LOW:${low.item.id.value}:${low.location.id.value}", Alert.Kind.LOW_STOCK, "کمبود «${low.item.name}»",
-                            "${low.location.name}: ${Fa.quantity(low.quantity)} مانده، کمتر از حداقل ${Fa.quantity(low.item.minimumStock)}"))
+                            "${low.location.name}: ${Fa.quantity(low.quantity)} مانده، کمتر از حداقل ${Fa.quantity(low.item.minimumAt(low.location.id))}"))
                     }
                     core.branches.all().filter { actor.canAccess(Scope.Branch(it.id)) }.forEach { b ->
                         safe { core.overview.openShortages(Scope.Branch(b.id)) }.forEach { v ->
