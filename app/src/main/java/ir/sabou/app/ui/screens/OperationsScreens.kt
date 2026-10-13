@@ -98,8 +98,13 @@ object OperationsScreens {
     private val inventoryPerms = listOf(Permission.INVENTORY_VIEW, Permission.INVENTORY_COUNT, Permission.INVENTORY_WASTE, Permission.INVENTORY_TRANSFER, Permission.RECIPE_MANAGE, Permission.INVENTORY_PRODUCE)
     private val purchasePerms = listOf(Permission.PURCHASE_VIEW, Permission.SUPPLIER_MANAGE, Permission.PURCHASE_ORDER)
     private val personnelPerms = listOf(Permission.PERSONNEL_VIEW, Permission.PERSONNEL_MANAGE, Permission.ATTENDANCE_RECORD, Permission.PAYROLL_CALCULATE, Permission.PAYROLL_APPROVE, Permission.PAYROLL_PAY)
-    val allPerms = inventoryPerms + purchasePerms + personnelPerms
+    // The time clock and shifts count too: a cashier who only clocks staff in still needs this tab.
+    val allPerms = inventoryPerms + purchasePerms + personnelPerms + listOf(Permission.SHIFT_MANAGE, Permission.TIME_CLOCK)
 
+    /**
+     * Four doors, then the rooms behind each (owner's request, 2026-10): انبار، خرید، پرسنل، گزارش‌ها. Each door shows
+     * one line of what needs attention there; a role sees only the doors it can use.
+     */
     @Composable
     fun Hub(nav: Nav) {
         val session = LocalSession.current
@@ -112,30 +117,77 @@ object OperationsScreens {
         val (low, payable) = counts.orNull() ?: (null to null)
         Column(Modifier.fillMaxSize()) {
             Header("عملیات") { BranchSwitcher() }
-            LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (any(inventoryPerms)) item { SectionTitle("انبار") }
-                if (session.can(Permission.INVENTORY_VIEW)) item { NavRow(R.drawable.ic_operations, "موجودی", low?.let { if (it > 0) "${Fa.number(it.toLong())} کالا زیر حداقل" else "همه کالاها بالای حداقل" }, onClick = { nav.go(Route.Stock) }) }
-                if (session.can(Permission.INVENTORY_COUNT) || session.can(Permission.INVENTORY_ADJUST)) item { NavRow(R.drawable.ic_count, "انبارگردانی", "شمارش، بررسی و تأیید اختلاف با دلیل", onClick = { nav.go(Route.Count) }) }
-                if (session.can(Permission.INVENTORY_TRANSFER)) item { NavRow(R.drawable.ic_transfer, "انتقال", "بین انبارها و شعب", onClick = { nav.go(Route.StockTransfer) }) }
-                if (session.can(Permission.INVENTORY_WASTE)) item { NavRow(R.drawable.ic_waste, "ضایعات", "ثبت با دلیل", onClick = { nav.go(Route.Waste) }) }
-                if (session.can(Permission.RECIPE_MANAGE)) item { NavRow(R.drawable.ic_recipe, "رسپی و بهای تمام‌شده", "نسخه‌های رسپی آیتم‌های منو", onClick = { nav.go(Route.Recipes) }) }
-                if (session.can(Permission.RECIPE_MANAGE)) item { NavRow(R.drawable.ic_recipe, "رسپی اقلام آماده", "سس، خمیر و هر چه در آشپزخانه ساخته می‌شود", onClick = { nav.go(Route.PrepRecipes) }) }
-                if (session.can(Permission.INVENTORY_PRODUCE)) item { NavRow(R.drawable.ic_calendar, "برنامه‌ی آماده‌سازی امروز", "چه چیزی، چقدر، به چه ترتیبی", onClick = { nav.go(Route.PrepPlan) }) }
-                if (session.can(Permission.INVENTORY_PRODUCE)) item { NavRow(R.drawable.ic_recipe, "تولید اقلام آماده", "مواد از انبار کم و قلم آماده اضافه می‌شود", onClick = { nav.go(Route.Production) }) }
-                if (any(purchasePerms)) item { SectionTitle("خرید") }
-                if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "خرید و دریافت کالا", payable?.let { "بدهی ${Fa.rialShort(it.rial)}" }, tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Purchases) }) }
-                if (session.can(Permission.PURCHASE_ORDER) || session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "سفارش خرید", "پیشنهاد خرید، سفارش و تحویل", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Orders) }) }
-                if (any(purchasePerms)) item { NavRow(R.drawable.ic_supplier, "تأمین‌کنندگان", "فهرست و مانده حساب", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Suppliers) }) }
-                if (any(personnelPerms)) item { SectionTitle("پرسنل") }
-                if (session.can(Permission.PERSONNEL_VIEW) || session.can(Permission.PERSONNEL_MANAGE)) item { NavRow(R.drawable.ic_person, "کارکنان", "ثبت و مشخصات", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Personnel) }) }
-                if (session.can(Permission.SHIFT_MANAGE)) item { NavRow(R.drawable.ic_calendar, "برنامه‌ی شیفت", "هفتگی، با هزینه‌ی نیرو در برابر بودجه و فروش", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Schedule) }) }
-                if (session.can(Permission.TIME_CLOCK)) item { NavRow(R.drawable.ic_clock, "ساعت‌زنی", "ورود و خروج کارکنان با رمز خودشان", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.TimeClock) }) }
-                if (session.can(Permission.ATTENDANCE_RECORD)) item { NavRow(R.drawable.ic_clock, "کارکرد امروز", "برنامه در برابر ساعت‌زنی؛ تأیید برای حقوق", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.DayTime) }) }
-                if (session.can(Permission.ATTENDANCE_RECORD) || session.can(Permission.PERSONNEL_VIEW)) item { NavRow(R.drawable.ic_clock, "حضور و غیاب", "ثبت روزانه کارکرد", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Attendance) }) }
-                if (listOf(Permission.PAYROLL_CALCULATE, Permission.PAYROLL_APPROVE, Permission.PAYROLL_PAY).any { session.can(it) }) item { NavRow(R.drawable.ic_payroll, "حقوق", "محاسبه، تأیید و پرداخت", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Payroll) }) }
-                if (FinanceScreens.reportPerms.any { session.can(it) }) item { SectionTitle("گزارش‌ها") }
-                if (FinanceScreens.reportPerms.any { session.can(it) }) item { NavRow(R.drawable.ic_count, "گزارش‌ها", "مصرف واقعی و تئوریک، پایان روز، کارکرد و …", onClick = { nav.go(Route.Reports) }) }
+            LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (any(inventoryPerms)) item {
+                    NavRow(R.drawable.ic_operations, "انبار و آشپزخانه",
+                        low?.let { if (it > 0) "${Fa.number(it.toLong())} کالا زیر حداقل" else "موجودی، انبارگردانی، ضایعات، رسپی و آماده‌سازی" }
+                            ?: "موجودی، انبارگردانی، ضایعات، رسپی و آماده‌سازی",
+                        onClick = { nav.go(Route.InventoryHub) })
+                }
+                if (any(purchasePerms)) item {
+                    NavRow(R.drawable.ic_purchase, "خرید", payable?.let { "بدهی ${Fa.rialShort(it.rial)} · فاکتور، سفارش و تأمین‌کنندگان" } ?: "فاکتور، سفارش و تأمین‌کنندگان",
+                        tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.PurchaseHub) })
+                }
+                if (any(personnelPerms + listOf(Permission.SHIFT_MANAGE, Permission.TIME_CLOCK))) item {
+                    NavRow(R.drawable.ic_person, "پرسنل", "کارکنان، شیفت، ساعت‌زنی، کارکرد و حقوق",
+                        tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.StaffHub) })
+                }
+                if (FinanceScreens.reportPerms.any { session.can(it) }) item {
+                    NavRow(R.drawable.ic_count, "گزارش‌ها", "سود و زیان، پایان روز، مصرف، منو، پیش‌بینی و کارکرد", onClick = { nav.go(Route.Reports) })
+                }
             }
+        }
+    }
+
+    @Composable
+    private fun SubHub(nav: Nav, title: String, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
+        Column(Modifier.fillMaxSize()) {
+            Header(title, onBack = nav.back) { BranchSwitcher() }
+            LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+        }
+    }
+
+    @Composable
+    fun InventoryHub(nav: Nav) {
+        val session = LocalSession.current
+        val low by load(session, session.branch) { if (session.can(Permission.INVENTORY_VIEW)) overview.lowStock().size else null }
+        val lowCount = low.orNull()
+        val kitchen = session.can(Permission.RECIPE_MANAGE) || session.can(Permission.INVENTORY_PRODUCE)
+        SubHub(nav, "انبار و آشپزخانه") {
+            item { SectionTitle("انبار") }
+            if (session.can(Permission.INVENTORY_VIEW)) item { NavRow(R.drawable.ic_operations, "موجودی", lowCount?.let { if (it > 0) "${Fa.number(it.toLong())} کالا زیر حداقل" else "همه کالاها بالای حداقل" }, onClick = { nav.go(Route.Stock) }) }
+            if (session.can(Permission.INVENTORY_COUNT) || session.can(Permission.INVENTORY_ADJUST)) item { NavRow(R.drawable.ic_count, "انبارگردانی", "شمارش، بررسی و تأیید اختلاف با دلیل", onClick = { nav.go(Route.Count) }) }
+            if (session.can(Permission.INVENTORY_TRANSFER)) item { NavRow(R.drawable.ic_transfer, "انتقال", "بین انبارها و شعب", onClick = { nav.go(Route.StockTransfer) }) }
+            if (session.can(Permission.INVENTORY_WASTE)) item { NavRow(R.drawable.ic_waste, "ضایعات", "ثبت با دلیل", onClick = { nav.go(Route.Waste) }) }
+            if (kitchen) item { SectionTitle("آشپزخانه") }
+            if (session.can(Permission.INVENTORY_PRODUCE)) item { NavRow(R.drawable.ic_calendar, "برنامه‌ی آماده‌سازی امروز", "چه چیزی، چقدر، به چه ترتیبی", onClick = { nav.go(Route.PrepPlan) }) }
+            if (session.can(Permission.INVENTORY_PRODUCE)) item { NavRow(R.drawable.ic_recipe, "تولید اقلام آماده", "مواد از انبار کم و قلم آماده اضافه می‌شود", onClick = { nav.go(Route.Production) }) }
+            if (session.can(Permission.RECIPE_MANAGE)) item { NavRow(R.drawable.ic_recipe, "رسپی و بهای تمام‌شده", "نسخه‌های رسپی آیتم‌های منو", onClick = { nav.go(Route.Recipes) }) }
+            if (session.can(Permission.RECIPE_MANAGE)) item { NavRow(R.drawable.ic_recipe, "رسپی اقلام آماده", "سس، خمیر و هر چه در آشپزخانه ساخته می‌شود", onClick = { nav.go(Route.PrepRecipes) }) }
+        }
+    }
+
+    @Composable
+    fun PurchaseHub(nav: Nav) {
+        val session = LocalSession.current
+        val payable by load(session, session.branch) { if (session.can(Permission.PURCHASE_VIEW)) overview.payables() else null }
+        SubHub(nav, "خرید") {
+            if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "خرید و دریافت کالا", payable.orNull()?.let { "بدهی ${Fa.rialShort(it.rial)}" } ?: "فاکتورهای خرید", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Purchases) }) }
+            if (session.can(Permission.PURCHASE_ORDER) || session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "سفارش خرید", "پیشنهاد خرید، سفارش و تحویل", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Orders) }) }
+            item { NavRow(R.drawable.ic_supplier, "تأمین‌کنندگان", "فهرست و مانده حساب", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Suppliers) }) }
+        }
+    }
+
+    @Composable
+    fun StaffHub(nav: Nav) {
+        val session = LocalSession.current
+        SubHub(nav, "پرسنل") {
+            if (session.can(Permission.TIME_CLOCK)) item { NavRow(R.drawable.ic_clock, "ساعت‌زنی", "ورود و خروج کارکنان با رمز خودشان", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.TimeClock) }) }
+            if (session.can(Permission.ATTENDANCE_RECORD)) item { NavRow(R.drawable.ic_clock, "کارکرد امروز", "برنامه در برابر ساعت‌زنی؛ تأیید برای حقوق", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.DayTime) }) }
+            if (session.can(Permission.SHIFT_MANAGE)) item { NavRow(R.drawable.ic_calendar, "برنامه‌ی شیفت", "هفتگی، با هزینه‌ی نیرو در برابر بودجه و فروش", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Schedule) }) }
+            if (session.can(Permission.PERSONNEL_VIEW) || session.can(Permission.PERSONNEL_MANAGE)) item { NavRow(R.drawable.ic_person, "کارکنان", "ثبت، مشخصات و مدارک", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Personnel) }) }
+            if (session.can(Permission.ATTENDANCE_RECORD) || session.can(Permission.PERSONNEL_VIEW)) item { NavRow(R.drawable.ic_clock, "حضور و غیاب", "ثبت روزانه کارکرد", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Attendance) }) }
+            if (listOf(Permission.PAYROLL_CALCULATE, Permission.PAYROLL_APPROVE, Permission.PAYROLL_PAY).any { session.can(it) }) item { NavRow(R.drawable.ic_payroll, "حقوق", "محاسبه، تأیید و پرداخت", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Payroll) }) }
         }
     }
 
