@@ -601,3 +601,123 @@ fun FormCard(title: String? = null, content: @Composable ColumnScope.() -> Unit)
         Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
 }
+
+// ---------------------------------------------------------------- Time and birth date
+
+/** "۰۹:۳۰" for minutes after midnight (a next-day end of shift wraps past ۲۴). */
+fun clockText(minutes: Int): String = Fa.digits("%02d:%02d".format((minutes / 60) % 24, minutes % 60))
+
+/** "۷:۳۰" for a duration in minutes. */
+fun durationText(minutes: Int): String = Fa.digits("%d:%02d".format(minutes / 60, minutes % 60))
+
+/**
+ * A time of day, or a length of time with [duration], chosen from hour and minute buttons: a number keypad has
+ * no ":" key, so times are never typed. [optional] lets the person clear it.
+ */
+@Composable
+fun TimeInput(
+    label: String,
+    minutes: Int?,
+    onChange: (Int?) -> Unit,
+    modifier: Modifier = Modifier,
+    duration: Boolean = false,
+    optional: Boolean = false,
+    placeholder: String = if (duration) "انتخاب مدت" else "انتخاب ساعت",
+) {
+    var open by remember { mutableStateOf(false) }
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = SabouType.caption.copy(fontSize = SabouType.body.fontSize * 0.93f), color = Sabou.colors.muted)
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(SabouShapes.field).background(Sabou.colors.field)
+                .border(1.dp, Sabou.colors.borderStrong, SabouShapes.field).clickable(role = Role.Button, onClickLabel = placeholder) { open = true }
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(minutes?.let { if (duration) durationText(it) else clockText(it) } ?: placeholder,
+                style = if (minutes != null) SabouType.bodyStrong else SabouType.body,
+                color = if (minutes != null) Sabou.colors.ink else Sabou.colors.subtle, modifier = Modifier.weight(1f))
+            Icon(painterResource(R.drawable.ic_clock), contentDescription = null, tint = Sabou.colors.primary, modifier = Modifier.size(20.dp))
+        }
+    }
+    if (open) TimePickerDialog(label, minutes, duration, optional, onPick = { onChange(it); open = false }, onDismiss = { open = false })
+}
+
+@Composable
+private fun TimePickerDialog(title: String, initial: Int?, duration: Boolean, optional: Boolean, onPick: (Int?) -> Unit, onDismiss: () -> Unit) {
+    var hour by remember { mutableStateOf(initial?.let { (it / 60).coerceAtMost(23) }) }
+    var minute by remember { mutableStateOf(initial?.let { it % 60 } ?: 0) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = { hour?.let { onPick(it * 60 + minute) } }, enabled = hour != null) {
+                Text("تأیید", style = SabouType.bodyStrong, color = if (hour != null) Sabou.colors.primary else Sabou.colors.subtle)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("انصراف", style = SabouType.bodyStrong, color = Sabou.colors.muted) } },
+        containerColor = Sabou.colors.surface,
+        title = { Text(title, style = SabouType.section, color = Sabou.colors.ink) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(hour?.let { if (duration) durationText(it * 60 + minute) else clockText(it * 60 + minute) } ?: "--:--",
+                    style = SabouType.section, color = Sabou.colors.primary, modifier = Modifier.fillMaxWidth(),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text(if (duration) "ساعت" else "ساعت (۰ تا ۲۳)", style = SabouType.caption, color = Sabou.colors.muted)
+                TimeGrid((0..23).toList(), hour, { Fa.digits(it.toString()) }) { hour = it }
+                Text("دقیقه", style = SabouType.caption, color = Sabou.colors.muted)
+                TimeGrid((0..55 step 5).toList(), minute, { Fa.digits("%02d".format(it)) }) { minute = it }
+                if (optional && initial != null) Text("بدون ساعت", style = SabouType.label, color = Sabou.colors.danger,
+                    modifier = Modifier.clickable(role = Role.Button) { onPick(null) }.padding(vertical = 6.dp))
+            }
+        },
+    )
+}
+
+@Composable
+private fun TimeGrid(values: List<Int>, selected: Int?, label: (Int) -> String, onPick: (Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        values.chunked(6).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                row.forEach { v ->
+                    val on = v == selected
+                    Box(Modifier.weight(1f).height(36.dp).clip(SabouShapes.chip).background(if (on) Sabou.colors.primary else Sabou.colors.track)
+                        .clickable(role = Role.Button) { onPick(v) }, contentAlignment = Alignment.Center) {
+                        Text(label(v), style = SabouType.label, color = if (on) Sabou.colors.surface else Sabou.colors.ink)
+                    }
+                }
+                repeat(6 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+/**
+ * A birth date typed as day / month / year of the Persian calendar (years back are many taps on a calendar).
+ * Reports the date, or null with [valid] false while what is typed is not a real date.
+ */
+@Composable
+fun BirthDateInput(label: String, value: ir.sabou.kernel.JalaliDay?, onChange: (ir.sabou.kernel.JalaliDay?, Boolean) -> Unit) {
+    var day by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(value?.day?.let { Fa.digits(it.toString()) } ?: "") }
+    var month by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(value?.month?.let { Fa.digits(it.toString()) } ?: "") }
+    var year by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(value?.year?.let { Fa.digits(it.toString()) } ?: "") }
+    fun parse(d: String, m: String, y: String): Pair<ir.sabou.kernel.JalaliDay?, Boolean> {
+        if (d.isBlank() && m.isBlank() && y.isBlank()) return null to true
+        val dd = Fa.latinDigits(d.trim()).toIntOrNull(); val mm = Fa.latinDigits(m.trim()).toIntOrNull(); val yy = Fa.latinDigits(y.trim()).toIntOrNull()
+        val parsed = if (dd != null && mm != null && yy != null) runCatching { ir.sabou.kernel.JalaliDay(yy, mm, dd) }.getOrNull() else null
+        return parsed to (parsed != null)
+    }
+    fun changed(d: String, m: String, y: String) { day = d; month = m; year = y; parse(d, m, y).let { (v, ok) -> onChange(v, ok) } }
+    val (parsed, ok) = parse(day, month, year)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = SabouType.caption.copy(fontSize = SabouType.body.fontSize * 0.93f), color = Sabou.colors.muted)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextInput("روز", day, { changed(it.take(2), month, year) }, Modifier.weight(1f), placeholder = "۱۲", keyboard = KeyboardType.Number)
+            TextInput("ماه", month, { changed(day, it.take(2), year) }, Modifier.weight(1f), placeholder = "۴", keyboard = KeyboardType.Number)
+            TextInput("سال", year, { changed(day, month, it.take(4)) }, Modifier.weight(1.4f), placeholder = "۱۳۷۰", keyboard = KeyboardType.Number)
+        }
+        when {
+            parsed != null -> Text("${Fa.digits(parsed.day.toString())} ${Fa.monthNames[parsed.month - 1]} ${Fa.digits(parsed.year.toString())}",
+                style = SabouType.caption, color = Sabou.colors.muted)
+            !ok -> Text("تاریخ تولد را کامل و درست بنویسید (مثلاً ۱۲ / ۴ / ۱۳۷۰).", style = SabouType.caption, color = Sabou.colors.danger)
+        }
+    }
+}

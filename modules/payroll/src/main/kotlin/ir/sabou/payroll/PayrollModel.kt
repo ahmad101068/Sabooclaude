@@ -16,6 +16,9 @@ data class Employee(
     val startDate: BusinessDate? = null,
     /** Last day of work once the employment has ended. */
     val endDate: BusinessDate? = null,
+    val birthDate: ir.sabou.kernel.JalaliDay? = null,
+    /** Personnel number: assigned in registration order across the whole organization, never reused. */
+    val personnelNumber: Int = 0,
 ) {
     /** Days of [from]..[to] on which this person was employed (0 when not employed at all). */
     fun employedDays(from: BusinessDate, to: BusinessDate): Int {
@@ -85,6 +88,8 @@ interface PersonnelStore {
     fun employee(id: GlobalId): Employee?
     fun employees(scope: Scope.Branch): List<Employee>
     fun saveEmployee(employee: Employee)
+    /** The next free personnel number of the organization (all branches). */
+    fun nextPersonnelNumber(): Int
     fun attendance(employeeId: GlobalId, from: BusinessDate, to: BusinessDate): List<AttendanceRecord>
     fun attendanceOn(employeeId: GlobalId, date: BusinessDate): AttendanceRecord?
     fun saveAttendance(record: AttendanceRecord)

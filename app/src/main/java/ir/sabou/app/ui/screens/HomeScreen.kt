@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -263,20 +264,28 @@ private fun QuickActions(nav: Nav) {
         Triple("پرداخت", R.drawable.ic_payment, Route.Payment) to Permission.TREASURY_PAYMENT,
         Triple("دریافت کالا", R.drawable.ic_operations, Route.NewPurchase) to Permission.PURCHASE_RECORD,
         Triple("انبارگردانی", R.drawable.ic_count, Route.Count) to Permission.INVENTORY_COUNT,
+        Triple("ساعت‌زنی", R.drawable.ic_clock, Route.TimeClock) to Permission.TIME_CLOCK,
     ).filter { session.can(it.second) }.map { it.first }
     if (items.isEmpty()) return
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        items.forEach { (label, icon, route) ->
-            Column(
-                Modifier.weight(1f).heightIn(min = 88.dp).clip(SabouShapes.card).background(Sabou.colors.surface)
-                    .border(1.dp, Sabou.colors.border, SabouShapes.card).clickable(role = Role.Button) { nav.go(route) }.padding(vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Box(Modifier.size(40.dp).clip(SabouShapes.tile).background(Sabou.colors.primarySoft), contentAlignment = Alignment.Center) {
-                    Icon(painterResource(icon), contentDescription = null, tint = Sabou.colors.primary, modifier = Modifier.size(22.dp))
+    // Up to four in a row; more wrap into rows of three so labels stay on one line.
+    val rows = if (items.size <= 4) listOf(items) else items.chunked(3)
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        rows.forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { (label, icon, route) ->
+                    Column(
+                        Modifier.weight(1f).heightIn(min = 88.dp).clip(SabouShapes.card).background(Sabou.colors.surface)
+                            .border(1.dp, Sabou.colors.border, SabouShapes.card).clickable(role = Role.Button) { nav.go(route) }.padding(vertical = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(Modifier.size(40.dp).clip(SabouShapes.tile).background(Sabou.colors.primarySoft), contentAlignment = Alignment.Center) {
+                            Icon(painterResource(icon), contentDescription = null, tint = Sabou.colors.primary, modifier = Modifier.size(22.dp))
+                        }
+                        Text(label, style = SabouType.label, color = Sabou.colors.ink, textAlign = TextAlign.Center)
+                    }
                 }
-                Text(label, style = SabouType.label, color = Sabou.colors.ink, textAlign = TextAlign.Center)
+                repeat(rows.first().size - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }

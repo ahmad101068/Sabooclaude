@@ -60,18 +60,6 @@ object ShiftScreens {
     /** «۹:۰۵»; past midnight shows the next day's hour. */
     fun clock(minute: Int): String = Fa.digits("${(minute / 60) % 24}:${(minute % 60).toString().padStart(2, '0')}")
 
-    /** «9:05», «۹٫۰۵» or «905» → minutes; null when not a time. */
-    fun parseClock(text: String): Int? {
-        val t = Fa.latinDigits(text.trim()).replace('٫', ':').replace('.', ':')
-        val (h, m) = when {
-            ':' in t -> t.split(':').let { it[0].toIntOrNull() to it.getOrNull(1)?.toIntOrNull() }
-            t.length in 3..4 -> t.dropLast(2).toIntOrNull() to t.takeLast(2).toIntOrNull()
-            else -> t.toIntOrNull() to 0
-        }
-        if (h == null || m == null || h !in 0..23 || m !in 0..59) return null
-        return h * 60 + m
-    }
-
     @Composable
     fun Schedule(nav: Nav) {
         val session = LocalSession.current
@@ -136,21 +124,21 @@ object ShiftScreens {
     @Composable
     private fun ShiftForm(branch: ir.sabou.kernel.Scope.Branch, date: ir.sabou.kernel.BusinessDate, employees: List<Choice<GlobalId>>, onDone: () -> Unit) {
         var employee by rememberSaveable { mutableStateOf<GlobalId?>(null) }
-        var start by rememberSaveable { mutableStateOf("") }
-        var end by rememberSaveable { mutableStateOf("") }
+        var start by rememberSaveable { mutableStateOf<Int?>(null) }
+        var end by rememberSaveable { mutableStateOf<Int?>(null) }
         var rest by rememberSaveable { mutableStateOf("") }
         var station by rememberSaveable { mutableStateOf("") }
         val action = rememberAction()
         Picker("کارمند", employees, employee, { employee = it })
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextInput("از (مثلاً ۹:۰۰)", start, { start = it }, Modifier.weight(1f), keyboard = KeyboardType.Number)
-            TextInput("تا (مثلاً ۱۷:۰۰)", end, { end = it }, Modifier.weight(1f), keyboard = KeyboardType.Number)
+            ir.sabou.app.ui.components.TimeInput("از ساعت", start, { start = it }, Modifier.weight(1f))
+            ir.sabou.app.ui.components.TimeInput("تا ساعت", end, { end = it }, Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextInput("استراحت (دقیقه)", rest, { rest = it }, Modifier.weight(1f), keyboard = KeyboardType.Number)
             TextInput("ایستگاه", station, { station = it }, Modifier.weight(1f), placeholder = "صندوق، کباب‌پز…")
         }
-        val s = parseClock(start); val e = parseClock(end)?.let { if (s != null && it <= s) it + 1_440 else it }
+        val s = start; val e = end?.let { if (s != null && it <= s) it + 1_440 else it }
         val b = Fa.latinDigits(rest.trim()).ifBlank { "0" }.toIntOrNull()
         if (s != null && e != null && e - s > 0) Text("${Fa.number((e - s - (b ?: 0)).toLong() / 60)} ساعت" + if (e >= 1_440) " (تا بامداد روز بعد)" else "", style = SabouType.caption, color = Sabou.colors.muted)
         action.error?.let { Banner(it) }

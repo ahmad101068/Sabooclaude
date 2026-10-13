@@ -27,6 +27,8 @@ import ir.sabou.app.ui.LocalSession
 import ir.sabou.app.ui.Nav
 import ir.sabou.app.ui.Route
 import ir.sabou.app.ui.components.Banner
+import ir.sabou.app.ui.components.BirthDateInput
+import ir.sabou.app.ui.components.TimeInput
 import ir.sabou.app.ui.components.Chip
 import ir.sabou.app.ui.components.ChipKind
 import ir.sabou.app.ui.components.Choice
@@ -115,6 +117,19 @@ object OperationsScreens {
             low to payable
         }
         val (low, payable) = counts.orNull() ?: (null to null)
+        val staffPerms = personnelPerms + listOf(Permission.SHIFT_MANAGE, Permission.TIME_CLOCK)
+        val reports = FinanceScreens.reportPerms.any { session.can(it) }
+        val groups = listOf(any(inventoryPerms), any(purchasePerms), any(staffPerms), reports)
+        // A role with one group only (a storekeeper's stock, a cashier's time clock) skips the doors and opens its room.
+        if (groups.count { it } == 1) {
+            when (groups.indexOf(true)) {
+                0 -> InventoryHub(nav, root = true)
+                1 -> PurchaseHub(nav, root = true)
+                2 -> StaffHub(nav, root = true)
+                else -> ReportsScreens.Hub(nav)
+            }
+            return
+        }
         Column(Modifier.fillMaxSize()) {
             Header("عملیات") { BranchSwitcher() }
             LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -128,11 +143,11 @@ object OperationsScreens {
                     NavRow(R.drawable.ic_purchase, "خرید", payable?.let { "بدهی ${Fa.rialShort(it.rial)} · فاکتور، سفارش و تأمین‌کنندگان" } ?: "فاکتور، سفارش و تأمین‌کنندگان",
                         tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.PurchaseHub) })
                 }
-                if (any(personnelPerms + listOf(Permission.SHIFT_MANAGE, Permission.TIME_CLOCK))) item {
+                if (any(staffPerms)) item {
                     NavRow(R.drawable.ic_person, "پرسنل", "کارکنان، شیفت، ساعت‌زنی، کارکرد و حقوق",
                         tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.StaffHub) })
                 }
-                if (FinanceScreens.reportPerms.any { session.can(it) }) item {
+                if (reports) item {
                     NavRow(R.drawable.ic_count, "گزارش‌ها", "سود و زیان، پایان روز، مصرف، منو، پیش‌بینی و کارکرد", onClick = { nav.go(Route.Reports) })
                 }
             }
@@ -140,20 +155,20 @@ object OperationsScreens {
     }
 
     @Composable
-    private fun SubHub(nav: Nav, title: String, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
+    private fun SubHub(nav: Nav, title: String, root: Boolean, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
         Column(Modifier.fillMaxSize()) {
-            Header(title, onBack = nav.back) { BranchSwitcher() }
+            Header(title, onBack = if (root) null else nav.back) { BranchSwitcher() }
             LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
         }
     }
 
     @Composable
-    fun InventoryHub(nav: Nav) {
+    fun InventoryHub(nav: Nav, root: Boolean = false) {
         val session = LocalSession.current
         val low by load(session, session.branch) { if (session.can(Permission.INVENTORY_VIEW)) overview.lowStock().size else null }
         val lowCount = low.orNull()
         val kitchen = session.can(Permission.RECIPE_MANAGE) || session.can(Permission.INVENTORY_PRODUCE)
-        SubHub(nav, "انبار و آشپزخانه") {
+        SubHub(nav, "انبار و آشپزخانه", root) {
             item { SectionTitle("انبار") }
             if (session.can(Permission.INVENTORY_VIEW)) item { NavRow(R.drawable.ic_operations, "موجودی", lowCount?.let { if (it > 0) "${Fa.number(it.toLong())} کالا زیر حداقل" else "همه کالاها بالای حداقل" }, onClick = { nav.go(Route.Stock) }) }
             if (session.can(Permission.INVENTORY_COUNT) || session.can(Permission.INVENTORY_ADJUST)) item { NavRow(R.drawable.ic_count, "انبارگردانی", "شمارش، بررسی و تأیید اختلاف با دلیل", onClick = { nav.go(Route.Count) }) }
@@ -168,10 +183,10 @@ object OperationsScreens {
     }
 
     @Composable
-    fun PurchaseHub(nav: Nav) {
+    fun PurchaseHub(nav: Nav, root: Boolean = false) {
         val session = LocalSession.current
         val payable by load(session, session.branch) { if (session.can(Permission.PURCHASE_VIEW)) overview.payables() else null }
-        SubHub(nav, "خرید") {
+        SubHub(nav, "خرید", root) {
             if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "خرید و دریافت کالا", payable.orNull()?.let { "بدهی ${Fa.rialShort(it.rial)}" } ?: "فاکتورهای خرید", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Purchases) }) }
             if (session.can(Permission.PURCHASE_ORDER) || session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "سفارش خرید", "پیشنهاد خرید، سفارش و تحویل", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Orders) }) }
             item { NavRow(R.drawable.ic_supplier, "تأمین‌کنندگان", "فهرست و مانده حساب", tint = Sabou.colors.onAccentSoft, tile = Sabou.colors.accentSoft, onClick = { nav.go(Route.Suppliers) }) }
@@ -179,9 +194,9 @@ object OperationsScreens {
     }
 
     @Composable
-    fun StaffHub(nav: Nav) {
+    fun StaffHub(nav: Nav, root: Boolean = false) {
         val session = LocalSession.current
-        SubHub(nav, "پرسنل") {
+        SubHub(nav, "پرسنل", root) {
             if (session.can(Permission.TIME_CLOCK)) item { NavRow(R.drawable.ic_clock, "ساعت‌زنی", "ورود و خروج کارکنان با رمز خودشان", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.TimeClock) }) }
             if (session.can(Permission.ATTENDANCE_RECORD)) item { NavRow(R.drawable.ic_clock, "کارکرد امروز", "برنامه در برابر ساعت‌زنی؛ تأیید برای حقوق", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.DayTime) }) }
             if (session.can(Permission.SHIFT_MANAGE)) item { NavRow(R.drawable.ic_calendar, "برنامه‌ی شیفت", "هفتگی، با هزینه‌ی نیرو در برابر بودجه و فروش", tint = Sabou.colors.moneyIn, tile = Sabou.colors.moneyInSoft, onClick = { nav.go(Route.Schedule) }) }
@@ -613,6 +628,10 @@ object OperationsScreens {
                 var salary by rememberSaveable { mutableStateOf<Money?>(null) }
                 var midMonth by rememberSaveable { mutableStateOf(false) }
                 var start by rememberSaveable { mutableStateOf(session.today) }
+                var birth by rememberSaveable { mutableStateOf<ir.sabou.kernel.JalaliDay?>(null) }
+                var birthOk by rememberSaveable { mutableStateOf(true) }
+                var birthKey by rememberSaveable { mutableStateOf(0) }
+                var editing by rememberSaveable { mutableStateOf<GlobalId?>(null) }
                 var ending by rememberSaveable { mutableStateOf<GlobalId?>(null) }
                 var lastDay by rememberSaveable { mutableStateOf(session.today) }
                 val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
@@ -625,6 +644,7 @@ object OperationsScreens {
                             SCard {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(e.name, style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                                    if (e.personnelNumber > 0) Chip("شماره پرسنلی ${Fa.number(e.personnelNumber.toLong())}", ChipKind.PRIMARY)
                                     if (e.endDate != null) Chip("پایان همکاری ${Fa.date(e.endDate!!)}", ChipKind.NEUTRAL)
                                 }
                                 KeyValue("حقوق ماهانه", Fa.rial(e.monthlySalary))
@@ -632,8 +652,15 @@ object OperationsScreens {
                                 Text("مدارک" + if (docIssues.isNotEmpty()) " (${Fa.number(docIssues.size.toLong())} مورد نیاز به رسیدگی)" else "", style = SabouType.label,
                                     color = if (docIssues.isNotEmpty()) Sabou.colors.danger else Sabou.colors.primary,
                                     modifier = Modifier.clickable { nav.go(Route.StaffDocuments(e.id)) }.padding(vertical = 4.dp))
-                                Text("کد ملی ${Fa.digits(e.nationalId)}" + (e.startDate?.let { " · شروع کار ${Fa.date(it)}" } ?: ""),
+                                Text("کد ملی ${Fa.digits(e.nationalId)}" +
+                                    (e.birthDate?.let { " · تولد ${Fa.digits(it.day.toString())} ${Fa.monthNames[it.month - 1]} ${Fa.digits(it.year.toString())}" } ?: " · تاریخ تولد ثبت نشده") +
+                                    (e.startDate?.let { " · شروع کار ${Fa.date(it)}" } ?: ""),
                                     style = SabouType.caption, color = Sabou.colors.muted)
+                                if (session.can(Permission.PERSONNEL_MANAGE)) {
+                                    if (editing == e.id) EmployeeDetailsForm(branch, e) { editing = null }
+                                    else Text("ویرایش نام و تاریخ تولد", style = SabouType.label, color = Sabou.colors.primary,
+                                        modifier = Modifier.clickable { editing = e.id }.padding(vertical = 4.dp))
+                                }
                                 if (e.endDate == null && e.isActive && session.can(Permission.PERSONNEL_MANAGE)) {
                                     var pin by rememberSaveable(e.id) { mutableStateOf("") }
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -664,6 +691,8 @@ object OperationsScreens {
                             TextInput("نام و نام خانوادگی", name, { name = it })
                             TextInput("کد ملی", nationalId, { nationalId = it }, keyboard = KeyboardType.Number)
                             MoneyInput("حقوق پایه ماهانه", salary, { salary = it })
+                            key(birthKey) { BirthDateInput("تاریخ تولد (اختیاری)", birth) { v, ok -> birth = v; birthOk = ok } }
+                            Text("شماره پرسنلی خودکار داده می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { midMonth = !midMonth }) {
                                 androidx.compose.material3.Checkbox(checked = midMonth, onCheckedChange = { midMonth = it })
                                 Text("از وسط ماه شروع به کار کرده (حقوق ماه اول به نسبت روزها)", style = SabouType.body, color = Sabou.colors.ink)
@@ -671,14 +700,32 @@ object OperationsScreens {
                             if (midMonth) DateInput("تاریخ شروع کار", start, { start = it }, session.today)
                             if (ending == null) action.error?.let { Banner(it) }
                             PrimaryButton("ثبت", {
-                                action.run({ payroll.registerEmployee(RegisterEmployee(id.value, branch, name, nationalId, salary!!, startDate = start.takeIf { midMonth })) }) {
-                                    name = ""; nationalId = ""; salary = null; midMonth = false; id.value = GlobalId.new()
+                                action.run({ payroll.registerEmployee(RegisterEmployee(id.value, branch, name, nationalId, salary!!, startDate = start.takeIf { midMonth }, birthDate = birth)) }) {
+                                    name = ""; nationalId = ""; salary = null; midMonth = false; birth = null; birthOk = true; birthKey++; id.value = GlobalId.new()
                                 }
-                            }, enabled = name.isNotBlank() && nationalId.isNotBlank() && salary != null, busy = action.busy)
+                            }, enabled = name.isNotBlank() && nationalId.isNotBlank() && salary != null && birthOk, busy = action.busy)
                         }
                     }
                 }
             }
+        }
+    }
+
+    @Composable
+    private fun EmployeeDetailsForm(branch: Scope.Branch, e: ir.sabou.payroll.Employee, onDone: () -> Unit) {
+        var name by rememberSaveable(e.id) { mutableStateOf(e.name) }
+        var birth by rememberSaveable(e.id) { mutableStateOf(e.birthDate) }
+        var birthOk by rememberSaveable(e.id) { mutableStateOf(true) }
+        val id = rememberSaveable(e.id) { mutableStateOf(GlobalId.new()) }
+        val action = rememberAction()
+        TextInput("نام و نام خانوادگی", name, { name = it })
+        BirthDateInput("تاریخ تولد", birth) { v, ok -> birth = v; birthOk = ok }
+        action.error?.let { Banner(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PrimaryButton("ذخیره", {
+                action.run({ payroll.updateEmployeeDetails(ir.sabou.payroll.UpdateEmployeeDetails(id.value, branch, e.id, name, birth)) }) { onDone() }
+            }, Modifier.weight(1f), enabled = name.isNotBlank() && birthOk, busy = action.busy)
+            SecondaryButton("انصراف", onDone, Modifier.weight(1f))
         }
     }
 
@@ -703,23 +750,21 @@ object OperationsScreens {
 
     @Composable
     private fun AttendanceRow(branch: Scope.Branch, date: BusinessDate, employeeId: GlobalId, name: String, record: ir.sabou.payroll.AttendanceRecord?) {
-        fun hours(min: Int?) = min?.takeIf { it > 0 }?.let { Fa.quantity(Quantity.of(it.toLong() * Quantity.SCALE / 60)) } ?: ""
-        fun minutes(text: String): Int? = if (text.isBlank()) 0 else Fa.parseQuantity(text)?.let { (it.micros * 60 / Quantity.SCALE).toInt() }
-        var worked by rememberSaveable { mutableStateOf(hours(record?.workedMinutes)) }
-        var overtime by rememberSaveable { mutableStateOf(hours(record?.overtimeMinutes)) }
-        var absent by rememberSaveable { mutableStateOf(hours(record?.absentMinutes)) }
+        // Hours and minutes are picked, not typed (a number keypad has no ":"); empty = none.
+        var worked by rememberSaveable { mutableStateOf(record?.workedMinutes?.takeIf { it > 0 }) }
+        var overtime by rememberSaveable { mutableStateOf(record?.overtimeMinutes?.takeIf { it > 0 }) }
+        var absent by rememberSaveable { mutableStateOf(record?.absentMinutes?.takeIf { it > 0 }) }
         val action = rememberAction()
         FormCard(name) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextInput("کارکرد (ساعت)", worked, { worked = it }, Modifier.weight(1f), keyboard = KeyboardType.Decimal)
-                TextInput("اضافه‌کار", overtime, { overtime = it }, Modifier.weight(1f), keyboard = KeyboardType.Decimal)
-                TextInput("غیبت", absent, { absent = it }, Modifier.weight(1f), keyboard = KeyboardType.Decimal)
+                TimeInput("کارکرد", worked, { worked = it }, Modifier.weight(1f), duration = true, optional = true, placeholder = "—")
+                TimeInput("اضافه‌کار", overtime, { overtime = it }, Modifier.weight(1f), duration = true, optional = true, placeholder = "—")
+                TimeInput("غیبت", absent, { absent = it }, Modifier.weight(1f), duration = true, optional = true, placeholder = "—")
             }
             action.error?.let { Banner(it) }
-            val w = minutes(worked); val o = minutes(overtime); val a = minutes(absent)
             if (LocalSession.current.can(Permission.ATTENDANCE_RECORD)) SecondaryButton(if (record == null) "ثبت" else "اصلاح", {
-                action.run({ payroll.recordAttendance(RecordAttendance(GlobalId.new(), branch, employeeId, date, w!!, o!!, a!!)) })
-            }, enabled = w != null && o != null && a != null && !action.busy)
+                action.run({ payroll.recordAttendance(RecordAttendance(GlobalId.new(), branch, employeeId, date, worked ?: 0, overtime ?: 0, absent ?: 0)) })
+            }, enabled = !action.busy)
         }
     }
 

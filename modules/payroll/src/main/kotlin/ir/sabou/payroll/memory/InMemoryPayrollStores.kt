@@ -19,6 +19,7 @@ class InMemoryPersonnelStore : PersonnelStore, Transactional {
     override fun employee(id: GlobalId) = employees[id]
     override fun employees(scope: Scope.Branch) = employees.values.filter { it.scope == scope }
     override fun saveEmployee(employee: Employee) { employees[employee.id] = employee }
+    override fun nextPersonnelNumber() = (employees.values.maxOfOrNull { it.personnelNumber } ?: 0) + 1
     override fun attendance(employeeId: GlobalId, from: BusinessDate, to: BusinessDate) =
         attendance.values.filter { it.employeeId == employeeId && it.date >= from && it.date <= to }
     override fun attendanceOn(employeeId: GlobalId, date: BusinessDate) = attendance.values.firstOrNull { it.employeeId == employeeId && it.date == date }

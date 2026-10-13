@@ -1,6 +1,8 @@
 package ir.sabou.payroll
 
 import ir.sabou.kernel.NationalId
+import ir.sabou.kernel.JalaliCalendar
+import ir.sabou.kernel.JalaliDay
 
 import ir.sabou.platform.NoDocument
 
@@ -38,9 +40,23 @@ data class RegisterEmployee(
     val monthlySalary: Money,
     /** Set when the person starts during a payroll month; their first month is then prorated. */
     val startDate: BusinessDate? = null,
+    val birthDate: JalaliDay? = null,
 ) : Command {
     override val requiredPermission = Permission.PERSONNEL_MANAGE
-    override fun fingerprint() = "$scope|$name|$nationalId|${monthlySalary.rial}|${startDate?.epochDay}"
+    override fun fingerprint() = "$scope|$name|$nationalId|${monthlySalary.rial}|${startDate?.epochDay}|${birthDate?.packed()}"
+}
+
+/** Corrects a person's name and birth date (the national ID and personnel number never change). */
+@NoDocument
+data class UpdateEmployeeDetails(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val employeeId: GlobalId,
+    val name: String,
+    val birthDate: JalaliDay?,
+) : Command {
+    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override fun fingerprint() = "$scope|$employeeId|$name|${birthDate?.packed()}"
 }
 
 /** Ends an employment after [lastDay]; that month is paid only up to it, later months not at all. */
@@ -167,10 +183,30 @@ class PayrollOperations(
             ensure(payroll.runs(cmd.scope).none { it.status == RunStatus.APPROVED && it.to >= start }) { DomainError.InvalidState("EMPLOYEE", "START_IN_APPROVED_PERIOD") }
         }
         ensure(personnel.employees(cmd.scope).none { NationalId.normalize(it.nationalId) == nationalId }) { DomainError.InvalidState("EMPLOYEE", "DUPLICATE_NATIONAL_ID") }
-        val employee = Employee(GlobalId.new(), name, nationalId, cmd.scope, cmd.monthlySalary, startDate = cmd.startDate)
+        cmd.birthDate?.let { validBirthDate(it, ctx.nowEpochMillis) }
+        val employee = Employee(
+            GlobalId.new(), name, nationalId, cmd.scope, cmd.monthlySalary, startDate = cmd.startDate,
+            birthDate = cmd.birthDate, personnelNumber = personnel.nextPersonnelNumber(),
+        )
         personnel.saveEmployee(employee)
-        ctx.audit(AuditDraft("EMPLOYEE_REGISTER", "EMPLOYEE", employee.id.value, name + (cmd.startDate?.let { ";start=${it.epochDay}" } ?: "")))
+        ctx.audit(AuditDraft("EMPLOYEE_REGISTER", "EMPLOYEE", employee.id.value, name + ";no=${employee.personnelNumber}" + (cmd.startDate?.let { ";start=${it.epochDay}" } ?: "")))
         employee.id
+    }
+
+    fun updateEmployeeDetails(c: UpdateEmployeeDetails): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val employee = requireEmployee(cmd.employeeId, cmd.scope)
+        val name = cmd.name.trim()
+        ensure(name.length in 2..120) { DomainError.InvalidInput("name", "نام کارمند الزامی است.") }
+        cmd.birthDate?.let { validBirthDate(it, ctx.nowEpochMillis) }
+        personnel.saveEmployee(employee.copy(name = name, birthDate = cmd.birthDate))
+        ctx.audit(AuditDraft("EMPLOYEE_UPDATE", "EMPLOYEE", employee.id.value, name + (cmd.birthDate?.let { ";birth=${it.packed()}" } ?: "")))
+        employee.id
+    }
+
+    /** A worker is at least 10 and at most 100 years old by the clock. */
+    private fun validBirthDate(birth: JalaliDay, nowEpochMillis: Long) {
+        val age = birth.yearsUntil(JalaliCalendar.of(Math.floorDiv(nowEpochMillis, 86_400_000L)))
+        ensure(age in 10..100) { DomainError.InvalidInput("birthDate", "تاریخ تولد معتبر نیست.") }
     }
 
     fun endEmployment(c: EndEmployment): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->

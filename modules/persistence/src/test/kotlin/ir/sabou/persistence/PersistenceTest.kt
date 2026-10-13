@@ -87,6 +87,18 @@ class PersistenceTest {
         assertFailsWith<Exception> { db.execute("INSERT INTO stock_balances VALUES ('i', 'l', -1, 0)") }
     }
 
+    @Test fun staffRegisteredBeforePersonnelNumbersGetThemInRegistrationOrder() {
+        val db = memoryDb(); Schema.migrate(db, 18)
+        listOf("b", "a", "c").forEach { id ->
+            db.execute("INSERT INTO employees(id, scope, doc) VALUES (?, 'ORG', ?)", id, "{\"id\":\"$id\",\"name\":\"$id\"}")
+        }
+        Schema.migrate(db)
+        assertEquals(listOf(1L, 2L, 3L), db.query("SELECT number FROM employees ORDER BY rowid").map { it.long("number") })
+        assertTrue(db.query("SELECT doc FROM employees WHERE id = 'a'").single().str("doc").contains("\"number\":2"))
+        assertFailsWith<Exception> { db.execute("UPDATE employees SET number = 1 WHERE id = 'c'") }
+        assertEquals(4, SqlPersonnelStore(db).nextPersonnelNumber())
+    }
+
     @Test fun employmentDatesPartialMonthsAndProrationSurviveTheDatabase() {
         val db = memoryDb(); Schema.migrate(db)
         val branch = ir.sabou.kernel.Scope.Branch(ir.sabou.kernel.BranchId(ir.sabou.kernel.GlobalId.new()))

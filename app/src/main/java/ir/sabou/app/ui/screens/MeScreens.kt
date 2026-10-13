@@ -98,13 +98,50 @@ object MeScreens {
         Role.RESTRICTED -> "فقط مشاهده محدود"
     }
 
+    /** The groups of the Me tab, each a page of settings (owner's request, 2026-10: same style as Operations). */
+    enum class Group(val title: String, val subtitle: String, val icon: Int) {
+        RESTAURANT("رستوران و دسترسی‌ها", "شعب، کاربران، صندوق‌ها و انبارها", R.drawable.ic_branch),
+        CATALOG("کالا، منو و مشتریان", "کالاها، منو و رسپی، مشتریان اعتباری", R.drawable.ic_recipe),
+        RULES("حقوق، مالیات و بودجه", "پارامترهای حقوق، قانون‌های تأیید، اطلاعات مالیاتی، بودجه", R.drawable.ic_finance),
+        SAFETY("امنیت و داده‌ها", "رمز و اعلان‌ها، پشتیبان، دو گوشی", R.drawable.ic_lock),
+    }
+
+    private class Entry(val icon: Int, val title: String, val subtitle: String?, val route: Route)
+
+    /** What this person may open in [group]; a group with nothing in it is not shown. */
+    private fun entries(group: Group, session: ir.sabou.app.ui.AppSession, replica: Boolean): List<Entry> = when (group) {
+        Group.RESTAURANT -> listOfNotNull(
+            Entry(R.drawable.ic_branch, "شعب", null, Route.Branches).takeIf { session.can(Permission.USER_MANAGE) },
+            Entry(R.drawable.ic_person, "کاربران و دسترسی‌ها", null, Route.Users).takeIf { session.can(Permission.USER_MANAGE) },
+            Entry(R.drawable.ic_bank, "صندوق‌ها و حساب‌های بانکی", null, Route.Accounts).takeIf { session.can(Permission.TREASURY_ACCOUNT_MANAGE) },
+            Entry(R.drawable.ic_branch, "انبارها و آشپزخانه‌ها", null, Route.Locations).takeIf { session.can(Permission.INVENTORY_LOCATION_MANAGE) },
+        )
+        Group.CATALOG -> listOfNotNull(
+            Entry(R.drawable.ic_operations, "کالاها", null, Route.Items).takeIf { session.can(Permission.INVENTORY_ITEM_MANAGE) },
+            Entry(R.drawable.ic_recipe, "منو و رسپی", null, Route.Menu).takeIf { session.can(Permission.RECIPE_MANAGE) },
+            Entry(R.drawable.ic_person, "مشتریان اعتباری", null, Route.Customers).takeIf { session.can(Permission.CUSTOMER_MANAGE) },
+        )
+        Group.RULES -> listOfNotNull(
+            Entry(R.drawable.ic_payroll, "پارامترهای قانونی حقوق", "بیمه و مالیات هر سال", Route.Policies).takeIf { session.can(Permission.PAYROLL_APPROVE) },
+            Entry(R.drawable.ic_check, "قانون‌های تأیید فاکتور", "چه فاکتوری پیش از پرداخت چند تأیید بخواهد", Route.ApprovalRules).takeIf { session.can(Permission.APPROVAL_RULES) },
+            Entry(R.drawable.ic_finance, "اطلاعات مالیاتی", "شناسه‌ها و نرخ ارزش افزوده؛ آمادگی سامانه‌ی مودیان", Route.TaxSettings).takeIf { session.can(Permission.TAX_SETTINGS) },
+            Entry(R.drawable.ic_finance, "بودجه", "مبلغ ماهانه‌ی هر حساب درآمد و هزینه", Route.Budget).takeIf { session.can(Permission.BUDGET_MANAGE) },
+        )
+        Group.SAFETY -> listOfNotNull(
+            Entry(R.drawable.ic_lock, "امنیت و اعلان‌ها", "تغییر رمز، اثر انگشت، اعلان هشدارها" + if (session.actor.role == Role.OWNER) "، کد بازیابی" else "", Route.Security),
+            // Backups are the main phone's: a second phone's data is a copy of it (ADR-0042).
+            Entry(R.drawable.ic_backup, "پشتیبان‌گیری و بازیابی", null, Route.Backup).takeIf { session.can(Permission.BACKUP_CREATE) && !replica },
+            Entry(R.drawable.ic_transfer, "دو گوشی، یک دفتر", "همگام‌سازی گوشی اصلی و گوشی دوم روی وای‌فای", Route.TwoPhones),
+        )
+    }
+
     @Composable
     fun Hub(nav: Nav, onSignOut: () -> Unit) {
         val session = LocalSession.current
         val twoPhones = (LocalContext.current.applicationContext as SabouApplication).container.twoPhones
         Column(Modifier.fillMaxSize()) {
             Header("من")
-            LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
                     SCard {
                         Text(session.actor.displayName, style = SabouType.section, color = Sabou.colors.ink)
@@ -112,25 +149,30 @@ object MeScreens {
                         BranchSwitcher()
                     }
                 }
-                item { SectionTitle("تنظیمات") }
-                if (session.can(Permission.USER_MANAGE)) {
-                    item { NavRow(R.drawable.ic_branch, "شعب", onClick = { nav.go(Route.Branches) }) }
-                    item { NavRow(R.drawable.ic_person, "کاربران و دسترسی‌ها", onClick = { nav.go(Route.Users) }) }
+                Group.entries.forEach { g ->
+                    val list = entries(g, session, twoPhones.isReplica)
+                    when (list.size) {
+                        0 -> Unit
+                        // One setting in a group needs no extra page.
+                        1 -> item(g.name) { list.single().let { e -> NavRow(e.icon, e.title, e.subtitle, onClick = { nav.go(e.route) }) } }
+                        else -> item(g.name) { NavRow(g.icon, g.title, g.subtitle, onClick = { nav.go(Route.MeGroup(g)) }) }
+                    }
                 }
-                if (session.can(Permission.TREASURY_ACCOUNT_MANAGE)) item { NavRow(R.drawable.ic_bank, "صندوق‌ها و حساب‌های بانکی", onClick = { nav.go(Route.Accounts) }) }
-                if (session.can(Permission.INVENTORY_ITEM_MANAGE)) item { NavRow(R.drawable.ic_operations, "کالاها", onClick = { nav.go(Route.Items) }) }
-                if (session.can(Permission.INVENTORY_LOCATION_MANAGE)) item { NavRow(R.drawable.ic_branch, "انبارها و آشپزخانه‌ها", onClick = { nav.go(Route.Locations) }) }
-                if (session.can(Permission.RECIPE_MANAGE)) item { NavRow(R.drawable.ic_recipe, "منو و رسپی", onClick = { nav.go(Route.Menu) }) }
-                if (session.can(Permission.CUSTOMER_MANAGE)) item { NavRow(R.drawable.ic_person, "مشتریان اعتباری", onClick = { nav.go(Route.Customers) }) }
-                if (session.can(Permission.PAYROLL_APPROVE)) item { NavRow(R.drawable.ic_payroll, "پارامترهای قانونی حقوق", "بیمه و مالیات هر سال", onClick = { nav.go(Route.Policies) }) }
-                if (session.can(Permission.APPROVAL_RULES)) item { NavRow(R.drawable.ic_check, "قانون‌های تأیید فاکتور", "چه فاکتوری پیش از پرداخت چند تأیید بخواهد", onClick = { nav.go(Route.ApprovalRules) }) }
-                if (session.can(Permission.TAX_SETTINGS)) item { NavRow(R.drawable.ic_finance, "اطلاعات مالیاتی", "شناسه‌ها و نرخ ارزش افزوده؛ آمادگی سامانه‌ی مودیان", onClick = { nav.go(Route.TaxSettings) }) }
-                if (session.can(Permission.BUDGET_MANAGE)) item { NavRow(R.drawable.ic_finance, "بودجه", "مبلغ ماهانه‌ی هر حساب درآمد و هزینه", onClick = { nav.go(Route.Budget) }) }
-                // Backups are the main phone's: a second phone's data is a copy of it (ADR-0042).
-                if (session.can(Permission.BACKUP_CREATE) && !twoPhones.isReplica) item { NavRow(R.drawable.ic_backup, "پشتیبان‌گیری و بازیابی", onClick = { nav.go(Route.Backup) }) }
-                item { NavRow(R.drawable.ic_transfer, "دو گوشی، یک دفتر", "همگام‌سازی گوشی اصلی و گوشی دوم روی وای‌فای", onClick = { nav.go(Route.TwoPhones) }) }
-                item { NavRow(R.drawable.ic_lock, "امنیت و اعلان‌ها", "تغییر رمز، اثر انگشت، اعلان هشدارها" + if (session.actor.role == ir.sabou.platform.Role.OWNER) "، کد بازیابی" else "", onClick = { nav.go(Route.Security) }) }
                 item { SecondaryButton("خروج از حساب", onSignOut, danger = true) }
+            }
+        }
+    }
+
+    @Composable
+    fun GroupPage(nav: Nav, group: Group) {
+        val session = LocalSession.current
+        val twoPhones = (LocalContext.current.applicationContext as SabouApplication).container.twoPhones
+        Column(Modifier.fillMaxSize()) {
+            Header(group.title, onBack = nav.back)
+            LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val list = entries(group, session, twoPhones.isReplica)
+                if (list.isEmpty()) item { EmptyState("دسترسی به این بخش ندارید.") }
+                list.forEach { e -> item { NavRow(e.icon, e.title, e.subtitle, onClick = { nav.go(e.route) }) } }
             }
         }
     }
