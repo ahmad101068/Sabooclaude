@@ -204,15 +204,19 @@ object ReportTables {
 
     fun payrollRun(run: ir.sabou.payroll.PayrollRun, names: Map<ir.sabou.kernel.GlobalId, String>, branch: String) = ReportTable(
         "لیست حقوق", "$branch · ${period(run.from, run.to)} · نسخه‌ی پارامترها ${run.policyVersion}",
-        listOf("کارمند", "روز کار", "حقوق پایه", "کسر غیبت", "اضافه‌کار", "ناخالص", "بیمه کارمند", "مالیات", "خالص", "بیمه کارفرما و بیکاری"),
+        listOf("کارمند", "روز کار", "حقوق پایه", "کسر غیبت", "اضافه‌کار", "مزایا", "ناخالص", "بیمه کارمند", "مالیات", "مساعده و کسور", "خالص", "بیمه کارفرما و بیکاری"),
         run.payslips.map { p ->
             listOf(Cell.of(names[p.employeeId].orEmpty()), p.payableDays?.let { Cell.Count(it.toLong()) } ?: Cell.of("کامل"), Cell.Amount(p.baseSalary.rial),
-                Cell.Amount(p.absenceDeduction.rial), Cell.Amount(p.overtimePay.rial), Cell.Amount(p.gross.rial), Cell.Amount(p.employeeInsurance.rial),
-                Cell.Amount(p.incomeTax.rial), Cell.Amount(p.net.rial), Cell.Amount(p.employerInsurance.rial + p.unemploymentInsurance.rial))
+                Cell.Amount(p.absenceDeduction.rial), Cell.Amount(p.overtimePay.rial), Cell.Amount(p.total(ir.sabou.payroll.PayLine.Kind.EARNING).rial),
+                Cell.Amount(p.gross.rial), Cell.Amount(p.employeeInsurance.rial), Cell.Amount(p.incomeTax.rial),
+                Cell.Amount(p.total(ir.sabou.payroll.PayLine.Kind.ADVANCE).rial + p.total(ir.sabou.payroll.PayLine.Kind.DEDUCTION).rial),
+                Cell.Amount(p.net.rial), Cell.Amount(p.employerInsurance.rial + p.unemploymentInsurance.rial))
         },
         footer = listOf(Cell.of("جمع"), Cell.EMPTY) + listOf<(ir.sabou.payroll.Payslip) -> Long>(
-            { it.baseSalary.rial }, { it.absenceDeduction.rial }, { it.overtimePay.rial }, { it.gross.rial }, { it.employeeInsurance.rial },
-            { it.incomeTax.rial }, { it.net.rial }, { it.employerInsurance.rial + it.unemploymentInsurance.rial },
+            { it.baseSalary.rial }, { it.absenceDeduction.rial }, { it.overtimePay.rial }, { it.total(ir.sabou.payroll.PayLine.Kind.EARNING).rial }, { it.gross.rial },
+            { it.employeeInsurance.rial }, { it.incomeTax.rial },
+            { it.total(ir.sabou.payroll.PayLine.Kind.ADVANCE).rial + it.total(ir.sabou.payroll.PayLine.Kind.DEDUCTION).rial },
+            { it.net.rial }, { it.employerInsurance.rial + it.unemploymentInsurance.rial },
         ).map { f -> Cell.Amount(run.payslips.sumOf(f)) },
         notes = listOf(RIAL),
     )
@@ -224,7 +228,9 @@ object ReportTables {
             fun kv(k: String, v: Long) = add(listOf(Cell.of(k), Cell.Amount(v)))
             slip.payableDays?.let { add(listOf(Cell.of("روزهای کار (ماه ناقص)"), Cell.Count(it.toLong()))) }
             kv("حقوق پایه", slip.baseSalary.rial); kv("اضافه‌کار", slip.overtimePay.rial); kv("کسر غیبت", -slip.absenceDeduction.rial)
+            slip.lines.filter { it.kind == ir.sabou.payroll.PayLine.Kind.EARNING }.forEach { kv(it.title, it.amount.rial) }
             kv("حقوق و مزایای ناخالص", slip.gross.rial); kv("بیمه سهم کارمند", -slip.employeeInsurance.rial); kv("مالیات حقوق", -slip.incomeTax.rial)
+            slip.lines.filter { it.kind != ir.sabou.payroll.PayLine.Kind.EARNING }.forEach { kv(it.title, -it.amount.rial) }
         },
         footer = listOf(Cell.of("خالص پرداختی"), Cell.Amount(slip.net.rial)),
         notes = listOf("نسخه‌ی پارامترهای قانونی: ${run.policyVersion}", "بیمه سهم کارفرما و بیکاری: ${Fa.rial(slip.employerInsurance.rial + slip.unemploymentInsurance.rial)} ریال (پرداخت کارفرما)"),

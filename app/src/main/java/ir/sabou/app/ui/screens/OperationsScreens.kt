@@ -626,6 +626,7 @@ object OperationsScreens {
                 var name by rememberSaveable { mutableStateOf("") }
                 var nationalId by rememberSaveable { mutableStateOf("") }
                 var salary by rememberSaveable { mutableStateOf<Money?>(null) }
+                var payType by rememberSaveable { mutableStateOf(ir.sabou.payroll.PayType.MONTHLY) }
                 var midMonth by rememberSaveable { mutableStateOf(false) }
                 var start by rememberSaveable { mutableStateOf(session.today) }
                 var birth by rememberSaveable { mutableStateOf<ir.sabou.kernel.JalaliDay?>(null) }
@@ -657,7 +658,8 @@ object OperationsScreens {
                         FormCard("کارمند جدید") {
                             TextInput("نام و نام خانوادگی", name, { name = it })
                             TextInput("کد ملی", nationalId, { nationalId = it }, keyboard = KeyboardType.Number)
-                            MoneyInput("حقوق پایه ماهانه", salary, { salary = it })
+                            Picker("نوع پرداخت", ir.sabou.payroll.PayType.entries.map { Choice(it, EmployeeScreens.payTypeName(it)) }, payType, { payType = it })
+                            MoneyInput(EmployeeScreens.rateLabel(payType), salary, { salary = it })
                             key(birthKey) { BirthDateInput("تاریخ تولد (اختیاری)", birth) { v, ok -> birth = v; birthOk = ok } }
                             Text("شماره پرسنلی خودکار داده می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { midMonth = !midMonth }) {
@@ -667,7 +669,7 @@ object OperationsScreens {
                             if (midMonth) DateInput("تاریخ شروع کار", start, { start = it }, session.today)
                             action.error?.let { Banner(it) }
                             PrimaryButton("ثبت", {
-                                action.run({ payroll.registerEmployee(RegisterEmployee(id.value, branch, name, nationalId, salary!!, startDate = start.takeIf { midMonth }, birthDate = birth)) }) {
+                                action.run({ payroll.registerEmployee(RegisterEmployee(id.value, branch, name, nationalId, salary!!, startDate = start.takeIf { midMonth }, birthDate = birth, payType = payType)) }) {
                                     name = ""; nationalId = ""; salary = null; midMonth = false; birth = null; birthOk = true; birthKey++; id.value = GlobalId.new()
                                 }
                             }, enabled = name.isNotBlank() && nationalId.isNotBlank() && salary != null && birthOk, busy = action.busy)

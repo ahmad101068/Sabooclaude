@@ -44,6 +44,7 @@ data class StaffDocument(
 }
 
 interface StaffDocumentStore {
+    fun byId(id: GlobalId): StaffDocument?
     fun of(employeeId: GlobalId): List<StaffDocument>
     fun all(scope: Scope.Branch): List<StaffDocument>
     fun save(document: StaffDocument)
@@ -124,6 +125,12 @@ data class RemoveStaffDocument(override val commandId: GlobalId, override val sc
     override fun fingerprint() = "$scope|$documentId|$reason"
 }
 
+@NoDocument
+data class SetEmployeePhoto(override val commandId: GlobalId, override val scope: Scope.Branch, val employeeId: GlobalId, val photo: AttachmentInput) : Command {
+    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override fun fingerprint() = "$scope|$employeeId|${photo.fingerprint()}"
+}
+
 class StaffDocumentOperations(
     private val bus: CommandBus,
     private val personnel: PersonnelStore,
@@ -172,13 +179,25 @@ class StaffDocumentOperations(
 
     /** A document of this branch that has not been corrected or removed since (only the latest version is changed). */
     private fun liveDocument(id: GlobalId, scope: Scope.Branch): StaffDocument {
-        val all = documents.all(scope)
-        val doc = all.firstOrNull { it.id == id } ?: throw DomainException(DomainError.NotFound("STAFF_DOCUMENT"))
-        ensure(doc in StaffDocumentRules.live(all.filter { it.employeeId == doc.employeeId })) { DomainError.InvalidState("STAFF_DOCUMENT", "ALREADY_CHANGED") }
+        val doc = documents.byId(id) ?: throw DomainException(DomainError.NotFound("STAFF_DOCUMENT"))
+        // The person's branch now (documents stay with the person when they move to another branch).
+        ensure(personnel.employee(doc.employeeId)?.scope == scope) { DomainError.InvalidInput("scope", "این کارمند متعلق به این شعبه نیست.") }
+        ensure(doc in StaffDocumentRules.live(documents.of(doc.employeeId))) { DomainError.InvalidState("STAFF_DOCUMENT", "ALREADY_CHANGED") }
         return doc
+    }
+
+    /** The person's photo for their file (the latest one is shown). */
+    fun setPhoto(c: SetEmployeePhoto): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val employee = personnel.employee(cmd.employeeId) ?: throw DomainException(DomainError.NotFound("EMPLOYEE"))
+        ensure(employee.scope == cmd.scope) { DomainError.InvalidInput("scope", "این کارمند متعلق به این شعبه نیست.") }
+        ensure(cmd.photo.mime.startsWith("image/")) { DomainError.InvalidInput("photo", "عکس لازم است.") }
+        Attachments.attach(ctx, attachments, PHOTO, employee.id, listOf(cmd.photo))
+        ctx.audit(AuditDraft("EMPLOYEE_PHOTO", "EMPLOYEE", employee.id.value, ""))
+        employee.id
     }
 
     companion object {
         const val OWNER = "STAFF_DOCUMENT"
+        const val PHOTO = "EMPLOYEE_PHOTO"
     }
 }

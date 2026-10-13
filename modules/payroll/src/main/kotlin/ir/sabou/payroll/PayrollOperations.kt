@@ -3,6 +3,7 @@ package ir.sabou.payroll
 import ir.sabou.kernel.NationalId
 import ir.sabou.kernel.JalaliCalendar
 import ir.sabou.kernel.JalaliDay
+import ir.sabou.kernel.Sheba
 
 import ir.sabou.platform.NoDocument
 
@@ -42,9 +43,28 @@ data class RegisterEmployee(
     /** Set when the person starts during a payroll month; their first month is then prorated. */
     val startDate: BusinessDate? = null,
     val birthDate: JalaliDay? = null,
+    /** [monthlySalary] is a month's salary, or a day's / an hour's wage. */
+    val payType: PayType = PayType.MONTHLY,
 ) : Command {
     override val requiredPermission = Permission.PERSONNEL_MANAGE
-    override fun fingerprint() = "$scope|$name|$nationalId|${monthlySalary.rial}|${startDate?.epochDay}|${birthDate?.packed()}"
+    override fun fingerprint() = "$scope|$name|$nationalId|${monthlySalary.rial}|${startDate?.epochDay}|${birthDate?.packed()}|$payType"
+}
+
+/** The person's file: contact, job, insurance number, bank account, family, contract. */
+@NoDocument
+data class UpdateEmployeeProfile(override val commandId: GlobalId, override val scope: Scope.Branch, val employeeId: GlobalId, val profile: EmployeeProfile) : Command {
+    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override fun fingerprint() = "$scope|$employeeId|$profile"
+}
+
+/**
+ * Moves a person to another branch from [effectiveFrom]. The old branch must have paid them up to the day before
+ * (its approved payroll ends there, or they had not started), and has no shifts or attendance for them after it.
+ */
+@NoDocument
+data class TransferEmployee(override val commandId: GlobalId, override val scope: Scope.Branch, val employeeId: GlobalId, val toBranch: Scope.Branch, val effectiveFrom: BusinessDate) : Command {
+    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override fun fingerprint() = "$scope|$employeeId|$toBranch|${effectiveFrom.epochDay}"
 }
 
 /** Corrects a person's name, national ID and birth date (the personnel number never changes). */
@@ -70,9 +90,11 @@ data class ChangeSalary(
     val effectiveFrom: BusinessDate,
     val monthlySalary: Money,
     val reason: String,
+    /** Changes how the person is paid as well; null keeps it. */
+    val payType: PayType? = null,
 ) : Command {
     override val requiredPermission = Permission.PERSONNEL_MANAGE
-    override fun fingerprint() = "$scope|$employeeId|${effectiveFrom.epochDay}|${monthlySalary.rial}|$reason"
+    override fun fingerprint() = "$scope|$employeeId|${effectiveFrom.epochDay}|${monthlySalary.rial}|$reason|$payType"
 }
 
 /** Someone who left comes back from [startDate]: same person, same personnel number, a new employment. */
@@ -83,9 +105,10 @@ data class RehireEmployee(
     val employeeId: GlobalId,
     val startDate: BusinessDate,
     val monthlySalary: Money,
+    val payType: PayType? = null,
 ) : Command {
     override val requiredPermission = Permission.PERSONNEL_MANAGE
-    override fun fingerprint() = "$scope|$employeeId|${startDate.epochDay}|${monthlySalary.rial}"
+    override fun fingerprint() = "$scope|$employeeId|${startDate.epochDay}|${monthlySalary.rial}|$payType"
 }
 
 /** Ends an employment after [lastDay]; that month is paid only up to it, later months not at all. */
@@ -183,6 +206,8 @@ class PayrollOperations(
     private val settings: () -> PayrollSettings = { PayrollSettings() },
     /** Whether someone other than this user may approve payroll (a second owner); with nobody else, the owner may approve their own calculation. */
     private val otherApproverExists: (GlobalId) -> Boolean = { true },
+    /** Whether the person has shifts planned in a branch from a date (they block a transfer). */
+    private val hasShiftsFrom: (GlobalId, Scope.Branch, BusinessDate) -> Boolean = { _, _, _ -> false },
 ) {
     init {
         require(capability.module == ModuleId.PAYROLL)
@@ -206,6 +231,79 @@ class PayrollOperations(
         return accrued - Money.sum(payroll.remittances(scope, kind).map { it.amount })
     }
 
+    /** Every branch this person has been paid in. */
+    private fun scopesOf(e: Employee): Set<Scope.Branch> = setOf(e.scope) + e.branchMoves.map { it.previous }
+
+    /** What approved payslips have taken back of [advance]. */
+    fun deducted(advance: Advance): Money {
+        val e = personnel.employee(advance.employeeId) ?: return Money.ZERO
+        return Money.sum(scopesOf(e).flatMap { payroll.runs(it) }.filter { it.status == RunStatus.APPROVED }
+            .flatMap { r -> r.payslips.filter { it.employeeId == e.id }.flatMap { it.lines } }.filter { it.code == advance.code }.map { it.amount })
+    }
+
+    fun advanceView(advance: Advance): AdvanceView {
+        val deducted = deducted(advance)
+        val owed = if (advance.reversed) 0L else maxOf(0L, advance.amount.rial - deducted.rial - advance.repaid().rial)
+        return AdvanceView(advance, deducted, Money.of(owed))
+    }
+
+    /** This month's installments: each advance given by the end of the month, while something is owed; all of it in the last month of work. */
+    private fun advanceLines(e: Employee, to: BusinessDate): List<PayLine> {
+        val leaving = e.endDate != null && e.endDate <= to
+        return payroll.advances(e.id).filter { !it.reversed && it.date <= to }.sortedBy { it.date }.mapNotNull { a ->
+            val owed = advanceView(a).outstanding
+            val take = if (leaving) owed else minOf(owed, a.installment)
+            PayLine(a.code, if (a.isLoan) "قسط وام" else "مساعده", take, PayLine.Kind.ADVANCE).takeIf { !take.isZero }
+        }
+    }
+
+    fun giveAdvance(c: GiveAdvance): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val employee = requireEmployee(cmd.employeeId, cmd.scope)
+        ensure(employee.employedOn(cmd.date)) { DomainError.InvalidState("EMPLOYEE", "NOT_EMPLOYED_ON_DATE") }
+        ensure(!cmd.amount.isZero && cmd.installments in 1..60) { DomainError.InvalidInput("installments", "تعداد قسط بین ۱ تا ۶۰ است.") }
+        ensure(cmd.note.length <= 120) { DomainError.InvalidInput("note", "متن بیش از حد طولانی است.") }
+        ensure(treasury.account(cmd.treasuryAccountId).scope == cmd.scope) { DomainError.InvalidInput("account", "حساب پرداخت متعلق به این شعبه نیست.") }
+        val advance = Advance(GlobalId.new(), cmd.scope, employee.id, cmd.amount, cmd.date, cmd.installments, cmd.note.trim(), cmd.treasuryAccountId)
+        treasury.settle(ctx, capability, cmd.treasuryAccountId, Direction.PAYMENT, cmd.amount, cmd.date, ADVANCE, advance.id,
+            (if (advance.isLoan) "وام " else "مساعده ") + employee.name,
+            listOf(LineDraft(StandardAccounts.EMPLOYEE_ADVANCE, debit = cmd.amount, memo = employee.name, by = capability)))
+        payroll.saveAdvance(advance)
+        ctx.number(DocumentSeries.PAYMENT, cmd.date, advance.id)
+        ctx.audit(AuditDraft("ADVANCE_GIVE", "EMPLOYEE", employee.id.value, "amount=${cmd.amount.rial};installments=${cmd.installments}"))
+        advance.id
+    }
+
+    fun repayAdvance(c: RepayAdvance): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val advance = requireAdvance(cmd.advanceId, cmd.scope)
+        ensure(!cmd.amount.isZero && cmd.amount <= advanceView(advance).outstanding) { DomainError.InvalidState("ADVANCE", "AMOUNT_EXCEEDS_OUTSTANDING") }
+        ensure(treasury.account(cmd.treasuryAccountId).scope == cmd.scope) { DomainError.InvalidInput("account", "حساب دریافت متعلق به این شعبه نیست.") }
+        val employee = personnel.employee(advance.employeeId)!!
+        val id = GlobalId.new()
+        treasury.settle(ctx, capability, cmd.treasuryAccountId, Direction.RECEIPT, cmd.amount, cmd.date, ADVANCE_REPAYMENT, id, "بازپرداخت ${employee.name}",
+            listOf(LineDraft(StandardAccounts.EMPLOYEE_ADVANCE, credit = cmd.amount, memo = employee.name, by = capability)))
+        payroll.saveAdvance(advance.copy(repayments = advance.repayments + AdvanceRepayment(id, cmd.amount, cmd.date, cmd.treasuryAccountId)))
+        ctx.number(DocumentSeries.RECEIPT, cmd.date, id)
+        id
+    }
+
+    fun reverseAdvance(c: ReverseAdvance): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val advance = requireAdvance(cmd.advanceId, cmd.scope)
+        ensure(!advance.reversed) { DomainError.InvalidState("ADVANCE", "ALREADY_REVERSED") }
+        // Once part of it was paid back (from a salary or in cash) it is no longer a mistake to undo.
+        ensure(deducted(advance).isZero && advance.repaid().isZero) { DomainError.InvalidState("ADVANCE", "PARTLY_REPAID") }
+        ensure(cmd.reason.trim().length >= 3) { DomainError.InvalidInput("reason", "دلیل را بنویسید.") }
+        treasury.reverseDocument(ctx, capability, ADVANCE, advance.id, cmd.date, cmd.reason)
+        payroll.saveAdvance(advance.copy(reversed = true))
+        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.PAYMENT to advance.id)
+        advance.id
+    }
+
+    private fun requireAdvance(id: GlobalId, scope: Scope.Branch): Advance {
+        val a = payroll.advance(id) ?: throw DomainException(DomainError.NotFound("ADVANCE"))
+        ensure(a.scope == scope) { DomainError.InvalidInput("scope", "این مساعده متعلق به این شعبه نیست.") }
+        return a
+    }
+
     fun registerEmployee(c: RegisterEmployee): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
         val name = cmd.name.trim()
         ensure(name.length in 2..120) { DomainError.InvalidInput("name", "نام کارمند الزامی است.") }
@@ -223,7 +321,7 @@ class PayrollOperations(
         cmd.birthDate?.let { validBirthDate(it, ctx.nowEpochMillis) }
         val employee = Employee(
             GlobalId.new(), name, nationalId, cmd.scope, cmd.monthlySalary, startDate = cmd.startDate,
-            birthDate = cmd.birthDate, personnelNumber = personnel.nextPersonnelNumber(),
+            birthDate = cmd.birthDate, personnelNumber = personnel.nextPersonnelNumber(), payType = cmd.payType,
         )
         personnel.saveEmployee(employee)
         ctx.audit(AuditDraft("EMPLOYEE_REGISTER", "EMPLOYEE", employee.id.value, name + ";no=${employee.personnelNumber}" + (cmd.startDate?.let { ";start=${it.epochDay}" } ?: "")))
@@ -267,7 +365,8 @@ class PayrollOperations(
         // A month already approved keeps the salary it was paid with.
         ensure(payroll.runs(cmd.scope).none { it.status == RunStatus.APPROVED && it.to >= cmd.effectiveFrom }) { DomainError.InvalidState("SALARY", "IN_APPROVED_PERIOD") }
         val before = employee.salaryOn(cmd.effectiveFrom)
-        val changes = (employee.salaryChanges.filter { it.from != cmd.effectiveFrom } + SalaryChange(cmd.effectiveFrom, cmd.monthlySalary, reason)).sortedBy { it.from }
+        val type = cmd.payType ?: employee.payTypeOn(cmd.effectiveFrom)
+        val changes = (employee.salaryChanges.filter { it.from != cmd.effectiveFrom } + SalaryChange(cmd.effectiveFrom, cmd.monthlySalary, reason, type)).sortedBy { it.from }
         personnel.saveEmployee(employee.copy(salaryChanges = changes))
         ctx.audit(AuditDraft("SALARY_CHANGE", "EMPLOYEE", employee.id.value, "from=${cmd.effectiveFrom.epochDay};${before.rial}->${cmd.monthlySalary.rial};$reason"))
         employee.id
@@ -282,10 +381,52 @@ class PayrollOperations(
         val back = employee.copy(
             isActive = true, startDate = cmd.startDate, endDate = null,
             pastEmployments = employee.pastEmployments + Employment(employee.startDate, ended),
-            salaryChanges = (employee.salaryChanges.filter { it.from < cmd.startDate } + SalaryChange(cmd.startDate, cmd.monthlySalary, "بازگشت به کار")).sortedBy { it.from },
+            salaryChanges = (employee.salaryChanges.filter { it.from < cmd.startDate } +
+                SalaryChange(cmd.startDate, cmd.monthlySalary, "بازگشت به کار", cmd.payType ?: employee.payTypeOn(ended))).sortedBy { it.from },
         )
         personnel.saveEmployee(back)
         ctx.audit(AuditDraft("EMPLOYEE_REHIRE", "EMPLOYEE", employee.id.value, "start=${cmd.startDate.epochDay};salary=${cmd.monthlySalary.rial}"))
+        employee.id
+    }
+
+    fun updateProfile(c: UpdateEmployeeProfile): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val employee = requireEmployee(cmd.employeeId, cmd.scope)
+        val p = cmd.profile.let {
+            it.copy(phone = it.phone.trim(), address = it.address.trim(), emergencyContact = it.emergencyContact.trim(), fatherName = it.fatherName.trim(),
+                jobTitle = it.jobTitle.trim(), insuranceNumber = NationalId.normalize(it.insuranceNumber), sheba = if (it.sheba.isBlank()) "" else Sheba.normalize(it.sheba))
+        }
+        ensure(listOf(p.phone, p.emergencyContact, p.fatherName, p.jobTitle, p.insuranceNumber).all { it.length <= 80 } && p.address.length <= 300) {
+            DomainError.InvalidInput("text", "متن بیش از حد طولانی است.")
+        }
+        ensure(p.sheba.isEmpty() || Sheba.isValid(p.sheba)) { DomainError.InvalidInput("sheba", "شماره شبا درست نیست (IR و ۲۴ رقم).") }
+        ensure(p.insuranceNumber.isEmpty() || p.insuranceNumber.all { it.isDigit() }) { DomainError.InvalidInput("insuranceNumber", "شماره بیمه فقط رقم است.") }
+        ensure(p.children in 0..20) { DomainError.InvalidInput("children", "تعداد فرزند معتبر نیست.") }
+        personnel.saveEmployee(employee.copy(profile = p))
+        // Which fields changed, not their values (the file holds personal data).
+        val changed = EmployeeProfile::class.java.declaredFields.filter { f ->
+            f.isAccessible = true; f.get(employee.profile) != f.get(p)
+        }.joinToString(",") { it.name }
+        ctx.audit(AuditDraft("EMPLOYEE_PROFILE", "EMPLOYEE", employee.id.value, changed))
+        employee.id
+    }
+
+    fun transfer(c: TransferEmployee): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val employee = requireEmployee(cmd.employeeId, cmd.scope)
+        ctx.requireScope(cmd.toBranch)
+        ensure(cmd.toBranch != cmd.scope) { DomainError.InvalidInput("toBranch", "شعبه‌ی مقصد همان شعبه‌ی فعلی است.") }
+        ensure(employee.endDate == null) { DomainError.InvalidState("EMPLOYEE", "ALREADY_ENDED") }
+        // The old branch pays up to the day before: its last approved month ends there, or the person had not started yet.
+        val paidTo = payroll.runs(cmd.scope).filter { it.status == RunStatus.APPROVED && it.payslips.any { s -> s.employeeId == employee.id } }.maxOfOrNull { it.to }
+        val notStarted = employee.startDate != null && employee.startDate >= cmd.effectiveFrom && paidTo == null
+        ensure(notStarted || paidTo?.plusDays(1) == cmd.effectiveFrom) { DomainError.InvalidState("EMPLOYEE", "TRANSFER_NOT_AT_PAID_END") }
+        ensure(payroll.runs(cmd.scope).none { it.status == RunStatus.DRAFT && it.to >= cmd.effectiveFrom && it.payslips.any { s -> s.employeeId == employee.id } }) {
+            DomainError.InvalidState("EMPLOYEE", "TRANSFER_DRAFT_RUN")
+        }
+        ensure(!hasShiftsFrom(employee.id, cmd.scope, cmd.effectiveFrom) && personnel.attendance(employee.id, cmd.effectiveFrom, cmd.effectiveFrom.plusDays(3_650)).isEmpty()) {
+            DomainError.InvalidState("EMPLOYEE", "TRANSFER_HAS_LATER_RECORDS")
+        }
+        personnel.saveEmployee(employee.copy(scope = cmd.toBranch, branchMoves = employee.branchMoves + BranchMove(cmd.effectiveFrom, cmd.scope)))
+        ctx.audit(AuditDraft("EMPLOYEE_TRANSFER", "EMPLOYEE", employee.id.value, "to=${ir.sabou.platform.CommandContext.scopeLabel(cmd.toBranch)};from=${cmd.effectiveFrom.epochDay}"))
         employee.id
     }
 
@@ -361,6 +502,8 @@ class PayrollOperations(
         val gross = Money.sum(s.map { it.gross })
         val employerCost = Money.sum(s.map { it.employerInsurance + it.unemploymentInsurance })
         val net = Money.sum(s.map { it.net })
+        val advances = Money.sum(s.map { it.total(PayLine.Kind.ADVANCE) })
+        val deductions = Money.sum(s.map { it.total(PayLine.Kind.DEDUCTION) })
         val insurance = Money.sum(s.map { it.employeeInsurance + it.employerInsurance + it.unemploymentInsurance })
         val tax = Money.sum(s.map { it.incomeTax })
         val lines = buildList {
@@ -369,6 +512,9 @@ class PayrollOperations(
             if (!net.isZero) add(LineDraft(StandardAccounts.PAYROLL_PAYABLE, credit = net, memo = "خالص پرداختنی", by = capability))
             if (!insurance.isZero) add(LineDraft(StandardAccounts.INSURANCE_PAYABLE, credit = insurance, memo = "بیمه", by = capability))
             if (!tax.isZero) add(LineDraft(StandardAccounts.PAYROLL_TAX_PAYABLE, credit = tax, memo = "مالیات حقوق", by = capability))
+            // Installments pay advances back; other deductions (meals, damages…) lower the salary cost.
+            if (!advances.isZero) add(LineDraft(StandardAccounts.EMPLOYEE_ADVANCE, credit = advances, memo = "بازپرداخت مساعده و وام", by = capability))
+            if (!deductions.isZero) add(LineDraft(StandardAccounts.SALARIES, credit = deductions, memo = "کسورات", by = capability))
         }
         // A month in which nobody earned anything (all absent) is approved without an accounting entry.
         val journal = if (lines.isEmpty()) null else ledger.post(ctx, capability, JournalDraft(run.to, run.scope, RUN, run.id, "حقوق دوره", lines))
@@ -439,16 +585,39 @@ class PayrollOperations(
         val periodDays = (to.epochDay - from.epochDay + 1).toInt()
         val options = settings()
         return personnel.employees(scope).mapNotNull { e ->
-            val employed = e.employedDays(from, to)
+            // Days employed here (a person moved from another branch is paid there until the move).
+            val days = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }.filter { e.employedOn(it) && e.branchOn(it) == scope }.toList()
+            val employed = days.size
             if (employed == 0) return@mapNotNull null
-            val records = personnel.attendance(e.id, from, to)
-            val runs = e.salaryDays(from, to)
-            val monthly = runs.last().first
+            val records = personnel.attendance(e.id, from, to).filter { it.date in days }
             val partial = employed < periodDays
-            // One salary all month: the usual rule. Several: each for its days, over the month (or the 30-day basis when partial).
-            val base = if (runs.size == 1) null else {
+            val monthlyDays = days.filter { e.payTypeOn(it) == PayType.MONTHLY }.toSet()
+            val last = days.last()
+            // The rate of a month, for pricing overtime and absence: a day's wage × 30, an hour's × the standard month.
+            val monthly = when (e.payTypeOn(last)) {
+                PayType.MONTHLY -> e.salaryOn(last)
+                PayType.DAILY -> Money.of(Math.multiplyExact(e.salaryOn(last).rial, 30L))
+                PayType.HOURLY -> Money.of(Ratio.mulDiv(e.salaryOn(last).rial, policy.standardMonthlyMinutes.toLong(), 60))
+            }
+            val runs = e.salaryDays(days.first(), days.last())
+            val base = if (monthlyDays.size == days.size) {
+                // One salary all month: the usual rule. Several: each for its days, over the month (or the 30-day basis when partial).
+                if (runs.size == 1) null else {
+                    val divisor = if (partial) policy.prorationDays.toLong() else periodDays.toLong()
+                    Money.of(minOf(runs.maxOf { it.first.rial }, runs.sumOf { (s, d) -> Ratio.mulDiv(s.rial, d.toLong(), divisor) }))
+                }
+            } else {
+                // Daily and hourly pay: a day's wage for each day worked, an hour's for each hour worked (from attendance).
+                val worked = records.associate { it.date to it.workedMinutes }
                 val divisor = if (partial) policy.prorationDays.toLong() else periodDays.toLong()
-                Money.of(minOf(runs.maxOf { it.first.rial }, runs.sumOf { (s, d) -> Ratio.mulDiv(s.rial, d.toLong(), divisor) }))
+                Money.of(days.sumOf { d ->
+                    val rate = e.salaryOn(d).rial
+                    when (e.payTypeOn(d)) {
+                        PayType.MONTHLY -> Ratio.mulDiv(rate, 1, divisor)
+                        PayType.DAILY -> if ((worked[d] ?: 0) > 0) rate else 0L
+                        PayType.HOURLY -> Ratio.mulDiv(rate, (worked[d] ?: 0).toLong(), 60)
+                    }
+                })
             }
             val overtimeMinutes = records.sumOf { it.overtimeMinutes.toLong() }
             val overtimePay = when (options.overtimeMode) {
@@ -456,8 +625,10 @@ class PayrollOperations(
                 OvertimeMode.FIXED_HOURLY -> Money.of(Ratio.mulDiv(options.overtimeHourlyRate.rial, overtimeMinutes, 60))
                 OvertimeMode.NONE -> Money.ZERO
             }
-            policy.calculate(e.id, monthly, records.sumOf { it.absentMinutes.toLong() }, overtimeMinutes,
-                payableDays = employed.takeIf { partial }, base = base, overtimePay = overtimePay)
+            // Absence is deducted only from days paid monthly (a daily or hourly wage pays only the time worked).
+            val absent = records.filter { it.date in monthlyDays }.sumOf { it.absentMinutes.toLong() }
+            policy.calculate(e.id, monthly, absent, overtimeMinutes,
+                payableDays = employed.takeIf { partial && monthlyDays.size == days.size }, base = base, overtimePay = overtimePay, lines = advanceLines(e, to))
         }
     }
 
@@ -477,5 +648,7 @@ class PayrollOperations(
         const val RUN = "PAYROLL_RUN"
         const val PAYMENT = "SALARY_PAYMENT"
         const val REMITTANCE = "PAYROLL_REMITTANCE"
+        const val ADVANCE = "EMPLOYEE_ADVANCE"
+        const val ADVANCE_REPAYMENT = "EMPLOYEE_ADVANCE_REPAYMENT"
     }
 }

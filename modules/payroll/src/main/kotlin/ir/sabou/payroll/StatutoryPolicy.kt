@@ -77,6 +77,8 @@ data class StatutoryPolicy(
         base: Money? = null,
         /** Overtime priced another way than the statutory multiplier (restaurant settings); null = statutory. */
         overtimePay: Money? = null,
+        /** Earnings, advance installments and deductions (see [PayLine]). */
+        lines: List<PayLine> = emptyList(),
     ): Payslip {
         require(payableDays == null || payableDays >= 1)
         val monthly = monthlySalary
@@ -84,17 +86,26 @@ data class StatutoryPolicy(
             else Money.of(minOf(monthly.rial, Ratio.mulDiv(monthly.rial, payableDays.toLong(), prorationDays.toLong())))
         val absence = Money.of(minOf(salary.rial, Ratio.mulDiv(monthly.rial, absentMinutes, standardMonthlyMinutes.toLong())))
         val overtime = overtimePay ?: statutoryOvertime(monthly, overtimeMinutes)
-        val gross = salary - absence + overtime
-        val insurable = minOf(gross, maxInsurableMonthly)
+        val earnings = lines.filter { it.kind == PayLine.Kind.EARNING && !it.amount.isZero }
+        val worked = salary - absence + overtime
+        val gross = worked + Money.sum(earnings.map { it.amount })
+        val insurable = minOf(worked + Money.sum(earnings.filter { it.insurable }.map { it.amount }), maxInsurableMonthly)
         val employeeIns = percent(insurable, employeeInsuranceBp)
         val exempt = Money.of(Ratio.mulDiv(employeeIns.rial, insuranceTaxExemptNumerator.toLong(), insuranceTaxExemptDenominator.toLong(), Rounding.DOWN))
-        val taxable = gross - exempt
+        val taxable = Money.of(maxOf(0L, (worked + Money.sum(earnings.filter { it.taxable }.map { it.amount })).rial - exempt.rial))
         val tax = progressiveTax(taxable)
+        // Advance installments and deductions, in order, as far as net pay allows.
+        var left = gross - employeeIns - tax
+        val taken = lines.filter { it.kind != PayLine.Kind.EARNING }.mapNotNull { l ->
+            val amount = minOf(l.amount, left)
+            left -= amount
+            l.copy(amount = amount).takeIf { !amount.isZero }
+        }
         return Payslip(
             employeeId = employeeId, baseSalary = salary, absenceDeduction = absence, overtimePay = overtime, gross = gross,
             insurableBase = insurable, employeeInsurance = employeeIns, employerInsurance = percent(insurable, employerInsuranceBp),
             unemploymentInsurance = percent(insurable, unemploymentInsuranceBp), taxableIncome = taxable, incomeTax = tax,
-            net = gross - employeeIns - tax, payableDays = payableDays,
+            net = left, payableDays = payableDays, lines = earnings + taken,
         )
     }
 }

@@ -427,8 +427,23 @@ class SqlPersonnelStore(db: SqlDatabase) : SqlTable(db), PersonnelStore {
         Codec.id(d.str("id")), d.str("name"), d.str("nationalId"), Codec.branchOf(d.str("scope")), Codec.money(d.long("salary")), d.bool("active"),
         startDate = d.longOrNull("start")?.let(Codec::date), endDate = d.longOrNull("end")?.let(Codec::date),
         birthDate = d.longOrNull("birth")?.let(ir.sabou.kernel.JalaliDay::unpack), personnelNumber = d.longOrNull("number")?.toInt() ?: 0,
-        salaryChanges = if (d.has("salaries")) d.docs("salaries").map { ir.sabou.payroll.SalaryChange(Codec.date(it.long("from")), Codec.money(it.long("rial")), it.strOr("reason", "")) } else emptyList(),
+        salaryChanges = if (d.has("salaries")) d.docs("salaries").map {
+            ir.sabou.payroll.SalaryChange(Codec.date(it.long("from")), Codec.money(it.long("rial")), it.strOr("reason", ""), ir.sabou.payroll.PayType.valueOf(it.strOr("type", "MONTHLY")))
+        } else emptyList(),
         pastEmployments = if (d.has("past")) d.docs("past").map { ir.sabou.payroll.Employment(it.longOrNull("start")?.let(Codec::date), Codec.date(it.long("end"))) } else emptyList(),
+        payType = ir.sabou.payroll.PayType.valueOf(d.strOr("payType", "MONTHLY")),
+        profile = d.docOrNull("profile")?.let(::profileOf) ?: ir.sabou.payroll.EmployeeProfile(),
+        branchMoves = if (d.has("moves")) d.docs("moves").map { ir.sabou.payroll.BranchMove(Codec.date(it.long("from")), Codec.branchOf(it.str("previous"))) } else emptyList(),
+    )
+    private fun profileOf(d: Doc) = ir.sabou.payroll.EmployeeProfile(
+        d.strOr("phone", ""), d.strOr("address", ""), d.strOr("emergency", ""), d.strOr("father", ""), d.strOr("job", ""), d.strOr("insurance", ""),
+        d.strOr("sheba", ""), d.strOrNull("marital")?.let(ir.sabou.payroll.MaritalStatus::valueOf), d.intOr("children", 0),
+        d.strOrNull("contract")?.let(ir.sabou.payroll.ContractType::valueOf), d.longOrNull("contractEnd")?.let(Codec::date),
+    )
+    private fun profileDoc(p: ir.sabou.payroll.EmployeeProfile) = mapOf(
+        "phone" to p.phone, "address" to p.address, "emergency" to p.emergencyContact, "father" to p.fatherName, "job" to p.jobTitle,
+        "insurance" to p.insuranceNumber, "sheba" to p.sheba, "marital" to p.maritalStatus?.name, "children" to p.children.toLong(),
+        "contract" to p.contractType?.name, "contractEnd" to p.contractEnd?.epochDay,
     )
     override fun employee(id: GlobalId) = doc("SELECT doc FROM employees WHERE id = ?", id.value)?.let(::employeeOf)
     override fun employees(scope: Scope.Branch) = docs("SELECT doc FROM employees WHERE scope = ? ORDER BY rowid", Codec.scope(scope)).map(::employeeOf)
@@ -445,8 +460,10 @@ class SqlPersonnelStore(db: SqlDatabase) : SqlTable(db), PersonnelStore {
                     "salary" to employee.monthlySalary.rial, "active" to employee.isActive,
                     "start" to employee.startDate?.epochDay, "end" to employee.endDate?.epochDay,
                     "birth" to employee.birthDate?.packed(), "number" to employee.personnelNumber.toLong(),
-                    "salaries" to employee.salaryChanges.map { mapOf("from" to it.from.epochDay, "rial" to it.monthlySalary.rial, "reason" to it.reason) },
+                    "salaries" to employee.salaryChanges.map { mapOf("from" to it.from.epochDay, "rial" to it.monthlySalary.rial, "reason" to it.reason, "type" to it.payType.name) },
                     "past" to employee.pastEmployments.map { mapOf("start" to it.start?.epochDay, "end" to it.end.epochDay) },
+                    "payType" to employee.payType.name, "profile" to profileDoc(employee.profile),
+                    "moves" to employee.branchMoves.map { mapOf("from" to it.from.epochDay, "previous" to Codec.scope(it.previous)) },
                 ),
             ),
         ),
@@ -481,12 +498,16 @@ class SqlPayrollStore(db: SqlDatabase) : SqlTable(db), PayrollStore {
         "gross" to p.gross.rial, "insurable" to p.insurableBase.rial, "empIns" to p.employeeInsurance.rial, "erIns" to p.employerInsurance.rial,
         "unemp" to p.unemploymentInsurance.rial, "taxable" to p.taxableIncome.rial, "tax" to p.incomeTax.rial, "net" to p.net.rial,
         "days" to p.payableDays?.toLong(),
+        "lines" to p.lines.map { mapOf("code" to it.code, "title" to it.title, "rial" to it.amount.rial, "kind" to it.kind.name, "ins" to it.insurable, "tax" to it.taxable) },
     )
     private fun slipOf(d: Doc) = Payslip(
         Codec.id(d.str("employee")), Codec.money(d.long("base")), Codec.money(d.long("absence")), Codec.money(d.long("overtime")),
         Codec.money(d.long("gross")), Codec.money(d.long("insurable")), Codec.money(d.long("empIns")), Codec.money(d.long("erIns")),
         Codec.money(d.long("unemp")), Codec.money(d.long("taxable")), Codec.money(d.long("tax")), Codec.money(d.long("net")),
         d.longOrNull("days")?.toInt(),
+        if (d.has("lines")) d.docs("lines").map {
+            ir.sabou.payroll.PayLine(it.str("code"), it.str("title"), Codec.money(it.long("rial")), ir.sabou.payroll.PayLine.Kind.valueOf(it.str("kind")), it.bool("ins"), it.bool("tax"))
+        } else emptyList(),
     )
     private fun runOf(d: Doc) = PayrollRun(
         Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.date(d.long("from")), Codec.date(d.long("to")), d.str("policy"),
@@ -541,6 +562,29 @@ class SqlPayrollStore(db: SqlDatabase) : SqlTable(db), PayrollStore {
                 "id" to remittance.id.value, "scope" to Codec.scope(remittance.scope), "kind" to remittance.kind.name,
                 "amount" to remittance.amount.rial, "date" to remittance.date.epochDay,
             ),
+        ),
+    )
+
+    private fun advanceOf(d: Doc) = ir.sabou.payroll.Advance(
+        Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.id(d.str("employee")), Codec.money(d.long("amount")), Codec.date(d.long("date")),
+        d.int("installments"), d.strOr("note", ""), Codec.id(d.str("treasury")), d.boolOr("reversed", false),
+        if (d.has("repayments")) d.docs("repayments").map {
+            ir.sabou.payroll.AdvanceRepayment(Codec.id(it.str("id")), Codec.money(it.long("amount")), Codec.date(it.long("date")), Codec.id(it.str("treasury")), it.boolOr("reversed", false))
+        } else emptyList(),
+    )
+    override fun advance(id: GlobalId) = doc("SELECT doc FROM salary_advances WHERE id = ?", id.value)?.let(::advanceOf)
+    override fun advances(employeeId: GlobalId) = docs("SELECT doc FROM salary_advances WHERE employee_id = ? ORDER BY rowid", employeeId.value).map(::advanceOf)
+    override fun advancesOf(scope: Scope.Branch) = docs("SELECT doc FROM salary_advances WHERE scope = ? ORDER BY rowid", Codec.scope(scope)).map(::advanceOf)
+    override fun saveAdvance(advance: ir.sabou.payroll.Advance) = upsert(
+        "salary_advances", "id",
+        mapOf(
+            "id" to advance.id.value, "scope" to Codec.scope(advance.scope), "employee_id" to advance.employeeId.value,
+            "doc" to Json.encode(mapOf(
+                "id" to advance.id.value, "scope" to Codec.scope(advance.scope), "employee" to advance.employeeId.value, "amount" to advance.amount.rial,
+                "date" to advance.date.epochDay, "installments" to advance.installments.toLong(), "note" to advance.note, "treasury" to advance.treasuryAccountId.value,
+                "reversed" to advance.reversed,
+                "repayments" to advance.repayments.map { mapOf("id" to it.id.value, "amount" to it.amount.rial, "date" to it.date.epochDay, "treasury" to it.treasuryAccountId.value, "reversed" to it.reversed) },
+            )),
         ),
     )
 }
@@ -736,11 +780,13 @@ class SqlPayrollSettingsStore(db: SqlDatabase) : ir.sabou.payroll.PayrollSetting
             overtimeHourlyRate = Codec.money(d.longOr("overtimeRate", 0)),
             overtimeMinimumMinutes = d.intOr("overtimeMinimum", defaults.overtimeMinimumMinutes),
             lateGraceMinutes = d.intOr("lateGrace", defaults.lateGraceMinutes),
+            clockPhotoRequired = d.boolOr("clockPhoto", defaults.clockPhotoRequired),
         )
     }
     override fun save(settings: ir.sabou.payroll.PayrollSettings) = meta.put(KEY, Json.encode(mapOf(
         "deductBreaks" to settings.deductPlannedBreaks, "overtimeMode" to settings.overtimeMode.name, "overtimeRate" to settings.overtimeHourlyRate.rial,
         "overtimeMinimum" to settings.overtimeMinimumMinutes.toLong(), "lateGrace" to settings.lateGraceMinutes.toLong(),
+        "clockPhoto" to settings.clockPhotoRequired,
     )))
     private companion object { const val KEY = "payroll.settings" }
 }
@@ -750,6 +796,7 @@ class SqlStaffDocumentStore(db: SqlDatabase) : SqlTable(db), ir.sabou.payroll.St
     private fun read(d: Doc) = ir.sabou.payroll.StaffDocument(Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.id(d.str("employee")),
         ir.sabou.payroll.StaffDocument.Kind.valueOf(d.str("kind")), d.strOr("title", ""), d.longOrNull("expires")?.let(Codec::date), d.strOr("note", ""), d.long("at"),
         replaces = d.strOrNull("replaces")?.let(Codec::id), voided = d.boolOr("voided", false), reason = d.strOr("reason", ""))
+    override fun byId(id: GlobalId) = doc("SELECT doc FROM staff_documents WHERE id = ?", id.value)?.let(::read)
     override fun of(employeeId: GlobalId) = docs("SELECT doc FROM staff_documents WHERE employee_id = ? ORDER BY rowid", employeeId.value).map(::read)
     override fun all(scope: Scope.Branch) = docs("SELECT doc FROM staff_documents WHERE scope = ? ORDER BY rowid", Codec.scope(scope)).map(::read)
     override fun save(document: ir.sabou.payroll.StaffDocument) = db.execute(

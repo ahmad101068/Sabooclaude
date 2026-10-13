@@ -37,6 +37,8 @@ data class PayrollSettings(
     val overtimeMinimumMinutes: Int = 0,
     /** Lateness within this many minutes is not reported. */
     val lateGraceMinutes: Int = 10,
+    /** The time clock takes a photo with every punch (against punching for someone else). Off by default. */
+    val clockPhotoRequired: Boolean = false,
 ) : java.io.Serializable {
     fun validate() {
         ensure(overtimeMode != OvertimeMode.FIXED_HOURLY || overtimeHourlyRate.rial > 0) {
