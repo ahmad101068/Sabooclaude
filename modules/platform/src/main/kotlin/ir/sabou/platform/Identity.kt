@@ -98,6 +98,14 @@ object PinHasher {
         return MessageDigest.isEqual(expected, derive(pin, salt, iterations))
     }
 
+    /**
+     * A deterministic digest of [pin] for command fingerprints (audit F10): a retried command with a different PIN
+     * must not pass as the same command. Salted by [context] (the command id) and as slow as a stored PIN hash, so
+     * the kept idempotency record is no easier to guess from than the PIN hash itself.
+     */
+    fun fingerprint(pin: CharArray, context: String): String =
+        b64(derive(pin, MessageDigest.getInstance("SHA-256").digest(("sabou-fp|" + context).toByteArray(Charsets.UTF_8)), ITERATIONS))
+
     private fun derive(pin: CharArray, salt: ByteArray, iterations: Int): ByteArray {
         val spec = PBEKeySpec(pin, salt, iterations, 256)
         try { return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded } finally { spec.clearPassword() }

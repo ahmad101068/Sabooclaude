@@ -40,8 +40,17 @@ class Closing internal constructor(private val core: SabouCore) {
         return a
     }
 
+    /**
+     * The checklist covers every branch, because closing a month locks the whole organization's books. So only a
+     * person who may close months AND sees every branch reads it (audit F02): a branch manager would otherwise learn
+     * other branches' stores, banks and figures from it.
+     */
     fun checklist(year: Int, month: Int): MonthClose {
-        actor(Permission.PERIOD_CLOSE, Permission.LEDGER_VIEW)
+        val a = actor(Permission.PERIOD_CLOSE)
+        val unseen = core.branches.all().filter { !a.canAccess(Scope.Branch(it.id)) }
+        if (unseen.isNotEmpty() || !a.canAccess(Scope.Organization)) {
+            throw DomainException(DomainError.InvalidState("PERIOD", "NEEDS_ALL_BRANCHES"))
+        }
         val from = JalaliCalendar.date(year, month, 1)
         val to = JalaliCalendar.date(year, month, JalaliCalendar.monthLength(year, month))
         val checks = ArrayList<CloseCheck>()
@@ -92,7 +101,8 @@ class Closing internal constructor(private val core: SabouCore) {
         add("PAYROLL", unpaidBranches.isNotEmpty(), CloseCheck.Severity.WARN, "حقوق ماه",
             "حقوق ${unpaidBranches.size} شعبه برای پایان این ماه تأیید نشده است.", "حقوق ماه تأیید شده است.")
         val assetBranches = core.assetStore.all().filter { it.status == ir.sabou.assets.AssetStatus.ACTIVE && it.acquiredOn <= to }.map { it.scope }.toSet()
-        val notDepreciated = assetBranches.filter { b -> core.assetStore.runs().none { it.scope == b && it.through >= to } }
+        // A reversed run no longer counts (audit F08): its depreciation was taken back.
+        val notDepreciated = assetBranches.filter { b -> core.assetStore.runs().none { it.scope == b && !it.reversed && it.through >= to } }
         add("DEPRECIATION", notDepreciated.isNotEmpty(), CloseCheck.Severity.WARN, "استهلاک دارایی‌ها",
             "استهلاک ${notDepreciated.size} شعبه تا پایان ماه ثبت نشده است.", "استهلاک تا پایان ماه ثبت شده است.")
 

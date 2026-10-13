@@ -95,7 +95,7 @@ object BankRecScreens {
                             SecondaryButton(file?.let { "انتخاب دوباره (${it.name})" } ?: "انتخاب فایل", { pick.launch(arrayOf("*/*")) })
                             readError?.let { Banner(it) }
                             file?.let { f ->
-                                val preview by load(session, f) { bankRec.preview(f) }
+                                val preview by load(session, f, account) { bankRec.preview(f, account) }
                                 Loaded(preview) { p ->
                                     p.problems.forEach { Banner(it) }
                                     if (p.lines.isNotEmpty()) {
@@ -103,6 +103,11 @@ object BankRecScreens {
                                         KeyValue("واریز", Fa.rial(p.lines.filter { it.direction == Direction.RECEIPT }.sumOf { it.amount.rial }))
                                         KeyValue("برداشت", Fa.rial(p.lines.filter { it.direction == Direction.PAYMENT }.sumOf { it.amount.rial }))
                                         p.closingBalance?.let { KeyValue("مانده‌ی پایان", Fa.rial(it) + " ریال", strong = true) }
+                                        if (p.alreadyImported > 0) Banner(
+                                            if (p.alreadyImported == p.lines.size) "همه‌ی سطرهای این فایل قبلاً وارد شده است."
+                                            else "${Fa.number(p.alreadyImported.toLong())} سطر این فایل قبلاً (در صورت‌حساب دیگری) وارد شده و کنار گذاشته می‌شود؛ بقیه وارد می‌شود.",
+                                            ChipKind.ACCENT,
+                                        )
                                     }
                                     action.error?.let { Banner(it) }
                                     PrimaryButton("ورود و تطبیق", {

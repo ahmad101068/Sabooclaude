@@ -124,7 +124,7 @@ class SabouCore private constructor(
     internal val treasuryGateway = TreasuryGateway(ledger, treasuryCapability, treasuryAccounts, treasuryMovements, cheques)
     val treasury = TreasuryOperations(bus, treasuryGateway, treasuryCapability, treasuryAccounts)
     internal val bankStatementStore = ir.sabou.persistence.SqlBankStatementStore(db)
-    val bankStatements = ir.sabou.treasury.BankStatementOperations(bus, treasuryAccounts, treasuryMovements, bankStatementStore)
+    val bankStatements = ir.sabou.treasury.BankStatementOperations(bus, treasuryAccounts, treasuryMovements, bankStatementStore, treasury)
     val chequeOps = ir.sabou.treasury.ChequeOperations(bus, treasuryGateway, treasuryCapability)
     val budgets = ir.sabou.ledger.BudgetOperations(bus, accounts, budgetStore)
     internal val shortages = ir.sabou.persistence.SqlShortageStore(db)

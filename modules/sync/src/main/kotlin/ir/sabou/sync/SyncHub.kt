@@ -62,6 +62,7 @@ class SyncHub(
     private val connections = ConcurrentHashMap.newKeySet<Socket>()
     private val sessions = ConcurrentHashMap<String, RemoteSession>()
     private val random = SecureRandom()
+    private val slots = java.util.concurrent.Semaphore(MAX_CONNECTIONS)
 
     private class RemoteSession(val userId: GlobalId, val deviceId: String, @Volatile var lastUse: Long)
 
@@ -97,9 +98,16 @@ class SyncHub(
     private fun acceptLoop(s: ServerSocket) {
         while (!s.isClosed) {
             val socket = try { s.accept() } catch (_: IOException) { break }
+            // Bounded (audit F11): a flood of connections from the network cannot exhaust the phone. Paired phones use
+            // two connections each; anything beyond the limit is closed at once, before any work is done for it.
+            if (!slots.tryAcquire()) { runCatching { socket.close() }; continue }
             connections += socket
-            if (s.isClosed) { runCatching { socket.close() }; break }
-            Thread({ serve(socket) }, "sabou-sync-conn").apply { isDaemon = true }.start()
+            if (s.isClosed) { connections -= socket; slots.release(); runCatching { socket.close() }; break }
+            try {
+                Thread({ try { serve(socket) } finally { slots.release() } }, "sabou-sync-conn").apply { isDaemon = true }.start()
+            } catch (e: Throwable) {
+                connections -= socket; slots.release(); runCatching { socket.close() }
+            }
         }
     }
 
@@ -313,6 +321,8 @@ class SyncHub(
 
     companion object {
         const val DEFAULT_PORT = 47_612
+        /** Connections served at once: a few phones × (requests + replication), and a pairing. */
+        const val MAX_CONNECTIONS = 12
         internal val MAGIC = "SABOUSY1".toByteArray(Charsets.US_ASCII)
         internal const val MODE_PAIR = 1
         internal const val MODE_SESSION = 2
