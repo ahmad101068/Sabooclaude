@@ -57,6 +57,7 @@ import ir.sabou.app.ui.screens.ClosingScreens
 import ir.sabou.app.ui.screens.TaxScreens
 import ir.sabou.app.ui.screens.ShiftScreens
 import ir.sabou.app.ui.screens.StaffDocScreens
+import ir.sabou.app.ui.screens.EmployeeScreens
 import ir.sabou.app.ui.screens.CountPlanScreens
 import ir.sabou.app.ui.screens.PrepScreens
 import ir.sabou.app.ui.screens.FinanceScreens
