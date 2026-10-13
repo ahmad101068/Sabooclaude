@@ -32,7 +32,14 @@ data class LaborDay(
 }
 
 /** One person's day: planned against clocked, their punches, and whether the day was typed by hand. */
-data class TimeRow(val employee: Employee, val time: DayTime, val punches: List<ir.sabou.payroll.Punch> = emptyList(), val manual: Boolean = false)
+data class TimeRow(
+    val employee: Employee,
+    val time: DayTime,
+    val punches: List<ir.sabou.payroll.Punch> = emptyList(),
+    val manual: Boolean = false,
+    /** Photos taken by the clock, per punch. */
+    val photos: Map<GlobalId, List<ir.sabou.platform.Attachment>> = emptyMap(),
+)
 
 /** A staff document with its files (those of every earlier version it corrected too) and how many times it was corrected. */
 data class StaffDocumentView(val document: ir.sabou.payroll.StaffDocument, val files: List<ir.sabou.platform.Attachment>, val corrections: Int = 0)
@@ -77,9 +84,10 @@ class Labor internal constructor(private val core: SabouCore) {
         val punches = core.shiftStore.punches(branch, date, date).groupBy { it.employeeId }
         return core.shifts.day(branch, date).mapNotNull { t ->
             employees[t.employeeId]?.let {
-                TimeRow(it.copy(monthlySalary = Money.ZERO, salaryChanges = emptyList(), nationalId = ""), t,
-                    ir.sabou.payroll.Punch.effective(punches[it.id].orEmpty()),
-                    core.personnel.attendanceOn(it.id, date)?.source == ir.sabou.payroll.AttendanceRecord.Source.MANUAL)
+                val effective = ir.sabou.payroll.Punch.effective(punches[it.id].orEmpty())
+                TimeRow(it.copy(monthlySalary = Money.ZERO, salaryChanges = emptyList(), nationalId = "", profile = ir.sabou.payroll.EmployeeProfile()), t, effective,
+                    core.personnel.attendanceOn(it.id, date)?.source == ir.sabou.payroll.AttendanceRecord.Source.MANUAL,
+                    effective.associate { p -> p.id to core.attachments.of(ir.sabou.payroll.ShiftOperations.PHOTO, p.id) }.filterValues { v -> v.isNotEmpty() })
             }
         }.sortedBy { it.employee.name }
     }
@@ -108,6 +116,20 @@ class Labor internal constructor(private val core: SabouCore) {
         return employee
     }
 
+    /** The person's latest photo, if any. */
+    fun photo(employeeId: GlobalId): ir.sabou.platform.Attachment? {
+        employee(employeeId)
+        return core.attachments.of(ir.sabou.payroll.StaffDocumentOperations.PHOTO, employeeId).lastOrNull()
+    }
+
+    /** Advances and loans of a person with what is still owed, newest first. */
+    fun advances(employeeId: GlobalId): List<ir.sabou.payroll.AdvanceView> {
+        val a = actor(Permission.PAYROLL_PAY, Permission.PERSONNEL_MANAGE, Permission.PERSONNEL_VIEW)
+        val employee = core.personnel.employee(employeeId) ?: throw DomainException(DomainError.NotFound("EMPLOYEE"))
+        a.require(employee.scope)
+        return core.payrollStore.advances(employeeId).sortedByDescending { it.date }.map { core.payroll.advanceView(it) }
+    }
+
     /** An employee's documents in use (renewed ones included as history), newest first, with their files. */
     fun documents(employeeId: GlobalId): List<StaffDocumentView> {
         val a = actor(Permission.PERSONNEL_MANAGE, Permission.PERSONNEL_VIEW)
@@ -124,9 +146,9 @@ class Labor internal constructor(private val core: SabouCore) {
     /** Missing health cards / contracts and documents expired or expiring within 30 days, for the branch's staff. */
     fun documentIssues(branch: Scope.Branch, today: BusinessDate): List<DocumentIssueView> {
         actor(Permission.PERSONNEL_MANAGE, Permission.PERSONNEL_VIEW).require(branch)
-        val docs = core.staffDocumentStore.all(branch)
+        // A person's documents follow them to another branch.
         return core.personnel.employees(branch).flatMap { e ->
-            ir.sabou.payroll.StaffDocumentRules.issues(e, docs, today).map { DocumentIssueView(e, it) }
+            ir.sabou.payroll.StaffDocumentRules.issues(e, core.staffDocumentStore.of(e.id), today).map { DocumentIssueView(e, it) }
         }.sortedWith(compareBy({ !it.issue.expired && !it.issue.missing }, { it.issue.daysLeft ?: Long.MIN_VALUE }))
     }
 }

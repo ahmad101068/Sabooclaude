@@ -177,9 +177,12 @@ data class ClockPunch(
     val pin: String,
     val date: BusinessDate,
     val minute: Int,
+    /** A photo taken by the phone at the moment (required when the restaurant turns it on). */
+    val photo: ir.sabou.platform.AttachmentInput? = null,
 ) : Command {
     override val requiredPermission = Permission.TIME_CLOCK
-    override fun fingerprint() = "$scope|$employeeId|${date.epochDay}|$minute|" + ir.sabou.platform.PinHasher.fingerprint(pin.toCharArray(), commandId.value)
+    override fun fingerprint() = "$scope|$employeeId|${date.epochDay}|$minute|" + ir.sabou.platform.PinHasher.fingerprint(pin.toCharArray(), commandId.value) +
+        "|" + (photo?.fingerprint() ?: "")
 }
 
 /**
@@ -221,6 +224,7 @@ class ShiftOperations(
     private val payroll: PayrollOperations,
     private val settings: () -> PayrollSettings = { PayrollSettings() },
     private val payrollRuns: (Scope.Branch) -> List<PayrollRun> = { emptyList() },
+    private val attachments: ir.sabou.platform.AttachmentStore? = null,
 ) {
     fun save(c: SaveShift): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
         val employee = employee(cmd.employeeId, cmd.scope)
@@ -295,13 +299,16 @@ class ShiftOperations(
             return@execute employee.id
         }
         if (failed.count > 0) shifts.savePinFailures(employee.id, PinFailures(0, 0L))
+        ensure(cmd.photo != null || !settings().clockPhotoRequired) { DomainError.InvalidInput("photo", "عکس لحظه‌ی ساعت‌زنی لازم است.") }
+        ensure(cmd.photo == null || cmd.photo.mime.startsWith("image/")) { DomainError.InvalidInput("photo", "عکس لازم است.") }
         val (day, minute) = workDay(cmd.scope, employee.id, cmd.date, cmd.minute)
         val today = Punch.effective(shifts.punches(cmd.scope, day, day).filter { it.employeeId == employee.id })
         ensure(today.none { kotlin.math.abs(it.minute - minute) < 1 }) { DomainError.InvalidState("PUNCH", "DUPLICATE") }
         val kind = if (today.lastOrNull()?.kind == Punch.Kind.IN) Punch.Kind.OUT else Punch.Kind.IN
         val punch = Punch(GlobalId.new(), cmd.scope, employee.id, day, minute, kind, ctx.nowEpochMillis)
         shifts.savePunch(punch)
-        ctx.audit(AuditDraft("CLOCK_${kind.name}", "EMPLOYEE", employee.id.value, "day=${day.epochDay};minute=$minute"))
+        cmd.photo?.let { photo -> attachments?.let { ir.sabou.platform.Attachments.attach(ctx, it, PHOTO, punch.id, listOf(photo)) } }
+        ctx.audit(AuditDraft("CLOCK_${kind.name}", "EMPLOYEE", employee.id.value, "day=${day.epochDay};minute=$minute" + if (cmd.photo != null) ";photo" else ""))
         punch.id
     }
 
@@ -392,6 +399,7 @@ class ShiftOperations(
         const val MAX_FAILURES = 5
         const val LOCK_MILLIS = 5 * 60_000L
         const val MAX_LOCK_MILLIS = 24 * 60 * 60_000L
+        const val PHOTO = "PUNCH_PHOTO"
         const val DEFAULT_MONTH_MINUTES = 192 * 60
     }
 }

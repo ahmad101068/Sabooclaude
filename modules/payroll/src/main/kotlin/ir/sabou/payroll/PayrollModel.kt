@@ -10,6 +10,7 @@ data class Employee(
     val name: String,
     val nationalId: String,
     val scope: Scope.Branch,
+    /** The first pay rate: a month's salary, or a day's or an hour's wage for [payType] DAILY / HOURLY. */
     val monthlySalary: Money,
     val isActive: Boolean = true,
     /** First day of work; null = employed before any period the app knows of. */
@@ -23,13 +24,24 @@ data class Employee(
     val salaryChanges: List<SalaryChange> = emptyList(),
     /** Earlier employments, for a person who left and came back. */
     val pastEmployments: List<Employment> = emptyList(),
+    /** How the first rate is paid; a [SalaryChange] may change it from its date. */
+    val payType: PayType = PayType.MONTHLY,
+    val profile: EmployeeProfile = EmployeeProfile(),
+    /** Branches this person worked in before [scope], each until the day before the move. */
+    val branchMoves: List<BranchMove> = emptyList(),
 ) {
+    /** How the person is paid on [date]. */
+    fun payTypeOn(date: BusinessDate): PayType = salaryChanges.lastOrNull { it.from <= date }?.payType ?: payType
+
     /** Days of [from]..[to] on which this person was employed (0 when not employed at all). */
     fun employedDays(from: BusinessDate, to: BusinessDate): Int {
         val past = pastEmployments.sumOf { overlap(from, to, it.start, it.end) }
         if (!isActive && endDate == null) return past
         return past + overlap(from, to, startDate, endDate)
     }
+
+    /** The branch this person worked in on [date]. */
+    fun branchOn(date: BusinessDate): Scope.Branch = branchMoves.sortedBy { it.from }.firstOrNull { date < it.from }?.previous ?: scope
 
     /** Whether [date] is a working day of an employment of this person. */
     fun employedOn(date: BusinessDate) = employedDays(date, date) == 1
@@ -58,8 +70,36 @@ data class Employee(
     }
 }
 
-/** A new monthly salary from [from] (yearly raise, promotion), with why. */
-data class SalaryChange(val from: BusinessDate, val monthlySalary: Money, val reason: String) : java.io.Serializable
+/** A new pay rate from [from] (yearly raise, promotion, a change to daily or hourly pay), with why. */
+data class SalaryChange(val from: BusinessDate, val monthlySalary: Money, val reason: String, val payType: PayType = PayType.MONTHLY) : java.io.Serializable
+
+/** Monthly salary, a day's wage for each day worked, or an hourly wage for the hours worked. */
+enum class PayType { MONTHLY, DAILY, HOURLY }
+
+enum class MaritalStatus { SINGLE, MARRIED }
+
+/** دائم، موقت، آزمایشی، پاره‌وقت. */
+enum class ContractType { PERMANENT, FIXED_TERM, TRIAL, PART_TIME }
+
+/** The person's file beyond what pay needs. All optional. */
+data class EmployeeProfile(
+    val phone: String = "",
+    val address: String = "",
+    /** Who to call in an emergency (name and number). */
+    val emergencyContact: String = "",
+    val fatherName: String = "",
+    val jobTitle: String = "",
+    val insuranceNumber: String = "",
+    /** For paying salaries by bank transfer; checked (IR + 24 digits). */
+    val sheba: String = "",
+    val maritalStatus: MaritalStatus? = null,
+    val children: Int = 0,
+    val contractType: ContractType? = null,
+    val contractEnd: BusinessDate? = null,
+) : java.io.Serializable
+
+/** This person worked in [previous] until the day before [from]. */
+data class BranchMove(val from: BusinessDate, val previous: Scope.Branch) : java.io.Serializable
 
 /** A finished employment of someone who later came back. */
 data class Employment(val start: BusinessDate?, val end: BusinessDate) : java.io.Serializable
@@ -92,7 +132,27 @@ data class Payslip(
     val net: Money,
     /** Paid days when the person worked only part of the month (hired or left during it); null = whole month. */
     val payableDays: Int? = null,
-)
+    /** Everything else on the slip: allowances and bonuses (earnings), advance installments and other deductions. */
+    val lines: List<PayLine> = emptyList(),
+) {
+    fun total(kind: PayLine.Kind): Money = Money.sum(lines.filter { it.kind == kind }.map { it.amount })
+}
+
+/**
+ * A payslip line beyond the base salary, absence and overtime. An earning adds to gross pay and, as flagged, to the
+ * insurance base and taxable income; an advance installment pays back an advance; a deduction lowers net pay.
+ * Deductions never take net pay below zero (what does not fit is left for next month).
+ */
+data class PayLine(
+    val code: String,
+    val title: String,
+    val amount: Money,
+    val kind: Kind,
+    val insurable: Boolean = false,
+    val taxable: Boolean = false,
+) : java.io.Serializable {
+    enum class Kind { EARNING, ADVANCE, DEDUCTION }
+}
 
 enum class RunStatus { DRAFT, APPROVED, REVERSED }
 
@@ -143,4 +203,8 @@ interface PayrollStore {
     fun savePayment(payment: SalaryPayment)
     fun remittances(scope: Scope.Branch, kind: LiabilityKind): List<Remittance>
     fun saveRemittance(remittance: Remittance)
+    fun advance(id: GlobalId): Advance?
+    fun advances(employeeId: GlobalId): List<Advance>
+    fun advancesOf(scope: Scope.Branch): List<Advance>
+    fun saveAdvance(advance: Advance)
 }

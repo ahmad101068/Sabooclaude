@@ -291,6 +291,14 @@ object Schema {
                 "ALTER TABLE clock_pins ADD COLUMN locked_until INTEGER NOT NULL DEFAULT 0",
             ),
         ),
+        Migration(
+            21,
+            listOf(
+                // Advances and loans to staff, paid back from salary (ADR-0043).
+                "CREATE TABLE salary_advances (id TEXT PRIMARY KEY, scope TEXT NOT NULL, employee_id TEXT NOT NULL REFERENCES employees(id), doc TEXT NOT NULL)",
+                "CREATE INDEX salary_advances_employee ON salary_advances(employee_id)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

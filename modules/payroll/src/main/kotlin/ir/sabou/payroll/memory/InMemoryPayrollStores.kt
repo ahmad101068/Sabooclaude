@@ -44,11 +44,18 @@ class InMemoryPayrollStore : PayrollStore, Transactional {
     override fun savePayment(payment: SalaryPayment) { payments[payment.id] = payment }
     override fun remittances(scope: Scope.Branch, kind: LiabilityKind) = remittances.filter { it.scope == scope && it.kind == kind }
     override fun saveRemittance(remittance: Remittance) { remittances += remittance }
-    override fun snapshot(): Any = Triple(LinkedHashMap(runs), LinkedHashMap(payments), remittances.toList())
+    private val advances = LinkedHashMap<GlobalId, ir.sabou.payroll.Advance>()
+    override fun advance(id: GlobalId) = advances[id]
+    override fun advances(employeeId: GlobalId) = advances.values.filter { it.employeeId == employeeId }
+    override fun advancesOf(scope: Scope.Branch) = advances.values.filter { it.scope == scope }
+    override fun saveAdvance(advance: ir.sabou.payroll.Advance) { advances[advance.id] = advance }
+    override fun snapshot(): Any = listOf(LinkedHashMap(runs), LinkedHashMap(payments), remittances.toList(), LinkedHashMap(advances))
     @Suppress("UNCHECKED_CAST")
     override fun restore(snapshot: Any) {
-        val (r, p, m) = snapshot as Triple<Map<GlobalId, PayrollRun>, Map<GlobalId, SalaryPayment>, List<Remittance>>
-        runs.clear(); runs.putAll(r); payments.clear(); payments.putAll(p); remittances.clear(); remittances.addAll(m)
+        val (r, p, m, a) = snapshot as List<Any>
+        runs.clear(); runs.putAll(r as Map<GlobalId, PayrollRun>); payments.clear(); payments.putAll(p as Map<GlobalId, SalaryPayment>)
+        remittances.clear(); remittances.addAll(m as List<Remittance>)
+        advances.clear(); advances.putAll(a as Map<GlobalId, ir.sabou.payroll.Advance>)
     }
 }
 
@@ -82,6 +89,7 @@ class InMemoryShiftStore : ir.sabou.payroll.ShiftStore {
 
 class InMemoryStaffDocumentStore : ir.sabou.payroll.StaffDocumentStore {
     private val rows = ArrayList<ir.sabou.payroll.StaffDocument>()
+    override fun byId(id: GlobalId) = rows.firstOrNull { it.id == id }
     override fun of(employeeId: GlobalId) = rows.filter { it.employeeId == employeeId }
     override fun all(scope: ir.sabou.kernel.Scope.Branch) = rows.filter { it.scope == scope }
     override fun save(document: ir.sabou.payroll.StaffDocument) { rows += document }

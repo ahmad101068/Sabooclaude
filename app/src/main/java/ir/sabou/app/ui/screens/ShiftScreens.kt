@@ -161,6 +161,7 @@ object ShiftScreens {
         var pin by rememberSaveable { mutableStateOf("") }
         var done by rememberSaveable { mutableStateOf<String?>(null) }
         val action = rememberAction()
+        val settings by load(session) { payrollSettings.current() }
         Column(Modifier.fillMaxSize()) {
             Header("ساعت‌زنی", Fa.dayTitle(session.today), onBack = nav.back)
             WithBranch { branch ->
@@ -187,14 +188,27 @@ object ShiftScreens {
                                 Text("•".repeat(pin.length).ifEmpty { "رمز خود را بزنید" }, style = SabouType.section, color = Sabou.colors.ink)
                                 PinPad({ if (pin.length < 6) pin += it }, { pin = pin.dropLast(1) })
                                 action.error?.let { Banner(it) }
-                                PrimaryButton(if (inside) "ثبت خروج" else "ثبت ورود", {
+                                fun punch(photo: ir.sabou.platform.AttachmentInput?) {
                                     val now = java.time.LocalTime.now()
                                     val minute = now.hour * 60 + now.minute
-                                    action.run({ shifts.punch(ClockPunch(GlobalId.new(), branch, selected.first, pin, session.today, minute)) }) {
+                                    action.run({ shifts.punch(ClockPunch(GlobalId.new(), branch, selected.first, pin, session.today, minute, photo)) }) {
                                         done = "${selected.second}: ${if (inside) "خروج" else "ورود"} ساعت ${clock(minute)} ثبت شد."
                                         who = null; pin = ""
                                     }
-                                }, enabled = pin.length >= 4 && !action.busy, busy = action.busy)
+                                }
+                                // When the restaurant asks for it, the phone takes a photo at the moment of the punch.
+                                val camera = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.TakePicturePreview()) { bitmap ->
+                                    bitmap?.let { b ->
+                                        val out = java.io.ByteArrayOutputStream()
+                                        b.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
+                                        punch(ir.sabou.platform.AttachmentInput("clock.jpg", "image/jpeg", out.toByteArray()))
+                                    }
+                                }
+                                val photoRequired = settings.orNull()?.clockPhotoRequired == true
+                                if (photoRequired) Text("با زدن دکمه دوربین باز می‌شود؛ یک عکس از خودتان بگیرید.", style = SabouType.caption, color = Sabou.colors.muted)
+                                PrimaryButton(if (inside) "ثبت خروج" else "ثبت ورود", {
+                                    if (photoRequired) camera.launch(null) else punch(null)
+                                }, enabled = pin.length >= 4 && !action.busy && settings.orNull() != null, busy = action.busy)
                                 SecondaryButton("انصراف", { who = null; pin = "" })
                             }
                         }
@@ -260,6 +274,7 @@ object ShiftScreens {
                                             (if (p.manualBy != null) " · دستی: ${p.reason}" else ""), style = SabouType.caption, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
                                         if (canFix && fixing == r.employee.id) VoidLink(branch, date, p)
                                     }
+                                    r.photos[p.id]?.let { ir.sabou.app.ui.AttachmentList(it) }
                                 }
                                 if (canFix) {
                                     if (fixing == r.employee.id) {

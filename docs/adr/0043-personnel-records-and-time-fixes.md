@@ -26,3 +26,22 @@ typed by hand; wrong clock PINs were forgotten when the app restarted.
   writes are kept and the command still fails (nothing is recorded for idempotency).
 - **Payroll settings** (owner): deduct planned breaks (off by default), overtime pricing (statutory / fixed per hour /
   none), minimum daily overtime, lateness grace.
+
+## Stage 2 — the employee file, advances, pay types, moves, clock photos
+- **File** — `EmployeeProfile`: phone, address, emergency contact, father's name, job title, insurance number, Sheba
+  (checked, ISO 13616), marital status, children, contract type and end; a photo (`EMPLOYEE_PHOTO` attachment). The
+  audit names the fields changed, not their values.
+- **Advances and loans** — `GiveAdvance` pays from a cash or bank account into «مساعده پرسنل» (1401); each payslip
+  takes one installment (`PayLine.Kind.ADVANCE`, an advance in one), as far as net pay allows; what is still owed in the
+  last month of work is taken whole. Cash repayment (`RepayAdvance`) and cancelling a mistake before anything was paid
+  back (`ReverseAdvance`). Approval credits 1401 with the installments. Schema 21: `salary_advances`.
+- **Payslip lines** — `Payslip.lines`: earnings (with insurable / taxable flags), advance installments, deductions;
+  deductions never take net below zero.
+- **Pay types** — monthly, daily (a day's wage for each day with work) and hourly (for the minutes worked); a salary
+  change may change the type from its date. Overtime and absence are priced on a month-equivalent rate; absence only
+  reduces monthly pay.
+- **Moving branches** — `TransferEmployee` from the day after the old branch's last approved month (or before the
+  person started), with no later shifts, attendance or draft run there. Each branch pays only its days
+  (`Employee.branchOn`); documents follow the person.
+- **Clock photos** — an option (off by default): the clock takes a photo with each punch (`PUNCH_PHOTO`), shown beside
+  it on the day's time.
