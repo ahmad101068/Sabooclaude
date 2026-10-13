@@ -232,7 +232,7 @@ object EmployeeScreens {
         val pay = session.can(Permission.PAYROLL_PAY)
         var changed by rememberSaveable { mutableStateOf(0) }
         val data by load(session, e.id, changed) { labor.advances(e.id) }
-        val accounts by load(session, e.scope, pay) { if (pay) overview.payroll(e.scope).accounts else emptyList() }
+        val accounts by load(session, e.scope, pay) { if (pay) overview.paymentAccounts(e.scope) else emptyList() }
         val list = data.orNull().orEmpty()
         if (list.isEmpty()) Text("مساعده یا وامی ثبت نشده است.", style = SabouType.body, color = Sabou.colors.muted)
         list.forEach { v ->
