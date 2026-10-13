@@ -299,6 +299,17 @@ object Schema {
                 "CREATE INDEX salary_advances_employee ON salary_advances(employee_id)",
             ),
         ),
+        Migration(
+            22,
+            listOf(
+                // Pay elements, one-off payslip lines (bonuses, deductions) and leave (ADR-0043).
+                "CREATE TABLE pay_elements (id TEXT PRIMARY KEY, doc TEXT NOT NULL)",
+                "CREATE TABLE pay_adjustments (id TEXT PRIMARY KEY, scope TEXT NOT NULL, period INTEGER NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX pay_adjustments_period ON pay_adjustments(scope, period)",
+                "CREATE TABLE leaves (id TEXT PRIMARY KEY, employee_id TEXT NOT NULL REFERENCES employees(id), date INTEGER NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX leaves_employee ON leaves(employee_id, date)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

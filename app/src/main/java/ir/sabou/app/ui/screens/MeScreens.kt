@@ -123,7 +123,8 @@ object MeScreens {
         )
         Group.RULES -> listOfNotNull(
             Entry(R.drawable.ic_payroll, "پارامترهای قانونی حقوق", "بیمه و مالیات هر سال", Route.Policies).takeIf { session.can(Permission.PAYROLL_APPROVE) },
-            Entry(R.drawable.ic_clock, "تنظیمات حقوق و کارکرد", "اضافه‌کار، استراحت، تأخیر", Route.PayrollSettings).takeIf { session.can(Permission.PAYROLL_APPROVE) },
+            Entry(R.drawable.ic_clock, "تنظیمات حقوق و کارکرد", "اضافه‌کار، شب‌کاری، مرخصی، عیدی، سنوات", Route.PayrollSettings).takeIf { session.can(Permission.PAYROLL_APPROVE) },
+            Entry(R.drawable.ic_payroll, "عوامل حقوقی", "مسکن، بن، حق اولاد، پایه سنوات، کسور ماهانه", Route.PayElements).takeIf { session.can(Permission.PAYROLL_APPROVE) },
             Entry(R.drawable.ic_check, "قانون‌های تأیید فاکتور", "چه فاکتوری پیش از پرداخت چند تأیید بخواهد", Route.ApprovalRules).takeIf { session.can(Permission.APPROVAL_RULES) },
             Entry(R.drawable.ic_finance, "اطلاعات مالیاتی", "شناسه‌ها و نرخ ارزش افزوده؛ آمادگی سامانه‌ی مودیان", Route.TaxSettings).takeIf { session.can(Permission.TAX_SETTINGS) },
             Entry(R.drawable.ic_finance, "بودجه", "مبلغ ماهانه‌ی هر حساب درآمد و هزینه", Route.Budget).takeIf { session.can(Permission.BUDGET_MANAGE) },

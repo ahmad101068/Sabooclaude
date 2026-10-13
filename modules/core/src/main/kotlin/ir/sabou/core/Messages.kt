@@ -54,6 +54,8 @@ object Messages {
         "EMPLOYEE:STILL_EMPLOYED" to "همکاری این کارمند تمام نشده است.",
         "SALARY:IN_APPROVED_PERIOD" to "حقوق ماهی که این تاریخ در آن است تأیید شده است؛ تغییر حقوق را از بعد از آخرین ماه تأییدشده بگذارید.",
         "PUNCH:ALREADY_VOIDED" to "این ساعت‌زنی قبلاً لغو شده است.",
+        "LEAVE:OVERLAP" to "برای یکی از این روزها مرخصی ثبت شده است.",
+        "LEAVE:CANCELLED" to "این مرخصی قبلاً لغو شده است.",
         "ADVANCE:AMOUNT_EXCEEDS_OUTSTANDING" to "مبلغ از مانده‌ی بدهی این مساعده بیشتر است.",
         "ADVANCE:ALREADY_REVERSED" to "این مساعده قبلاً لغو شده است.",
         "ADVANCE:PARTLY_REPAID" to "بخشی از این مساعده پس داده شده (از حقوق یا نقدی)؛ دیگر قابل لغو نیست.",
@@ -168,6 +170,9 @@ object Messages {
         } else if (error.entity == "CLOCK_PIN" && error.state.startsWith("LOCKED:")) {
             val seconds = error.state.substringAfter(':').toLongOrNull() ?: 0
             "به دلیل رمزهای اشتباه، ساعت‌زنی این نفر ${waitText(seconds)} قفل است."
+        } else if (error.entity == "LEAVE" && error.state.startsWith("NOT_ENOUGH:")) {
+            val minutes = error.state.substringAfter(':').toLongOrNull() ?: 0
+            "مانده‌ی مرخصی استحقاقی کافی نیست؛ مانده: ${Fa.number(minutes / 60)} ساعت و ${Fa.number(minutes % 60)} دقیقه."
         } else states["${error.entity}:${error.state.substringBefore(':')}"] ?: error.userMessage
         else -> error.userMessage
     }

@@ -39,8 +39,46 @@ data class PayrollSettings(
     val lateGraceMinutes: Int = 10,
     /** The time clock takes a photo with every punch (against punching for someone else). Off by default. */
     val clockPhotoRequired: Boolean = false,
+
+    // Premiums on top of the hourly rate (basis points; 0 = not paid). By law: night 35 %, Fridays and holidays 40 %.
+    val nightPremiumBp: Int = 0,
+    val nightStartMinute: Int = 22 * 60,
+    val nightEndMinute: Int = 6 * 60,
+    val holidayPremiumBp: Int = 0,
+
+    // Leave
+    val leaveDaysPerYear: Int = 26,
+    /** One day of leave, in minutes (44 hours over 6 days = 7:20). */
+    val workdayMinutes: Int = 440,
+    /** Unused annual leave carried into the next year, at most. */
+    val leaveCarryDays: Int = 9,
+    /** Unused annual leave is paid in the last month of work. */
+    val leavePayoutOnExit: Boolean = true,
+
+    // Bonuses: what a new bonus line is by default.
+    val bonusInsurable: Boolean = true,
+    val bonusTaxable: Boolean = true,
+
+    // Eidi (عیدی و پاداش سالانه): [eidiDays] days of salary for a full year, paid in [eidiMonth] (or on leaving).
+    val eidiEnabled: Boolean = false,
+    val eidiDays: Int = 60,
+    /** The legal ceiling (three times the minimum wage, entered by the owner each year); zero = none. */
+    val eidiCap: Money = Money.ZERO,
+    val eidiMonth: Int = 12,
+    /** The part of eidi free of income tax (entered each year); the rest is taxable. */
+    val eidiTaxExempt: Money = Money.ZERO,
+
+    // Severance (سنوات): [sanavatDays] days of the last salary per year of service, paid on leaving (or yearly).
+    val sanavatEnabled: Boolean = false,
+    val sanavatDays: Int = 30,
+    val sanavatYearly: Boolean = false,
 ) : java.io.Serializable {
     fun validate() {
+        ensure(listOf(nightPremiumBp, holidayPremiumBp).all { it in 0..20_000 } && nightStartMinute in 0 until 1_440 && nightEndMinute in 0 until 1_440) {
+            DomainError.InvalidInput("premium", "درصد یا ساعت معتبر نیست.")
+        }
+        ensure(leaveDaysPerYear in 0..60 && workdayMinutes in 60..720 && leaveCarryDays in 0..60) { DomainError.InvalidInput("leave", "مقدارهای مرخصی معتبر نیستند.") }
+        ensure(eidiDays in 0..365 && eidiMonth in 1..12 && sanavatDays in 0..365) { DomainError.InvalidInput("eidi", "مقدارهای عیدی یا سنوات معتبر نیستند.") }
         ensure(overtimeMode != OvertimeMode.FIXED_HOURLY || overtimeHourlyRate.rial > 0) {
             DomainError.InvalidInput("overtimeHourlyRate", "مبلغ هر ساعت اضافه‌کار را وارد کنید.")
         }

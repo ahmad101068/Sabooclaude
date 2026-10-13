@@ -45,3 +45,23 @@ typed by hand; wrong clock PINs were forgotten when the app restarted.
   (`Employee.branchOn`); documents follow the person.
 - **Clock photos** — an option (off by default): the clock takes a photo with each punch (`PUNCH_PHOTO`), shown beside
   it on the day's time.
+
+## Stage 3 — pay elements, bonuses, leave, premiums, eidi, severance, statutory sheets
+- **Pay elements** (`pay_elements`, schema 22; owner): earnings or deductions — a fixed monthly amount, per child, per
+  year of service, or a share of the base salary — each insurable / taxable as set, for everyone or chosen people,
+  from a date. Prorated like the salary in a partial month. No legal amount is built in: the owner enters each year's.
+- **One-off lines** (`pay_adjustments`): a bonus, commission or fine for one month, a fixed amount or a share of each
+  person's salary, for one person or everyone; insurable / taxable per line (defaults in the settings). Not after the
+  month is approved.
+- **Leave** (`leaves`): annual, sick and unpaid, by the day (Fridays and holidays skipped) or by the hour. Leave covers
+  the day's absence; sick and unpaid leave are deducted like absence. Annual leave is earned per employed day
+  (26 days a year by default), what is left carries over up to 9 days; it cannot be overdrawn.
+- **Premiums** (settings, off by default): night work (minutes clocked inside the night hours, from the punches) and
+  Friday / holiday work (holidays = special days of kind HOLIDAY), as a percentage of the hourly rate.
+- **Eidi** (option): N days of salary for a full year, capped, prorated by the days worked in the year, paid in the
+  chosen month or in the last month of work; the tax-free part entered each year. **Severance** (option): N days of
+  the last salary per year of service on leaving (or yearly with eidi). **Unused leave** is paid on leaving (option).
+  These defaults (eidi not insurable; severance neither insurable nor taxable; leave payout both) need professional
+  review.
+- **Statutory sheets** — the payroll export adds preparation sheets for the insurance list and the salary tax list.
+  They are not the portals' upload files.

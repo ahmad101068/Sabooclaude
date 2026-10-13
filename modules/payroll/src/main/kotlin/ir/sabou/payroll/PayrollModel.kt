@@ -113,6 +113,8 @@ data class AttendanceRecord(
     val absentMinutes: Int,
     /** Typed by a person, or taken from the time clock; confirming a day keeps typed records unless told otherwise. */
     val source: Source = Source.MANUAL,
+    /** Of the time worked, how much fell in the night hours (from the clock). */
+    val nightMinutes: Int = 0,
 ) {
     enum class Source { MANUAL, CLOCK }
 }

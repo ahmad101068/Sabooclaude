@@ -719,6 +719,79 @@ object OperationsScreens {
         }
     }
 
+    /** One-off lines of the month: bonuses, commissions, fines (before the month is approved). */
+    @Composable
+    private fun PayAdjustments(branch: Scope.Branch, periodFrom: BusinessDate) {
+        val session = LocalSession.current
+        var changed by rememberSaveable { mutableStateOf(0) }
+        val data by load(session, branch, periodFrom, changed) { labor.adjustments(branch, periodFrom) to overview.employees(branch).filter { it.endDate == null || it.endDate!! >= periodFrom } }
+        val settings by load(session) { payrollSettings.current() }
+        var adding by rememberSaveable { mutableStateOf(false) }
+        val action = rememberAction()
+        FormCard("پاداش و کسورات این ماه") {
+            Loaded(data) { (list, people) ->
+                if (list.isEmpty()) Text("پاداش یا کسری ثبت نشده است.", style = SabouType.body, color = Sabou.colors.muted)
+                list.forEach { (a, name) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("$name · ${a.title} · " + (if (a.kind == ir.sabou.payroll.PayLine.Kind.EARNING) "" else "−") + Fa.rial(a.amount) +
+                            (if (a.insurable) " · مشمول بیمه" else "") + (if (a.taxable) " · مشمول مالیات" else ""),
+                            style = SabouType.caption, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                        Text("حذف", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable(enabled = !action.busy) {
+                            action.run({ payroll.removeAdjustment(ir.sabou.payroll.RemovePayAdjustment(GlobalId.new(), branch, a.id)) }) { changed++ }
+                        }.padding(6.dp))
+                    }
+                }
+                action.error?.let { Banner(it) }
+                val defaults = settings.orNull()
+                if (adding && defaults != null) AdjustmentForm(branch, periodFrom, people, defaults) { adding = false; changed++ }
+                else Text("+ پاداش یا کسر", style = SabouType.label, color = Sabou.colors.primary, modifier = Modifier.clickable { adding = true }.padding(vertical = 6.dp))
+                Text("بعد از ثبت، حقوق این ماه را دوباره محاسبه کنید.", style = SabouType.caption, color = Sabou.colors.muted)
+            }
+        }
+    }
+
+    @Composable
+    private fun AdjustmentForm(branch: Scope.Branch, periodFrom: BusinessDate, people: List<ir.sabou.payroll.Employee>, defaults: ir.sabou.payroll.PayrollSettings, onDone: () -> Unit) {
+        var who by rememberSaveable { mutableStateOf<GlobalId?>(null) }      // null = everyone
+        var title by rememberSaveable { mutableStateOf("پاداش") }
+        var kind by rememberSaveable { mutableStateOf(ir.sabou.payroll.PayLine.Kind.EARNING) }
+        var byPercent by rememberSaveable { mutableStateOf(false) }
+        var amount by rememberSaveable { mutableStateOf<Money?>(null) }
+        var percent by rememberSaveable { mutableStateOf("") }
+        var insurable by rememberSaveable { mutableStateOf(defaults.bonusInsurable) }
+        var taxable by rememberSaveable { mutableStateOf(defaults.bonusTaxable) }
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
+        val action = rememberAction()
+        val pct = Fa.parseQuantity(percent)?.let { (it.micros / 10_000).toInt() }   // percent → basis points
+        Picker("برای", listOf(Choice<GlobalId?>(null, "همه‌ی کارکنان")) + people.map { Choice<GlobalId?>(it.id, it.name) }, who, { who = it })
+        Picker("نوع", listOf(Choice(ir.sabou.payroll.PayLine.Kind.EARNING, "پاداش / مزایا"), Choice(ir.sabou.payroll.PayLine.Kind.DEDUCTION, "کسر")), kind, { kind = it })
+        TextInput("شرح", title, { title = it })
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { byPercent = !byPercent }) {
+            androidx.compose.material3.Checkbox(checked = byPercent, onCheckedChange = { byPercent = it })
+            Text("درصدی از حقوق هر نفر", style = SabouType.body, color = Sabou.colors.ink)
+        }
+        if (byPercent) TextInput("درصد", percent, { percent = it }, keyboard = KeyboardType.Decimal, placeholder = "مثلاً ۵۰ برای نیم‌ماه")
+        else MoneyInput("مبلغ برای هر نفر", amount, { amount = it })
+        if (kind == ir.sabou.payroll.PayLine.Kind.EARNING) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { insurable = !insurable }) {
+                androidx.compose.material3.Checkbox(checked = insurable, onCheckedChange = { insurable = it })
+                Text("مشمول بیمه", style = SabouType.body, color = Sabou.colors.ink)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { taxable = !taxable }) {
+                androidx.compose.material3.Checkbox(checked = taxable, onCheckedChange = { taxable = it })
+                Text("مشمول مالیات", style = SabouType.body, color = Sabou.colors.ink)
+            }
+        }
+        action.error?.let { Banner(it) }
+        PrimaryButton("ثبت", {
+            val ids = who?.let { listOf(it) } ?: people.map { it.id }
+            action.run({
+                payroll.addAdjustment(ir.sabou.payroll.AddPayAdjustment(id.value, branch, ids, periodFrom, title, kind,
+                    amount.takeIf { !byPercent }, pct.takeIf { byPercent }, insurable && kind == ir.sabou.payroll.PayLine.Kind.EARNING, taxable && kind == ir.sabou.payroll.PayLine.Kind.EARNING))
+            }) { onDone() }
+        }, enabled = title.isNotBlank() && people.isNotEmpty() && (if (byPercent) pct != null && pct > 0 else amount != null) && !action.busy, busy = action.busy)
+    }
+
     private class PayrollView(
         val runs: List<ir.sabou.payroll.PayrollRun>,
         val names: Map<GlobalId, String>,
@@ -766,8 +839,10 @@ object OperationsScreens {
                             PrimaryButton("محاسبه", {
                                 action.run({ payroll.calculate(CalculatePayroll(calcId.value, branch, fromDate, toDate)) }) { calcId.value = GlobalId.new() }
                             }, busy = action.busy)
-                            Text("محاسبه طبق پارامترهای قانونی ثبت‌شده برای آن سال انجام می‌شود. تأیید باید توسط فرد دیگری انجام شود.", style = SabouType.caption, color = Sabou.colors.muted)
+                            Text("محاسبه طبق پارامترهای قانونی ثبت‌شده برای آن سال و عوامل حقوقی انجام می‌شود. تأیید با فرد دیگری است؛ اگر کس دیگری اجازه‌ی تأیید ندارد، خودتان تأیید می‌کنید.",
+                                style = SabouType.caption, color = Sabou.colors.muted)
                         }
+                        key(branch, fromDate) { PayAdjustments(branch, fromDate) }
                     }
                     Loaded(data) { d ->
                         if (d.runs.isEmpty()) EmptyState("هنوز حقوقی محاسبه نشده است.")
@@ -787,6 +862,8 @@ object OperationsScreens {
                                     }
                                     Text("ناخالص ${Fa.rial(p.gross)} · بیمه ${Fa.rial(p.employeeInsurance)} · مالیات ${Fa.rial(p.incomeTax)}",
                                         style = SabouType.caption, color = Sabou.colors.muted)
+                                    if (p.lines.isNotEmpty()) Text(p.lines.joinToString(" · ") { (if (it.kind == ir.sabou.payroll.PayLine.Kind.EARNING) "" else "−") + "${it.title} ${Fa.rial(it.amount)}" },
+                                        style = SabouType.caption, color = Sabou.colors.muted)
                                     val unpaid = d.unpaid[run.id]?.get(p.employeeId)
                                     if (unpaid != null && !unpaid.isZero && session.can(Permission.PAYROLL_PAY)) {
                                         SecondaryButton("پرداخت ${Fa.rial(unpaid)} ریال", {
@@ -795,10 +872,13 @@ object OperationsScreens {
                                     }
                                 }
                                 key(run.id) {
-                                    Text("لیست و فیش‌ها (هر فیش در یک صفحه‌ی PDF)", style = SabouType.caption, color = Sabou.colors.muted)
+                                    Text("لیست حقوق، پیش‌نویس لیست بیمه و مالیات، و فیش‌ها (هر فیش در یک صفحه‌ی PDF)", style = SabouType.caption, color = Sabou.colors.muted)
                                     ExportButtons("حقوق-${Fa.latinDigits(Fa.date(run.from)).replace('/', '-')}") {
                                         val place = overview.branches().firstOrNull { it.id == branch.branchId }?.name ?: "شعبه"
+                                        // The insurance and tax sheets need national IDs and insurance numbers (personnel access).
+                                        val people = runCatching { overview.employees(branch) }.getOrDefault(emptyList()).associateBy { it.id }
                                         listOf(ReportTables.payrollRun(run, d.names, place)) +
+                                            (if (people.isNotEmpty()) listOf(ReportTables.insuranceList(run, people, place), ReportTables.taxList(run, people, place)) else emptyList()) +
                                             run.payslips.map { ReportTables.payslip(run, it, d.names[it.employeeId].orEmpty(), place) }
                                     }
                                 }

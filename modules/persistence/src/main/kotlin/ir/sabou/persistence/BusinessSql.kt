@@ -471,7 +471,7 @@ class SqlPersonnelStore(db: SqlDatabase) : SqlTable(db), PersonnelStore {
 
     private fun attendanceOf(d: Doc) = AttendanceRecord(
         Codec.id(d.str("id")), Codec.id(d.str("employee")), Codec.date(d.long("date")), d.int("worked"), d.int("overtime"), d.int("absent"),
-        ir.sabou.payroll.AttendanceRecord.Source.valueOf(d.strOr("source", "MANUAL")),
+        ir.sabou.payroll.AttendanceRecord.Source.valueOf(d.strOr("source", "MANUAL")), d.intOr("night", 0),
     )
     override fun attendance(employeeId: GlobalId, from: BusinessDate, to: BusinessDate) =
         docs("SELECT doc FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ? ORDER BY date", employeeId.value, from.epochDay, to.epochDay).map(::attendanceOf)
@@ -485,7 +485,7 @@ class SqlPersonnelStore(db: SqlDatabase) : SqlTable(db), PersonnelStore {
                 mapOf(
                     "id" to record.id.value, "employee" to record.employeeId.value, "date" to record.date.epochDay,
                     "worked" to record.workedMinutes, "overtime" to record.overtimeMinutes, "absent" to record.absentMinutes,
-                    "source" to record.source.name,
+                    "source" to record.source.name, "night" to record.nightMinutes.toLong(),
                 ),
             ),
         ),
@@ -768,6 +768,50 @@ class SqlShiftStore(db: SqlDatabase) : SqlTable(db), ir.sabou.payroll.ShiftStore
     }
 }
 
+/** Pay elements, one-off payslip lines and leave (ADR-0043). */
+class SqlPayElementStore(db: SqlDatabase) : SqlTable(db), ir.sabou.payroll.PayElementStore {
+    private fun elementOf(d: Doc) = ir.sabou.payroll.PayElement(
+        Codec.id(d.str("id")), d.str("name"), ir.sabou.payroll.PayLine.Kind.valueOf(d.str("kind")), ir.sabou.payroll.PayElement.Basis.valueOf(d.str("basis")),
+        d.long("amount"), d.bool("ins"), d.bool("tax"), d.longOrNull("from")?.let(Codec::date), d.bool("active"), d.strsOr("employees").map(Codec::id).toSet(),
+    )
+    override fun elements() = docs("SELECT doc FROM pay_elements ORDER BY rowid").map(::elementOf)
+    override fun saveElement(element: ir.sabou.payroll.PayElement) = upsert("pay_elements", "id", mapOf("id" to element.id.value, "doc" to Json.encode(mapOf(
+        "id" to element.id.value, "name" to element.name, "kind" to element.kind.name, "basis" to element.basis.name, "amount" to element.amount,
+        "ins" to element.insurable, "tax" to element.taxable, "from" to element.from?.epochDay, "active" to element.active,
+        "employees" to element.employees.map { it.value },
+    ))))
+
+    private fun adjustmentOf(d: Doc) = ir.sabou.payroll.PayAdjustment(
+        Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.id(d.str("employee")), Codec.date(d.long("period")), d.str("title"),
+        ir.sabou.payroll.PayLine.Kind.valueOf(d.str("kind")), Codec.money(d.long("amount")), d.bool("ins"), d.bool("tax"),
+    )
+    override fun adjustments(scope: Scope.Branch, periodFrom: BusinessDate) =
+        docs("SELECT doc FROM pay_adjustments WHERE scope = ? AND period = ? ORDER BY rowid", Codec.scope(scope), periodFrom.epochDay).map(::adjustmentOf)
+    override fun adjustment(id: GlobalId) = doc("SELECT doc FROM pay_adjustments WHERE id = ?", id.value)?.let(::adjustmentOf)
+    override fun saveAdjustment(adjustment: ir.sabou.payroll.PayAdjustment) = upsert("pay_adjustments", "id", mapOf(
+        "id" to adjustment.id.value, "scope" to Codec.scope(adjustment.scope), "period" to adjustment.periodFrom.epochDay,
+        "doc" to Json.encode(mapOf(
+            "id" to adjustment.id.value, "scope" to Codec.scope(adjustment.scope), "employee" to adjustment.employeeId.value, "period" to adjustment.periodFrom.epochDay,
+            "title" to adjustment.title, "kind" to adjustment.kind.name, "amount" to adjustment.amount.rial, "ins" to adjustment.insurable, "tax" to adjustment.taxable,
+        )),
+    ))
+    override fun deleteAdjustment(id: GlobalId) { db.execute("DELETE FROM pay_adjustments WHERE id = ?", id.value) }
+
+    private fun leaveOf(d: Doc) = ir.sabou.payroll.Leave(
+        Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.id(d.str("employee")), Codec.date(d.long("date")),
+        ir.sabou.payroll.Leave.Kind.valueOf(d.str("kind")), d.int("minutes"), d.strOr("note", ""), d.boolOr("cancelled", false),
+    )
+    override fun leaves(employeeId: GlobalId) = docs("SELECT doc FROM leaves WHERE employee_id = ? ORDER BY date, rowid", employeeId.value).map(::leaveOf)
+    override fun leave(id: GlobalId) = doc("SELECT doc FROM leaves WHERE id = ?", id.value)?.let(::leaveOf)
+    override fun saveLeave(leave: ir.sabou.payroll.Leave) = upsert("leaves", "id", mapOf(
+        "id" to leave.id.value, "employee_id" to leave.employeeId.value, "date" to leave.date.epochDay,
+        "doc" to Json.encode(mapOf(
+            "id" to leave.id.value, "scope" to Codec.scope(leave.scope), "employee" to leave.employeeId.value, "date" to leave.date.epochDay,
+            "kind" to leave.kind.name, "minutes" to leave.minutes.toLong(), "note" to leave.note, "cancelled" to leave.cancelled,
+        )),
+    ))
+}
+
 /** The restaurant's payroll options (one JSON value in the meta table). */
 class SqlPayrollSettingsStore(db: SqlDatabase) : ir.sabou.payroll.PayrollSettingsStore {
     private val meta = DatabaseMeta(db)
@@ -781,12 +825,28 @@ class SqlPayrollSettingsStore(db: SqlDatabase) : ir.sabou.payroll.PayrollSetting
             overtimeMinimumMinutes = d.intOr("overtimeMinimum", defaults.overtimeMinimumMinutes),
             lateGraceMinutes = d.intOr("lateGrace", defaults.lateGraceMinutes),
             clockPhotoRequired = d.boolOr("clockPhoto", defaults.clockPhotoRequired),
+            nightPremiumBp = d.intOr("nightBp", defaults.nightPremiumBp), nightStartMinute = d.intOr("nightStart", defaults.nightStartMinute),
+            nightEndMinute = d.intOr("nightEnd", defaults.nightEndMinute), holidayPremiumBp = d.intOr("holidayBp", defaults.holidayPremiumBp),
+            leaveDaysPerYear = d.intOr("leaveDays", defaults.leaveDaysPerYear), workdayMinutes = d.intOr("workday", defaults.workdayMinutes),
+            leaveCarryDays = d.intOr("leaveCarry", defaults.leaveCarryDays), leavePayoutOnExit = d.boolOr("leavePayout", defaults.leavePayoutOnExit),
+            bonusInsurable = d.boolOr("bonusIns", defaults.bonusInsurable), bonusTaxable = d.boolOr("bonusTax", defaults.bonusTaxable),
+            eidiEnabled = d.boolOr("eidi", defaults.eidiEnabled), eidiDays = d.intOr("eidiDays", defaults.eidiDays),
+            eidiCap = Codec.money(d.longOr("eidiCap", 0)), eidiMonth = d.intOr("eidiMonth", defaults.eidiMonth),
+            eidiTaxExempt = Codec.money(d.longOr("eidiExempt", 0)),
+            sanavatEnabled = d.boolOr("sanavat", defaults.sanavatEnabled), sanavatDays = d.intOr("sanavatDays", defaults.sanavatDays),
+            sanavatYearly = d.boolOr("sanavatYearly", defaults.sanavatYearly),
         )
     }
     override fun save(settings: ir.sabou.payroll.PayrollSettings) = meta.put(KEY, Json.encode(mapOf(
         "deductBreaks" to settings.deductPlannedBreaks, "overtimeMode" to settings.overtimeMode.name, "overtimeRate" to settings.overtimeHourlyRate.rial,
         "overtimeMinimum" to settings.overtimeMinimumMinutes.toLong(), "lateGrace" to settings.lateGraceMinutes.toLong(),
         "clockPhoto" to settings.clockPhotoRequired,
+        "nightBp" to settings.nightPremiumBp.toLong(), "nightStart" to settings.nightStartMinute.toLong(), "nightEnd" to settings.nightEndMinute.toLong(),
+        "holidayBp" to settings.holidayPremiumBp.toLong(), "leaveDays" to settings.leaveDaysPerYear.toLong(), "workday" to settings.workdayMinutes.toLong(),
+        "leaveCarry" to settings.leaveCarryDays.toLong(), "leavePayout" to settings.leavePayoutOnExit, "bonusIns" to settings.bonusInsurable,
+        "bonusTax" to settings.bonusTaxable, "eidi" to settings.eidiEnabled, "eidiDays" to settings.eidiDays.toLong(), "eidiCap" to settings.eidiCap.rial,
+        "eidiMonth" to settings.eidiMonth.toLong(), "eidiExempt" to settings.eidiTaxExempt.rial, "sanavat" to settings.sanavatEnabled,
+        "sanavatDays" to settings.sanavatDays.toLong(), "sanavatYearly" to settings.sanavatYearly,
     )))
     private companion object { const val KEY = "payroll.settings" }
 }
