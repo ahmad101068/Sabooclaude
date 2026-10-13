@@ -19,15 +19,50 @@ data class Employee(
     val birthDate: ir.sabou.kernel.JalaliDay? = null,
     /** Personnel number: assigned in registration order across the whole organization, never reused. */
     val personnelNumber: Int = 0,
+    /** Salary changes after [monthlySalary] (the first salary), each from a date; in date order. */
+    val salaryChanges: List<SalaryChange> = emptyList(),
+    /** Earlier employments, for a person who left and came back. */
+    val pastEmployments: List<Employment> = emptyList(),
 ) {
     /** Days of [from]..[to] on which this person was employed (0 when not employed at all). */
     fun employedDays(from: BusinessDate, to: BusinessDate): Int {
-        if (!isActive && endDate == null) return 0
-        val first = maxOf(from.epochDay, startDate?.epochDay ?: Long.MIN_VALUE)
-        val last = minOf(to.epochDay, endDate?.epochDay ?: Long.MAX_VALUE)
+        val past = pastEmployments.sumOf { overlap(from, to, it.start, it.end) }
+        if (!isActive && endDate == null) return past
+        return past + overlap(from, to, startDate, endDate)
+    }
+
+    /** Whether [date] is a working day of an employment of this person. */
+    fun employedOn(date: BusinessDate) = employedDays(date, date) == 1
+
+    /** The monthly salary in force on [date]. */
+    fun salaryOn(date: BusinessDate): Money = salaryChanges.lastOrNull { it.from <= date }?.monthlySalary ?: monthlySalary
+
+    /** The salary in force on each employed day of [from]..[to], as (salary, days) runs in date order. */
+    fun salaryDays(from: BusinessDate, to: BusinessDate): List<Pair<Money, Int>> {
+        val out = ArrayList<Pair<Money, Int>>()
+        var day = from
+        while (day <= to) {
+            if (employedOn(day)) {
+                val s = salaryOn(day)
+                if (out.isNotEmpty() && out.last().first == s) out[out.size - 1] = s to out.last().second + 1 else out += s to 1
+            }
+            day = day.plusDays(1)
+        }
+        return out
+    }
+
+    private fun overlap(from: BusinessDate, to: BusinessDate, start: BusinessDate?, end: BusinessDate?): Int {
+        val first = maxOf(from.epochDay, start?.epochDay ?: Long.MIN_VALUE)
+        val last = minOf(to.epochDay, end?.epochDay ?: Long.MAX_VALUE)
         return if (last < first) 0 else (last - first + 1).toInt()
     }
 }
+
+/** A new monthly salary from [from] (yearly raise, promotion), with why. */
+data class SalaryChange(val from: BusinessDate, val monthlySalary: Money, val reason: String) : java.io.Serializable
+
+/** A finished employment of someone who later came back. */
+data class Employment(val start: BusinessDate?, val end: BusinessDate) : java.io.Serializable
 
 data class AttendanceRecord(
     val id: GlobalId,
@@ -36,7 +71,11 @@ data class AttendanceRecord(
     val workedMinutes: Int,
     val overtimeMinutes: Int,
     val absentMinutes: Int,
-)
+    /** Typed by a person, or taken from the time clock; confirming a day keeps typed records unless told otherwise. */
+    val source: Source = Source.MANUAL,
+) {
+    enum class Source { MANUAL, CLOCK }
+}
 
 data class Payslip(
     val employeeId: GlobalId,

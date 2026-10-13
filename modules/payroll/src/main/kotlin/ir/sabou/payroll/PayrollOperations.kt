@@ -15,6 +15,7 @@ import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
 import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Money
+import ir.sabou.kernel.Ratio
 import ir.sabou.kernel.Scope
 import ir.sabou.kernel.ensure
 import ir.sabou.ledger.JournalDraft
@@ -58,6 +59,33 @@ data class UpdateEmployeeDetails(
 ) : Command {
     override val requiredPermission = Permission.PERSONNEL_MANAGE
     override fun fingerprint() = "$scope|$employeeId|$name|$nationalId|${birthDate?.packed()}"
+}
+
+/** A new monthly salary from [effectiveFrom] (a yearly raise, a promotion). Earlier months keep the salary they had. */
+@NoDocument
+data class ChangeSalary(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val employeeId: GlobalId,
+    val effectiveFrom: BusinessDate,
+    val monthlySalary: Money,
+    val reason: String,
+) : Command {
+    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override fun fingerprint() = "$scope|$employeeId|${effectiveFrom.epochDay}|${monthlySalary.rial}|$reason"
+}
+
+/** Someone who left comes back from [startDate]: same person, same personnel number, a new employment. */
+@NoDocument
+data class RehireEmployee(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val employeeId: GlobalId,
+    val startDate: BusinessDate,
+    val monthlySalary: Money,
+) : Command {
+    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override fun fingerprint() = "$scope|$employeeId|${startDate.epochDay}|${monthlySalary.rial}"
 }
 
 /** Ends an employment after [lastDay]; that month is paid only up to it, later months not at all. */
@@ -151,6 +179,10 @@ class PayrollOperations(
     private val personnel: PersonnelStore,
     private val payroll: PayrollStore,
     private val policies: StatutoryPolicyRegistry,
+    /** The restaurant's payroll options (overtime pricing…). */
+    private val settings: () -> PayrollSettings = { PayrollSettings() },
+    /** Whether someone other than this user may approve payroll (a second owner); with nobody else, the owner may approve their own calculation. */
+    private val otherApproverExists: (GlobalId) -> Boolean = { true },
 ) {
     init {
         require(capability.module == ModuleId.PAYROLL)
@@ -178,12 +210,16 @@ class PayrollOperations(
         val name = cmd.name.trim()
         ensure(name.length in 2..120) { DomainError.InvalidInput("name", "نام کارمند الزامی است.") }
         ensure(NationalId.isValid(cmd.nationalId)) { DomainError.InvalidInput("nationalId", "کد ملی معتبر نیست.") }
+        ensure(cmd.monthlySalary.rial > 0) { DomainError.InvalidInput("monthlySalary", "حقوق ماهانه را وارد کنید.") }
         val nationalId = NationalId.normalize(cmd.nationalId)
         // Days inside a month already approved could never be paid (that month is closed for attendance and recalculation).
         cmd.startDate?.let { start ->
             ensure(payroll.runs(cmd.scope).none { it.status == RunStatus.APPROVED && it.to >= start }) { DomainError.InvalidState("EMPLOYEE", "START_IN_APPROVED_PERIOD") }
         }
-        ensure(personnel.employees(cmd.scope).none { NationalId.normalize(it.nationalId) == nationalId }) { DomainError.InvalidState("EMPLOYEE", "DUPLICATE_NATIONAL_ID") }
+        personnel.employees(cmd.scope).firstOrNull { NationalId.normalize(it.nationalId) == nationalId }?.let { same ->
+            // Someone who left and comes back is the same person: «بازگشت به کار», not a second record.
+            throw DomainException(DomainError.InvalidState("EMPLOYEE", if (same.endDate != null) "DUPLICATE_NATIONAL_ID_ENDED" else "DUPLICATE_NATIONAL_ID"))
+        }
         cmd.birthDate?.let { validBirthDate(it, ctx.nowEpochMillis) }
         val employee = Employee(
             GlobalId.new(), name, nationalId, cmd.scope, cmd.monthlySalary, startDate = cmd.startDate,
@@ -221,6 +257,38 @@ class PayrollOperations(
         ensure(age in 10..100) { DomainError.InvalidInput("birthDate", "تاریخ تولد معتبر نیست.") }
     }
 
+    fun changeSalary(c: ChangeSalary): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val employee = requireEmployee(cmd.employeeId, cmd.scope)
+        ensure(cmd.monthlySalary.rial > 0) { DomainError.InvalidInput("monthlySalary", "حقوق ماهانه را وارد کنید.") }
+        val reason = cmd.reason.trim()
+        ensure(reason.length <= 120) { DomainError.InvalidInput("reason", "متن بیش از حد طولانی است.") }
+        ensure(employee.startDate == null || cmd.effectiveFrom > employee.startDate) { DomainError.InvalidInput("effectiveFrom", "تاریخ تغییر باید بعد از شروع کار باشد.") }
+        ensure(employee.endDate == null) { DomainError.InvalidState("EMPLOYEE", "ALREADY_ENDED") }
+        // A month already approved keeps the salary it was paid with.
+        ensure(payroll.runs(cmd.scope).none { it.status == RunStatus.APPROVED && it.to >= cmd.effectiveFrom }) { DomainError.InvalidState("SALARY", "IN_APPROVED_PERIOD") }
+        val before = employee.salaryOn(cmd.effectiveFrom)
+        val changes = (employee.salaryChanges.filter { it.from != cmd.effectiveFrom } + SalaryChange(cmd.effectiveFrom, cmd.monthlySalary, reason)).sortedBy { it.from }
+        personnel.saveEmployee(employee.copy(salaryChanges = changes))
+        ctx.audit(AuditDraft("SALARY_CHANGE", "EMPLOYEE", employee.id.value, "from=${cmd.effectiveFrom.epochDay};${before.rial}->${cmd.monthlySalary.rial};$reason"))
+        employee.id
+    }
+
+    fun rehire(c: RehireEmployee): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val employee = requireEmployee(cmd.employeeId, cmd.scope)
+        val ended = employee.endDate ?: throw DomainException(DomainError.InvalidState("EMPLOYEE", "STILL_EMPLOYED"))
+        ensure(cmd.startDate > ended) { DomainError.InvalidInput("startDate", "شروع دوباره باید بعد از آخرین روز کار قبلی باشد.") }
+        ensure(cmd.monthlySalary.rial > 0) { DomainError.InvalidInput("monthlySalary", "حقوق ماهانه را وارد کنید.") }
+        ensure(payroll.runs(cmd.scope).none { it.status == RunStatus.APPROVED && it.to >= cmd.startDate }) { DomainError.InvalidState("EMPLOYEE", "START_IN_APPROVED_PERIOD") }
+        val back = employee.copy(
+            isActive = true, startDate = cmd.startDate, endDate = null,
+            pastEmployments = employee.pastEmployments + Employment(employee.startDate, ended),
+            salaryChanges = (employee.salaryChanges.filter { it.from < cmd.startDate } + SalaryChange(cmd.startDate, cmd.monthlySalary, "بازگشت به کار")).sortedBy { it.from },
+        )
+        personnel.saveEmployee(back)
+        ctx.audit(AuditDraft("EMPLOYEE_REHIRE", "EMPLOYEE", employee.id.value, "start=${cmd.startDate.epochDay};salary=${cmd.monthlySalary.rial}"))
+        employee.id
+    }
+
     fun endEmployment(c: EndEmployment): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
         val employee = requireEmployee(cmd.employeeId, cmd.scope)
         ensure(employee.endDate == null && employee.isActive) { DomainError.InvalidState("EMPLOYEE", "ALREADY_ENDED") }
@@ -235,11 +303,14 @@ class PayrollOperations(
     }
 
     fun recordAttendance(c: RecordAttendance): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
-        applyAttendance(ctx, cmd.scope, cmd.employeeId, cmd.date, cmd.workedMinutes, cmd.overtimeMinutes, cmd.absentMinutes)
+        applyAttendance(ctx, cmd.scope, cmd.employeeId, cmd.date, cmd.workedMinutes, cmd.overtimeMinutes, cmd.absentMinutes, AttendanceRecord.Source.MANUAL)
     }
 
     /** One day's attendance under the attendance rules; also used when a day's punches are confirmed (ADR-0038). */
-    internal fun applyAttendance(ctx: ir.sabou.platform.CommandContext, scope: Scope.Branch, employeeId: GlobalId, date: BusinessDate, worked: Int, overtime: Int, absent: Int): GlobalId {
+    internal fun applyAttendance(
+        ctx: ir.sabou.platform.CommandContext, scope: Scope.Branch, employeeId: GlobalId, date: BusinessDate,
+        worked: Int, overtime: Int, absent: Int, source: AttendanceRecord.Source,
+    ): GlobalId {
         val employee = requireEmployee(employeeId, scope)
         ensure(employee.employedDays(date, date) == 1) { DomainError.InvalidState("EMPLOYEE", "NOT_EMPLOYED_ON_DATE") }
         ensure(listOf(worked, overtime, absent).all { it in 0..1_440 } && worked + overtime <= 1_440) { DomainError.InvalidInput("minutes", "زمان حضور معتبر نیست.") }
@@ -247,10 +318,10 @@ class PayrollOperations(
             DomainError.InvalidState("ATTENDANCE", "PERIOD_APPROVED")
         }
         val existing = personnel.attendanceOn(employee.id, date)
-        val record = AttendanceRecord(existing?.id ?: GlobalId.new(), employee.id, date, worked, overtime, absent)
+        val record = AttendanceRecord(existing?.id ?: GlobalId.new(), employee.id, date, worked, overtime, absent, source)
         personnel.saveAttendance(record)
         ctx.audit(AuditDraft(if (existing == null) "ATTENDANCE_RECORD" else "ATTENDANCE_CORRECT", "EMPLOYEE", employee.id.value,
-            "day=${date.epochDay};w=$worked;ot=$overtime;abs=$absent"))
+            "day=${date.epochDay};w=$worked;ot=$overtime;abs=$absent;src=$source" + (existing?.let { ";was=${it.workedMinutes}/${it.overtimeMinutes}/${it.absentMinutes}/${it.source}" } ?: "")))
         return record.id
     }
 
@@ -277,7 +348,10 @@ class PayrollOperations(
     fun approve(c: ApprovePayroll): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
         val run = requireRun(cmd.runId, cmd.scope)
         ensure(run.status == RunStatus.DRAFT) { DomainError.InvalidState("PAYROLL_RUN", run.status.name) }
-        ensure(run.calculatedBy != ctx.actor.userId) { DomainError.InvalidState("PAYROLL_RUN", "SAME_PERSON_CALCULATED") }
+        // Two people: one calculates, another approves. A restaurant with a single person who may approve (the only
+        // owner) would otherwise never pay salaries: then that person approves their own calculation, recorded as such.
+        val self = run.calculatedBy == ctx.actor.userId
+        ensure(!self || !otherApproverExists(ctx.actor.userId)) { DomainError.InvalidState("PAYROLL_RUN", "SAME_PERSON_CALCULATED") }
         // What is approved must be what the data says now: a hire, a leaver, a salary or attendance change
         // after the calculation makes the draft stale.
         ensure(payslips(run.scope, run.from, run.to, policies.forPeriod(run.from, run.to)) == run.payslips) {
@@ -299,7 +373,7 @@ class PayrollOperations(
         // A month in which nobody earned anything (all absent) is approved without an accounting entry.
         val journal = if (lines.isEmpty()) null else ledger.post(ctx, capability, JournalDraft(run.to, run.scope, RUN, run.id, "حقوق دوره", lines))
         payroll.saveRun(run.copy(status = RunStatus.APPROVED, approvedBy = ctx.actor.userId, accrualJournalId = journal?.id))
-        ctx.audit(AuditDraft("PAYROLL_APPROVE", "PAYROLL_RUN", run.id.value, "gross=${gross.rial};net=${net.rial}"))
+        ctx.audit(AuditDraft("PAYROLL_APPROVE", "PAYROLL_RUN", run.id.value, "gross=${gross.rial};net=${net.rial}" + if (self) ";self_approved=only_approver" else ""))
         run.id
     }
 
@@ -357,15 +431,33 @@ class PayrollOperations(
         id
     }
 
-    /** Everyone employed on at least one day of the month; someone hired or leaving during it is prorated. */
+    /**
+     * Everyone employed on at least one day of the month; someone hired or leaving during it is prorated. A salary
+     * changed during the month is paid day by day: each salary for the days it was in force.
+     */
     private fun payslips(scope: Scope.Branch, from: BusinessDate, to: BusinessDate, policy: StatutoryPolicy): List<Payslip> {
         val periodDays = (to.epochDay - from.epochDay + 1).toInt()
+        val options = settings()
         return personnel.employees(scope).mapNotNull { e ->
             val employed = e.employedDays(from, to)
             if (employed == 0) return@mapNotNull null
             val records = personnel.attendance(e.id, from, to)
-            policy.calculate(e.id, e.monthlySalary, records.sumOf { it.absentMinutes.toLong() }, records.sumOf { it.overtimeMinutes.toLong() },
-                payableDays = employed.takeIf { it < periodDays })
+            val runs = e.salaryDays(from, to)
+            val monthly = runs.last().first
+            val partial = employed < periodDays
+            // One salary all month: the usual rule. Several: each for its days, over the month (or the 30-day basis when partial).
+            val base = if (runs.size == 1) null else {
+                val divisor = if (partial) policy.prorationDays.toLong() else periodDays.toLong()
+                Money.of(minOf(runs.maxOf { it.first.rial }, runs.sumOf { (s, d) -> Ratio.mulDiv(s.rial, d.toLong(), divisor) }))
+            }
+            val overtimeMinutes = records.sumOf { it.overtimeMinutes.toLong() }
+            val overtimePay = when (options.overtimeMode) {
+                OvertimeMode.STATUTORY -> null
+                OvertimeMode.FIXED_HOURLY -> Money.of(Ratio.mulDiv(options.overtimeHourlyRate.rial, overtimeMinutes, 60))
+                OvertimeMode.NONE -> Money.ZERO
+            }
+            policy.calculate(e.id, monthly, records.sumOf { it.absentMinutes.toLong() }, overtimeMinutes,
+                payableDays = employed.takeIf { partial }, base = base, overtimePay = overtimePay)
         }
     }
 

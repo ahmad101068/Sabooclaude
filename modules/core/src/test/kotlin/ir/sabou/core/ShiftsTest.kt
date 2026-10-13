@@ -40,6 +40,8 @@ class ShiftsTest {
     @Test fun planClockAndConfirm() {
         core.bootstrap("شعبه یک", "مالک", "owner", "123456".toCharArray())
         val branch = Scope.Branch(core.overview.branches().single().id)
+        // This restaurant deducts planned breaks (an option; off by default).
+        core.payrollSettings.save(ir.sabou.payroll.SavePayrollSettings(id(), ir.sabou.payroll.PayrollSettings(deductPlannedBreaks = true)))
         // 192,000,000 a month over 192 hours (no statutory policy configured): 1,000,000 an hour.
         val ali = core.payroll.registerEmployee(RegisterEmployee(id(), branch, "علی", "0012345679", Money.of(192_000_000), JalaliCalendar.date(1405, 1, 1))).resultId
         val sara = core.payroll.registerEmployee(RegisterEmployee(id(), branch, "سارا", "0084575948", Money.of(96_000_000), JalaliCalendar.date(1405, 1, 1))).resultId

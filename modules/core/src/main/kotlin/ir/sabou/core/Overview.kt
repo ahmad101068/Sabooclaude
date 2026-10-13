@@ -423,8 +423,8 @@ class Overview internal constructor(private val core: SabouCore) {
         val a = actor(Permission.ATTENDANCE_RECORD, Permission.PERSONNEL_VIEW)
         a.require(branch)
         // Everyone employed on that day (an end date entered ahead of time still lets the last days be recorded).
-        return core.personnel.employees(branch).filter { it.employedDays(date, date) == 1 }
-            .map { it.copy(monthlySalary = Money.ZERO, nationalId = "") to core.personnel.attendanceOn(it.id, date) }
+        return core.personnel.employees(branch).filter { it.employedOn(date) }
+            .map { it.copy(monthlySalary = Money.ZERO, salaryChanges = emptyList(), nationalId = "") to core.personnel.attendanceOn(it.id, date) }
     }
 
     fun payroll(branch: Scope.Branch): PayrollView {

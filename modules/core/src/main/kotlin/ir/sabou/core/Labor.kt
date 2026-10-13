@@ -31,7 +31,8 @@ data class LaborDay(
     val laborBp: Long? get() = if (expectedSales.rial > 0) Ratio.mulDiv(cost.rial, 10_000, expectedSales.rial) else null
 }
 
-data class TimeRow(val employee: Employee, val time: DayTime)
+/** One person's day: planned against clocked, their punches, and whether the day was typed by hand. */
+data class TimeRow(val employee: Employee, val time: DayTime, val punches: List<ir.sabou.payroll.Punch> = emptyList(), val manual: Boolean = false)
 
 /** A staff document with its files (those of every earlier version it corrected too) and how many times it was corrected. */
 data class StaffDocumentView(val document: ir.sabou.payroll.StaffDocument, val files: List<ir.sabou.platform.Attachment>, val corrections: Int = 0)
@@ -60,11 +61,12 @@ class Labor internal constructor(private val core: SabouCore) {
             val date = start.plusDays(offset)
             val policy = runCatching { core.policyRegistry.forPeriod(date, date) }.getOrNull()
             val day = shifts[date].orEmpty().sortedBy { it.startMinute }
-            val cost = Money.sum(day.mapNotNull { s -> employees[s.employeeId]?.let { core.shifts.cost(it, s.minutes, policy) } })
+            val deduct = core.payrollSettings.current().deductPlannedBreaks
+            val cost = Money.sum(day.mapNotNull { s -> employees[s.employeeId]?.let { core.shifts.cost(it, s.paidMinutes(deduct), policy, date) } })
             val budget = core.budgetStore.entries().filter { it.scope == branch && it.account in LABOR_ACCOUNTS && it.from <= date && it.to >= date }
                 .sumOf { Ratio.mulDiv(it.amount.rial, 1, it.to.epochDay - it.from.epochDay + 1) }
             val sales = expected[date] ?: 0L
-            LaborDay(date, day.map { ShiftView(it, employees[it.employeeId]?.name.orEmpty()) }, day.sumOf { it.minutes }, cost, Money.of(budget), Money.of(sales))
+            LaborDay(date, day.map { ShiftView(it, employees[it.employeeId]?.name.orEmpty()) }, day.sumOf { it.paidMinutes(deduct) }, cost, Money.of(budget), Money.of(sales))
         }
     }
 
@@ -72,7 +74,14 @@ class Labor internal constructor(private val core: SabouCore) {
     fun day(branch: Scope.Branch, date: BusinessDate): List<TimeRow> {
         actor(Permission.ATTENDANCE_RECORD, Permission.SHIFT_MANAGE, Permission.PERSONNEL_VIEW).require(branch)
         val employees = core.personnel.employees(branch).associateBy { it.id }
-        return core.shifts.day(branch, date).mapNotNull { t -> employees[t.employeeId]?.let { TimeRow(it, t) } }.sortedBy { it.employee.name }
+        val punches = core.shiftStore.punches(branch, date, date).groupBy { it.employeeId }
+        return core.shifts.day(branch, date).mapNotNull { t ->
+            employees[t.employeeId]?.let {
+                TimeRow(it.copy(monthlySalary = Money.ZERO, salaryChanges = emptyList(), nationalId = ""), t,
+                    ir.sabou.payroll.Punch.effective(punches[it.id].orEmpty()),
+                    core.personnel.attendanceOn(it.id, date)?.source == ir.sabou.payroll.AttendanceRecord.Source.MANUAL)
+            }
+        }.sortedBy { it.employee.name }
     }
 
     /** Who can clock in on this phone: employed today, with a clock PIN. Names only. */
@@ -82,10 +91,14 @@ class Labor internal constructor(private val core: SabouCore) {
             .sortedWith(compareBy(Comparator { a: String, b: String -> Fa.compareAlphabetical(a, b) }) { it.name }).map { it.id to it.name }
     }
 
-    /** The employee's punches today, for the clock screen («آمدید ۸:۰۵»). */
-    fun punchesToday(branch: Scope.Branch, date: BusinessDate, employeeId: GlobalId): List<ir.sabou.payroll.Punch> {
+    /**
+     * The employee's punches of the work day now, for the clock screen («آمدید ۸:۰۵»): after midnight, a night
+     * shift still open from yesterday.
+     */
+    fun punchesToday(branch: Scope.Branch, date: BusinessDate, employeeId: GlobalId, minute: Int): List<ir.sabou.payroll.Punch> {
         actor(Permission.TIME_CLOCK).require(branch)
-        return core.shiftStore.punches(branch, date, date).filter { it.employeeId == employeeId }.sortedBy { it.minute }
+        val (day, _) = core.shifts.workDay(branch, employeeId, date, minute)
+        return ir.sabou.payroll.Punch.effective(core.shiftStore.punches(branch, day, day).filter { it.employeeId == employeeId })
     }
 
     fun employee(employeeId: GlobalId): Employee {

@@ -33,12 +33,40 @@ data class Shift(
     val station: String,
 ) {
     val minutes: Int get() = endMinute - startMinute - breakMinutes
+    /** Paid minutes: with breaks not deducted (the default), the whole shift. */
+    fun paidMinutes(deductBreaks: Boolean): Int = if (deductBreaks) minutes else endMinute - startMinute
 }
 
-/** One clock-in or clock-out with the employee's own PIN. [minute] is minutes from midnight of [date]. */
-data class Punch(val id: GlobalId, val scope: Scope.Branch, val employeeId: GlobalId, val date: BusinessDate, val minute: Int, val kind: Kind, val atEpochMillis: Long) {
+/**
+ * One clock-in or clock-out. [date] is the work day and [minute] counts from its midnight: an OUT after midnight
+ * of a night shift is 24:00 + the time. Punches are never changed: a manager adds a missing one ([manualBy],
+ * [reason]) or cancels a wrong one by a record that [voids] it.
+ */
+data class Punch(
+    val id: GlobalId,
+    val scope: Scope.Branch,
+    val employeeId: GlobalId,
+    val date: BusinessDate,
+    val minute: Int,
+    val kind: Kind,
+    val atEpochMillis: Long,
+    val manualBy: GlobalId? = null,
+    val reason: String = "",
+    val voids: GlobalId? = null,
+) {
     enum class Kind { IN, OUT }
+
+    companion object {
+        /** The punches in effect: cancelled ones and the cancelling records left out, in time order. */
+        fun effective(punches: List<Punch>): List<Punch> {
+            val voided = punches.mapNotNull { it.voids }.toSet()
+            return punches.filter { it.voids == null && it.id !in voided }.sortedBy { it.minute }
+        }
+    }
 }
+
+/** Wrong clock PINs: how many in a row, and locked until when. */
+data class PinFailures(val count: Int, val lockedUntil: Long)
 
 interface ShiftStore {
     fun shift(id: GlobalId): Shift?
@@ -50,12 +78,23 @@ interface ShiftStore {
     /** The employee's clock PIN (PBKDF2), or null when they have none. */
     fun clockPin(employeeId: GlobalId): String?
     fun saveClockPin(employeeId: GlobalId, hash: String?)
+    fun pinFailures(employeeId: GlobalId): PinFailures
+    fun savePinFailures(employeeId: GlobalId, failures: PinFailures)
 }
 
 /** What one day's punches add up to against the plan. Minutes. */
-data class DayTime(val employeeId: GlobalId, val date: BusinessDate, val planned: Int, val worked: Int, val late: Int, val openPunch: Boolean) {
-    /** Beyond the plan (only when there was a plan). */
-    val overtime: Int get() = if (planned > 0) maxOf(0, worked - planned) else 0
+data class DayTime(
+    val employeeId: GlobalId,
+    val date: BusinessDate,
+    val planned: Int,
+    val worked: Int,
+    val late: Int,
+    val openPunch: Boolean,
+    /** Overtime shorter than this is not counted (settings). */
+    val overtimeMinimum: Int = 0,
+) {
+    /** Beyond the plan (only when there was a plan), when at least the minimum. */
+    val overtime: Int get() = (if (planned > 0) maxOf(0, worked - planned) else 0).takeIf { it >= overtimeMinimum } ?: 0
     /** Short of the plan. */
     val absent: Int get() = maxOf(0, planned - worked)
 }
@@ -65,8 +104,8 @@ object TimeMath {
      * Pairs IN→OUT in order; an unpaired IN at the end is an open punch (still at work, or forgot to clock out) and
      * counts nothing. Worked time is the sum of the pairs minus the planned breaks.
      */
-    fun day(employeeId: GlobalId, date: BusinessDate, shifts: List<Shift>, punches: List<Punch>): DayTime {
-        val sorted = punches.sortedBy { it.minute }
+    fun day(employeeId: GlobalId, date: BusinessDate, shifts: List<Shift>, punches: List<Punch>, settings: PayrollSettings = PayrollSettings()): DayTime {
+        val sorted = Punch.effective(punches)
         var worked = 0; var pairs = 0; var open: Punch? = null
         for (p in sorted) {
             when (p.kind) {
@@ -74,17 +113,19 @@ object TimeMath {
                 Punch.Kind.OUT -> open?.let { worked += p.minute - it.minute; pairs++; open = null }
             }
         }
-        val planned = shifts.sumOf { it.minutes }
-        // A planned break is taken off only when the person did not clock out for it.
-        val breaks = if (pairs <= shifts.size) shifts.sumOf { it.breakMinutes } else 0
+        val deduct = settings.deductPlannedBreaks
+        val planned = shifts.sumOf { it.paidMinutes(deduct) }
+        // When the restaurant deducts breaks (an option, off by default): the planned break is taken off only when the
+        // person did not clock out for it, and only from time longer than the break.
+        val breaks = if (deduct && pairs <= shifts.size) shifts.sumOf { it.breakMinutes } else 0
         val firstIn = sorted.firstOrNull { it.kind == Punch.Kind.IN }?.minute
         val start = shifts.minOfOrNull { it.startMinute }
-        val late = if (firstIn != null && start != null) maxOf(0, firstIn - start - LATE_GRACE) else 0
-        return DayTime(employeeId, date, planned, maxOf(0, worked - if (worked > breaks) breaks else 0), late, open != null)
+        val late = if (firstIn != null && start != null) maxOf(0, firstIn - start - settings.lateGraceMinutes) else 0
+        return DayTime(employeeId, date, planned, maxOf(0, worked - if (worked > breaks) breaks else 0), late, open != null, settings.overtimeMinimumMinutes)
     }
 
-    /** Minutes of lateness ignored (traffic, changing clothes). */
-    const val LATE_GRACE = 10
+    /** A night shift's IN still open the next morning is closed by an OUT up to this long after it. */
+    const val NIGHT_CARRY_MINUTES = 16 * 60
 }
 
 @NoDocument
@@ -141,11 +182,36 @@ data class ClockPunch(
     override fun fingerprint() = "$scope|$employeeId|${date.epochDay}|$minute|" + ir.sabou.platform.PinHasher.fingerprint(pin.toCharArray(), commandId.value)
 }
 
-/** Turns a day's punches into attendance (worked, overtime, absence) through the ordinary attendance record. */
+/**
+ * Turns a day's punches into attendance (worked, overtime, absence) through the ordinary attendance record. A day
+ * typed by hand is kept unless [replaceManual].
+ */
 @NoDocument
-data class ConfirmDayTime(override val commandId: GlobalId, override val scope: Scope.Branch, val date: BusinessDate) : Command {
+data class ConfirmDayTime(override val commandId: GlobalId, override val scope: Scope.Branch, val date: BusinessDate, val replaceManual: Boolean = false) : Command {
     override val requiredPermission = Permission.ATTENDANCE_RECORD
-    override fun fingerprint() = "$scope|${date.epochDay}"
+    override fun fingerprint() = "$scope|${date.epochDay}|$replaceManual"
+}
+
+/** A manager adds a missing clock-in or clock-out (forgot to clock out), with why. */
+@NoDocument
+data class AddPunch(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val employeeId: GlobalId,
+    val date: BusinessDate,
+    val minute: Int,
+    val kind: Punch.Kind,
+    val reason: String,
+) : Command {
+    override val requiredPermission = Permission.ATTENDANCE_RECORD
+    override fun fingerprint() = "$scope|$employeeId|${date.epochDay}|$minute|$kind|$reason"
+}
+
+/** A manager cancels a wrong punch (twice by mistake, the wrong name), with why. */
+@NoDocument
+data class VoidPunch(override val commandId: GlobalId, override val scope: Scope.Branch, val punchId: GlobalId, val date: BusinessDate, val reason: String) : Command {
+    override val requiredPermission = Permission.ATTENDANCE_RECORD
+    override fun fingerprint() = "$scope|$punchId|${date.epochDay}|$reason"
 }
 
 class ShiftOperations(
@@ -153,12 +219,12 @@ class ShiftOperations(
     private val personnel: PersonnelStore,
     private val shifts: ShiftStore,
     private val payroll: PayrollOperations,
+    private val settings: () -> PayrollSettings = { PayrollSettings() },
+    private val payrollRuns: (Scope.Branch) -> List<PayrollRun> = { emptyList() },
 ) {
-    private val failures = HashMap<GlobalId, Pair<Int, Long>>()
-
     fun save(c: SaveShift): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
         val employee = employee(cmd.employeeId, cmd.scope)
-        ensure(employee.employedDays(cmd.date, cmd.date) == 1) { DomainError.InvalidState("EMPLOYEE", "NOT_EMPLOYED_ON_DATE") }
+        ensure(employee.employedOn(cmd.date)) { DomainError.InvalidState("EMPLOYEE", "NOT_EMPLOYED_ON_DATE") }
         ensure(cmd.startMinute in 0 until 1_440 && cmd.endMinute - cmd.startMinute in 30..16 * 60 && cmd.endMinute <= 36 * 60) {
             DomainError.InvalidInput("time", "شیفت باید بین نیم ساعت و ۱۶ ساعت باشد.")
         }
@@ -203,40 +269,91 @@ class ShiftOperations(
         val pin = cmd.pin?.let(ir.sabou.kernel.NationalId::normalize)
         ensure(pin == null || (pin.matches(Regex("\\d{4,6}")) && pin.toSet().size > 1)) { DomainError.InvalidInput("pin", "رمز ساعت‌زنی ۴ تا ۶ رقم است و همه‌ی رقم‌ها یکی نباشند.") }
         shifts.saveClockPin(employee.id, pin?.let { PinHasher.hash(it.toCharArray()) })
+        if (pin != null) shifts.savePinFailures(employee.id, PinFailures(0, 0L))
         ctx.audit(AuditDraft(if (pin == null) "CLOCK_PIN_REMOVE" else "CLOCK_PIN_SET", "EMPLOYEE", employee.id.value, ""))
         employee.id
     }
 
     fun punch(c: ClockPunch): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
         val employee = employee(cmd.employeeId, cmd.scope)
-        ensure(employee.employedDays(cmd.date, cmd.date) == 1) { DomainError.InvalidState("EMPLOYEE", "NOT_EMPLOYED_ON_DATE") }
+        ensure(employee.employedOn(cmd.date)) { DomainError.InvalidState("EMPLOYEE", "NOT_EMPLOYED_ON_DATE") }
         ensure(cmd.minute in 0 until 36 * 60) { DomainError.InvalidInput("time", "زمان معتبر نیست.") }
         // The phone's date must be today's (within a day of the clock) so a punch cannot be back-dated.
         val clockDay = Math.floorDiv(ctx.nowEpochMillis, 86_400_000L)
         ensure(kotlin.math.abs(cmd.date.epochDay - clockDay) <= 1) { DomainError.InvalidInput("date", "تاریخ گوشی درست نیست.") }
-        val (fails, until) = failures[employee.id] ?: (0 to 0L)
-        ensure(ctx.nowEpochMillis >= until) { DomainError.InvalidState("CLOCK_PIN", "LOCKED:${(until - ctx.nowEpochMillis + 999) / 1_000}") }
+        val failed = shifts.pinFailures(employee.id)
+        ensure(ctx.nowEpochMillis >= failed.lockedUntil) { DomainError.InvalidState("CLOCK_PIN", "LOCKED:${(failed.lockedUntil - ctx.nowEpochMillis + 999) / 1_000}") }
         val hash = shifts.clockPin(employee.id) ?: throw DomainException(DomainError.InvalidState("CLOCK_PIN", "NOT_SET"))
         if (!PinHasher.verify(ir.sabou.kernel.NationalId.normalize(cmd.pin).toCharArray(), hash)) {
-            val next = fails + 1
-            failures[employee.id] = next to if (next >= MAX_FAILURES) ctx.nowEpochMillis + LOCK_MILLIS else 0L
-            throw DomainException(DomainError.InvalidInput("pin", "رمز درست نیست."))
+            // Counted in the database (kept when the app restarts): 5 wrong → 5 minutes, then each further wrong PIN
+            // doubles the lock, up to a day. The count is kept although the punch fails.
+            val count = failed.count + 1
+            val lock = if (count < MAX_FAILURES) 0L else minOf(MAX_LOCK_MILLIS, LOCK_MILLIS shl minOf(count - MAX_FAILURES, 20))
+            shifts.savePinFailures(employee.id, PinFailures(count, if (lock > 0) ctx.nowEpochMillis + lock else 0L))
+            ctx.audit(AuditDraft("CLOCK_PIN_FAILURE", "EMPLOYEE", employee.id.value, "count=$count"))
+            ctx.failAfterCommit(DomainError.InvalidInput("pin", "رمز درست نیست."))
+            return@execute employee.id
         }
-        failures.remove(employee.id)
-        val today = shifts.punches(cmd.scope, cmd.date, cmd.date).filter { it.employeeId == employee.id }.sortedBy { it.minute }
-        ensure(today.none { kotlin.math.abs(it.minute - cmd.minute) < 1 }) { DomainError.InvalidState("PUNCH", "DUPLICATE") }
+        if (failed.count > 0) shifts.savePinFailures(employee.id, PinFailures(0, 0L))
+        val (day, minute) = workDay(cmd.scope, employee.id, cmd.date, cmd.minute)
+        val today = Punch.effective(shifts.punches(cmd.scope, day, day).filter { it.employeeId == employee.id })
+        ensure(today.none { kotlin.math.abs(it.minute - minute) < 1 }) { DomainError.InvalidState("PUNCH", "DUPLICATE") }
         val kind = if (today.lastOrNull()?.kind == Punch.Kind.IN) Punch.Kind.OUT else Punch.Kind.IN
-        val punch = Punch(GlobalId.new(), cmd.scope, employee.id, cmd.date, cmd.minute, kind, ctx.nowEpochMillis)
+        val punch = Punch(GlobalId.new(), cmd.scope, employee.id, day, minute, kind, ctx.nowEpochMillis)
         shifts.savePunch(punch)
-        ctx.audit(AuditDraft("CLOCK_${kind.name}", "EMPLOYEE", employee.id.value, "day=${cmd.date.epochDay};minute=${cmd.minute}"))
+        ctx.audit(AuditDraft("CLOCK_${kind.name}", "EMPLOYEE", employee.id.value, "day=${day.epochDay};minute=$minute"))
         punch.id
     }
+
+    /**
+     * The work day of a punch at [date] [minute] (phone time): a night shift's IN still open from yesterday is closed
+     * on yesterday's page (24:00 + the time), so the night is one work day, not two.
+     */
+    fun workDay(scope: Scope.Branch, employeeId: GlobalId, date: BusinessDate, minute: Int): Pair<BusinessDate, Int> {
+        if (minute >= 1_440) return date to minute
+        val yesterday = date.plusDays(-1)
+        val open = Punch.effective(shifts.punches(scope, yesterday, yesterday).filter { it.employeeId == employeeId }).lastOrNull()
+            ?.takeIf { it.kind == Punch.Kind.IN }
+        return if (open != null && minute + 1_440 - open.minute in 1..TimeMath.NIGHT_CARRY_MINUTES) yesterday to minute + 1_440 else date to minute
+    }
+
+    fun addPunch(c: AddPunch): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val employee = employee(cmd.employeeId, cmd.scope)
+        ensure(employee.employedOn(cmd.date)) { DomainError.InvalidState("EMPLOYEE", "NOT_EMPLOYED_ON_DATE") }
+        ensure(cmd.minute in 0 until 36 * 60) { DomainError.InvalidInput("time", "زمان معتبر نیست.") }
+        val reason = cmd.reason.trim()
+        ensure(reason.length in 3..200) { DomainError.InvalidInput("reason", "دلیل را بنویسید.") }
+        notInApprovedPeriod(cmd.scope, cmd.date)
+        val day = Punch.effective(shifts.punches(cmd.scope, cmd.date, cmd.date).filter { it.employeeId == employee.id })
+        ensure(day.none { it.minute == cmd.minute }) { DomainError.InvalidState("PUNCH", "DUPLICATE") }
+        val punch = Punch(GlobalId.new(), cmd.scope, employee.id, cmd.date, cmd.minute, cmd.kind, ctx.nowEpochMillis, manualBy = ctx.actor.userId, reason = reason)
+        shifts.savePunch(punch)
+        ctx.audit(AuditDraft("PUNCH_ADD", "EMPLOYEE", employee.id.value, "day=${cmd.date.epochDay};minute=${cmd.minute};${cmd.kind};$reason"))
+        punch.id
+    }
+
+    fun voidPunch(c: VoidPunch): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val reason = cmd.reason.trim()
+        ensure(reason.length in 3..200) { DomainError.InvalidInput("reason", "دلیل را بنویسید.") }
+        val all = shifts.punches(cmd.scope, cmd.date, cmd.date)
+        val punch = all.firstOrNull { it.id == cmd.punchId && it.voids == null } ?: throw DomainException(DomainError.NotFound("PUNCH"))
+        ensure(all.none { it.voids == punch.id }) { DomainError.InvalidState("PUNCH", "ALREADY_VOIDED") }
+        notInApprovedPeriod(cmd.scope, punch.date)
+        val record = punch.copy(id = GlobalId.new(), atEpochMillis = ctx.nowEpochMillis, manualBy = ctx.actor.userId, reason = reason, voids = punch.id)
+        shifts.savePunch(record)
+        ctx.audit(AuditDraft("PUNCH_VOID", "EMPLOYEE", punch.employeeId.value, "day=${punch.date.epochDay};minute=${punch.minute};${punch.kind};$reason"))
+        record.id
+    }
+
+    private fun notInApprovedPeriod(scope: Scope.Branch, date: BusinessDate) =
+        ensure(payrollRuns(scope).none { it.status == RunStatus.APPROVED && date >= it.from && date <= it.to }) { DomainError.InvalidState("ATTENDANCE", "PERIOD_APPROVED") }
 
     /** Each employee's planned and worked time on [date] (planned shifts, punches). */
     fun day(scope: Scope.Branch, date: BusinessDate): List<DayTime> {
         val planned = shifts.shifts(scope, date, date).groupBy { it.employeeId }
         val punched = shifts.punches(scope, date, date).groupBy { it.employeeId }
-        return (planned.keys + punched.keys).map { TimeMath.day(it, date, planned[it].orEmpty(), punched[it].orEmpty()) }
+        val options = settings()
+        return (planned.keys + punched.keys).map { TimeMath.day(it, date, planned[it].orEmpty(), punched[it].orEmpty(), options) }
     }
 
     /** Every employee's day in one transaction, through the ordinary attendance rules (employment, approved periods). */
@@ -244,11 +361,14 @@ class ShiftOperations(
         val times = day(cmd.scope, cmd.date)
         ensure(times.isNotEmpty()) { DomainError.InvalidState("PUNCH", "NOTHING") }
         ensure(times.none { it.openPunch }) { DomainError.InvalidState("PUNCH", "OPEN:${times.count { it.openPunch }}") }
+        var kept = 0
         times.forEach { t ->
+            // A day typed by hand is someone's decision: kept unless the manager chose to replace it.
+            if (!cmd.replaceManual && personnel.attendanceOn(t.employeeId, cmd.date)?.source == AttendanceRecord.Source.MANUAL) { kept++; return@forEach }
             val regular = if (t.planned > 0) minOf(t.worked, t.planned) else t.worked
-            payroll.applyAttendance(ctx, cmd.scope, t.employeeId, cmd.date, regular, t.overtime, t.absent)
+            payroll.applyAttendance(ctx, cmd.scope, t.employeeId, cmd.date, regular, t.overtime, t.absent, AttendanceRecord.Source.CLOCK)
         }
-        ctx.audit(AuditDraft("DAY_TIME_CONFIRM", "ATTENDANCE", cmd.date.epochDay.toString(), "employees=${times.size}"))
+        ctx.audit(AuditDraft("DAY_TIME_CONFIRM", "ATTENDANCE", cmd.date.epochDay.toString(), "employees=${times.size};kept_manual=$kept"))
         GlobalId.new()
     }
 
@@ -256,8 +376,9 @@ class ShiftOperations(
      * The cost of [minutes] of [employee]'s time: monthly salary plus the employer's insurance share, over the
      * standard month of the policy in force (or 192 hours, 44 a week, when none is configured).
      */
-    fun cost(employee: Employee, minutes: Int, policy: StatutoryPolicy?): Money {
-        val monthly = employee.monthlySalary.rial + (policy?.let { Ratio.mulDiv(employee.monthlySalary.rial, it.employerInsuranceBp.toLong(), 10_000) } ?: 0L)
+    fun cost(employee: Employee, minutes: Int, policy: StatutoryPolicy?, date: BusinessDate): Money {
+        val salary = employee.salaryOn(date).rial
+        val monthly = salary + (policy?.let { Ratio.mulDiv(salary, it.employerInsuranceBp.toLong(), 10_000) } ?: 0L)
         return Money.of(Ratio.mulDiv(monthly, minutes.toLong(), (policy?.standardMonthlyMinutes ?: DEFAULT_MONTH_MINUTES).toLong()))
     }
 
@@ -270,6 +391,7 @@ class ShiftOperations(
     companion object {
         const val MAX_FAILURES = 5
         const val LOCK_MILLIS = 5 * 60_000L
+        const val MAX_LOCK_MILLIS = 24 * 60 * 60_000L
         const val DEFAULT_MONTH_MINUTES = 192 * 60
     }
 }

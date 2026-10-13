@@ -145,9 +145,12 @@ class SabouCore private constructor(
     val payrollPolicies = PolicyAdministration(bus, SqlPolicyStore(db))
     internal val policyRegistry = StatutoryPolicyRegistry { payrollPolicies.policies() + policies }
     val fixedAssets = ir.sabou.assets.AssetOperations(bus, ledger, registry.issue(ModuleId.ASSETS), treasuryGateway, assetStore)
-    val payroll = PayrollOperations(bus, ledger, registry.issue(ModuleId.PAYROLL), treasuryGateway, personnel, payrollStore, policyRegistry)
+    val payrollSettings = ir.sabou.payroll.PayrollSettingsAdministration(bus, ir.sabou.persistence.SqlPayrollSettingsStore(db))
+    val payroll = PayrollOperations(bus, ledger, registry.issue(ModuleId.PAYROLL), treasuryGateway, personnel, payrollStore, policyRegistry,
+        settings = payrollSettings::current,
+        otherApproverExists = { me -> users.all().any { it.isActive && it.id != me && it.role.allows(ir.sabou.platform.Permission.PAYROLL_APPROVE) } })
     internal val shiftStore = ir.sabou.persistence.SqlShiftStore(db)
-    val shifts = ir.sabou.payroll.ShiftOperations(bus, personnel, shiftStore, payroll)
+    val shifts = ir.sabou.payroll.ShiftOperations(bus, personnel, shiftStore, payroll, payrollSettings::current, { payrollStore.runs(it) })
     internal val staffDocumentStore = ir.sabou.persistence.SqlStaffDocumentStore(db)
     val staffDocuments = ir.sabou.payroll.StaffDocumentOperations(bus, personnel, staffDocumentStore, attachments)
 

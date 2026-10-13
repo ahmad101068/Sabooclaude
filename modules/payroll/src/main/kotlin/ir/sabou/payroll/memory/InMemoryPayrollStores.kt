@@ -75,6 +75,9 @@ class InMemoryShiftStore : ir.sabou.payroll.ShiftStore {
     override fun savePunch(punch: ir.sabou.payroll.Punch) { punches += punch }
     override fun clockPin(employeeId: GlobalId) = pins[employeeId]
     override fun saveClockPin(employeeId: GlobalId, hash: String?) { if (hash == null) pins.remove(employeeId) else pins[employeeId] = hash }
+    private val pinFailures = HashMap<GlobalId, ir.sabou.payroll.PinFailures>()
+    override fun pinFailures(employeeId: GlobalId) = pinFailures[employeeId] ?: ir.sabou.payroll.PinFailures(0, 0L)
+    override fun savePinFailures(employeeId: GlobalId, failures: ir.sabou.payroll.PinFailures) { pinFailures[employeeId] = failures }
 }
 
 class InMemoryStaffDocumentStore : ir.sabou.payroll.StaffDocumentStore {

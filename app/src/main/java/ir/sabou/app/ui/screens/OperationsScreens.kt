@@ -631,62 +631,24 @@ object OperationsScreens {
                 var birth by rememberSaveable { mutableStateOf<ir.sabou.kernel.JalaliDay?>(null) }
                 var birthOk by rememberSaveable { mutableStateOf(true) }
                 var birthKey by rememberSaveable { mutableStateOf(0) }
-                var editing by rememberSaveable { mutableStateOf<GlobalId?>(null) }
-                var ending by rememberSaveable { mutableStateOf<GlobalId?>(null) }
-                var lastDay by rememberSaveable { mutableStateOf(session.today) }
                 val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
-                val endId = rememberSaveable { mutableStateOf(GlobalId.new()) }
                 val action = rememberAction()
                 Page {
                     Loaded(data) { list ->
                         if (list.isEmpty()) EmptyState("کارمندی برای این شعبه ثبت نشده است.")
-                        list.forEach { e ->
-                            SCard {
+                        // Current staff first, then those who left; each card opens the person's page.
+                        list.sortedWith(compareBy({ it.endDate != null }, { it.personnelNumber })).forEach { e ->
+                            SCard(onClick = { nav.go(Route.Employee(e.id)) }) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(e.name, style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
-                                    if (e.personnelNumber > 0) Chip("شماره پرسنلی ${Fa.number(e.personnelNumber.toLong())}", ChipKind.PRIMARY)
+                                    Text(e.name, style = SabouType.bodyStrong, color = if (e.endDate == null) Sabou.colors.ink else Sabou.colors.muted, modifier = Modifier.weight(1f))
+                                    if (e.personnelNumber > 0) Chip("شماره ${Fa.number(e.personnelNumber.toLong())}", ChipKind.PRIMARY)
                                     if (e.endDate != null) Chip("پایان همکاری ${Fa.date(e.endDate!!)}", ChipKind.NEUTRAL)
                                 }
-                                KeyValue("حقوق ماهانه", Fa.rial(e.monthlySalary))
+                                KeyValue("حقوق ماهانه", Fa.rial(e.salaryOn(session.today)))
                                 // Each document that needs attention by name: which one, and what is wrong with it.
-                                val docIssues = issues.orNull().orEmpty().filter { it.employee.id == e.id }
-                                docIssues.forEach { v ->
+                                issues.orNull().orEmpty().filter { it.employee.id == e.id }.forEach { v ->
                                     Text("⚠ " + StaffDocScreens.issueText(v.issue), style = SabouType.label,
-                                        color = if (v.issue.missing || v.issue.expired) Sabou.colors.danger else Sabou.colors.onAccentSoft,
-                                        modifier = Modifier.clickable { nav.go(Route.StaffDocuments(e.id)) }.padding(vertical = 2.dp))
-                                }
-                                Text("مدارک", style = SabouType.label, color = Sabou.colors.primary,
-                                    modifier = Modifier.clickable { nav.go(Route.StaffDocuments(e.id)) }.padding(vertical = 4.dp))
-                                Text("کد ملی ${Fa.digits(e.nationalId)}" +
-                                    (e.birthDate?.let { " · تولد ${Fa.digits(it.day.toString())} ${Fa.monthNames[it.month - 1]} ${Fa.digits(it.year.toString())}" } ?: " · تاریخ تولد ثبت نشده") +
-                                    (e.startDate?.let { " · شروع کار ${Fa.date(it)}" } ?: ""),
-                                    style = SabouType.caption, color = Sabou.colors.muted)
-                                if (session.can(Permission.PERSONNEL_MANAGE)) {
-                                    if (editing == e.id) EmployeeDetailsForm(branch, e) { editing = null }
-                                    else Text("ویرایش مشخصات (نام، کد ملی، تاریخ تولد)", style = SabouType.label, color = Sabou.colors.primary,
-                                        modifier = Modifier.clickable { editing = e.id }.padding(vertical = 4.dp))
-                                }
-                                if (e.endDate == null && e.isActive && session.can(Permission.PERSONNEL_MANAGE)) {
-                                    var pin by rememberSaveable(e.id) { mutableStateOf("") }
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        TextInput("رمز ساعت‌زنی (۴ تا ۶ رقم)", pin, { pin = it }, Modifier.weight(1f), keyboard = KeyboardType.NumberPassword, secret = true)
-                                        Text("ثبت", style = SabouType.label, color = Sabou.colors.primary, modifier = Modifier.clickable(enabled = pin.length >= 4 && !action.busy) {
-                                            action.run({ shifts.setPin(ir.sabou.payroll.SetClockPin(GlobalId.new(), branch, e.id, pin)) }) { pin = "" }
-                                        }.padding(8.dp))
-                                    }
-                                    if (ending == e.id) {
-                                        DateInput("آخرین روز کار", lastDay, { lastDay = it }, session.today)
-                                        Text("حقوق ماه آخر به نسبت روزهای کار تا این تاریخ حساب می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
-                                        action.error?.let { Banner(it) }
-                                        PrimaryButton("ثبت پایان همکاری", {
-                                            action.run({ payroll.endEmployment(EndEmployment(endId.value, branch, e.id, lastDay)) }) {
-                                                ending = null; endId.value = GlobalId.new()
-                                            }
-                                        }, busy = action.busy)
-                                        SecondaryButton("انصراف", { ending = null })
-                                    } else {
-                                        SecondaryButton("پایان همکاری", { ending = e.id; lastDay = session.today; endId.value = GlobalId.new() })
-                                    }
+                                        color = if (v.issue.missing || v.issue.expired) Sabou.colors.danger else Sabou.colors.onAccentSoft)
                                 }
                             }
                         }
@@ -703,7 +665,7 @@ object OperationsScreens {
                                 Text("از وسط ماه شروع به کار کرده (حقوق ماه اول به نسبت روزها)", style = SabouType.body, color = Sabou.colors.ink)
                             }
                             if (midMonth) DateInput("تاریخ شروع کار", start, { start = it }, session.today)
-                            if (ending == null) action.error?.let { Banner(it) }
+                            action.error?.let { Banner(it) }
                             PrimaryButton("ثبت", {
                                 action.run({ payroll.registerEmployee(RegisterEmployee(id.value, branch, name, nationalId, salary!!, startDate = start.takeIf { midMonth }, birthDate = birth)) }) {
                                     name = ""; nationalId = ""; salary = null; midMonth = false; birth = null; birthOk = true; birthKey++; id.value = GlobalId.new()
@@ -713,26 +675,6 @@ object OperationsScreens {
                     }
                 }
             }
-        }
-    }
-
-    @Composable
-    private fun EmployeeDetailsForm(branch: Scope.Branch, e: ir.sabou.payroll.Employee, onDone: () -> Unit) {
-        var name by rememberSaveable(e.id) { mutableStateOf(e.name) }
-        var nationalId by rememberSaveable(e.id) { mutableStateOf(Fa.digits(e.nationalId)) }
-        var birth by rememberSaveable(e.id) { mutableStateOf(e.birthDate) }
-        var birthOk by rememberSaveable(e.id) { mutableStateOf(true) }
-        val id = rememberSaveable(e.id) { mutableStateOf(GlobalId.new()) }
-        val action = rememberAction()
-        TextInput("نام و نام خانوادگی", name, { name = it })
-        TextInput("کد ملی", nationalId, { nationalId = it }, keyboard = KeyboardType.Number)
-        BirthDateInput("تاریخ تولد", birth) { v, ok -> birth = v; birthOk = ok }
-        action.error?.let { Banner(it) }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PrimaryButton("ذخیره", {
-                action.run({ payroll.updateEmployeeDetails(ir.sabou.payroll.UpdateEmployeeDetails(id.value, branch, e.id, name, nationalId, birth)) }) { onDone() }
-            }, Modifier.weight(1f), enabled = name.isNotBlank() && nationalId.isNotBlank() && birthOk, busy = action.busy)
-            SecondaryButton("انصراف", onDone, Modifier.weight(1f))
         }
     }
 
