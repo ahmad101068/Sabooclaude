@@ -208,6 +208,10 @@ class PayrollOperations(
     private val otherApproverExists: (GlobalId) -> Boolean = { true },
     /** Whether the person has shifts planned in a branch from a date (they block a transfer). */
     private val hasShiftsFrom: (GlobalId, Scope.Branch, BusinessDate) -> Boolean = { _, _, _ -> false },
+    /** Pay elements, one-off lines and leave; without it (module tests) none apply. */
+    private val elements: PayElementStore? = null,
+    /** Fridays, and the branch's holidays. */
+    private val isHoliday: (Scope.Branch, BusinessDate) -> Boolean = { _, d -> JalaliCalendar.weekdayIndex(d) == 6 },
 ) {
     init {
         require(capability.module == ModuleId.PAYROLL)
@@ -303,6 +307,83 @@ class PayrollOperations(
         ensure(a.scope == scope) { DomainError.InvalidInput("scope", "این مساعده متعلق به این شعبه نیست.") }
         return a
     }
+
+    // ------------------------------------------------------------ Pay elements, one-off lines, leave
+
+    fun savePayElement(c: SavePayElement): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val el = cmd.element.copy(name = cmd.element.name.trim())
+        ensure(el.name.length in 2..60) { DomainError.InvalidInput("name", "نام عامل حقوقی را بنویسید.") }
+        ensure(el.kind != PayLine.Kind.ADVANCE) { DomainError.InvalidInput("kind", "مزایا یا کسور.") }
+        ensure(el.amount > 0 && (el.basis != PayElement.Basis.PERCENT_OF_BASE || el.amount <= 10_000)) { DomainError.InvalidInput("amount", "مبلغ یا درصد معتبر نیست.") }
+        store().saveElement(el)
+        ctx.audit(AuditDraft("PAY_ELEMENT_SAVE", "PAY_ELEMENT", el.id.value, el.toString()))
+        el.id
+    }
+
+    fun addAdjustment(c: AddPayAdjustment): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val title = cmd.title.trim()
+        ensure(title.length in 2..60) { DomainError.InvalidInput("title", "شرح را بنویسید.") }
+        ensure(cmd.kind != PayLine.Kind.ADVANCE && cmd.employeeIds.isNotEmpty()) { DomainError.InvalidInput("employees", "کارمند را انتخاب کنید.") }
+        ensure((cmd.amount != null && !cmd.amount.isZero) != (cmd.percentOfSalary != null && cmd.percentOfSalary in 1..100_000)) {
+            DomainError.InvalidInput("amount", "مبلغ یا درصدی از حقوق را وارد کنید.")
+        }
+        ensure(payroll.runs(cmd.scope).none { it.status == RunStatus.APPROVED && it.from == cmd.periodFrom }) { DomainError.InvalidState("PAYROLL_RUN", "APPROVED") }
+        val ids = cmd.employeeIds.distinct().map { id ->
+            val e = requireEmployee(id, cmd.scope)
+            val amount = cmd.amount ?: Money.of(Ratio.mulDiv(e.salaryOn(cmd.periodFrom).rial, cmd.percentOfSalary!!.toLong(), 10_000))
+            val adj = PayAdjustment(GlobalId.new(), cmd.scope, e.id, cmd.periodFrom, title, cmd.kind, amount, cmd.insurable, cmd.taxable)
+            store().saveAdjustment(adj)
+            ctx.audit(AuditDraft("PAY_ADJUSTMENT_ADD", "EMPLOYEE", e.id.value, "period=${cmd.periodFrom.epochDay};${cmd.kind};${amount.rial};$title"))
+            adj.id
+        }
+        ids.first()
+    }
+
+    fun removeAdjustment(c: RemovePayAdjustment): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val adj = store().adjustment(cmd.adjustmentId) ?: throw DomainException(DomainError.NotFound("PAY_ADJUSTMENT"))
+        ensure(adj.scope == cmd.scope) { DomainError.InvalidInput("scope", "متعلق به این شعبه نیست.") }
+        ensure(payroll.runs(cmd.scope).none { it.status == RunStatus.APPROVED && it.from == adj.periodFrom }) { DomainError.InvalidState("PAYROLL_RUN", "APPROVED") }
+        store().deleteAdjustment(adj.id)
+        ctx.audit(AuditDraft("PAY_ADJUSTMENT_REMOVE", "EMPLOYEE", adj.employeeId.value, "period=${adj.periodFrom.epochDay};${adj.amount.rial};${adj.title}"))
+        adj.id
+    }
+
+    fun recordLeave(c: RecordLeave): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val e = requireEmployee(cmd.employeeId, cmd.scope)
+        val options = settings()
+        ensure(cmd.from <= cmd.to && cmd.to.epochDay - cmd.from.epochDay < 62) { DomainError.InvalidInput("to", "بازه‌ی مرخصی معتبر نیست.") }
+        val minutes = cmd.minutes ?: options.workdayMinutes
+        ensure(minutes in 15..options.workdayMinutes && (cmd.minutes == null || cmd.from == cmd.to)) { DomainError.InvalidInput("minutes", "مدت مرخصی ساعتی معتبر نیست.") }
+        ensure(cmd.note.length <= 120) { DomainError.InvalidInput("note", "متن بیش از حد طولانی است.") }
+        // Fridays and holidays are not working days: a week's leave is six days.
+        val days = generateSequence(cmd.from) { it.plusDays(1) }.takeWhile { it <= cmd.to }.filter { !isHoliday(cmd.scope, it) }.toList()
+        ensure(days.isNotEmpty()) { DomainError.InvalidInput("from", "این روزها تعطیل است.") }
+        ensure(days.all { e.employedOn(it) }) { DomainError.InvalidState("EMPLOYEE", "NOT_EMPLOYED_ON_DATE") }
+        ensure(days.none { d -> payroll.runs(cmd.scope).any { it.status == RunStatus.APPROVED && d >= it.from && d <= it.to } }) { DomainError.InvalidState("ATTENDANCE", "PERIOD_APPROVED") }
+        val existing = store().leaves(e.id).filter { !it.cancelled }
+        ensure(days.none { d -> existing.any { it.date == d } }) { DomainError.InvalidState("LEAVE", "OVERLAP") }
+        if (cmd.kind == Leave.Kind.ANNUAL) {
+            val left = LeaveRules.balance(e, existing, options, cmd.to).left
+            ensure(left >= minutes.toLong() * days.size) { DomainError.InvalidState("LEAVE", "NOT_ENOUGH:${left}") }
+        }
+        val ids = days.map { d -> Leave(GlobalId.new(), cmd.scope, e.id, d, cmd.kind, minutes, cmd.note.trim()).also(store()::saveLeave).id }
+        ctx.audit(AuditDraft("LEAVE_RECORD", "EMPLOYEE", e.id.value, "${cmd.kind};${cmd.from.epochDay}-${cmd.to.epochDay};days=${days.size};minutes=$minutes"))
+        ids.first()
+    }
+
+    fun cancelLeave(c: CancelLeave): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
+        val leave = store().leave(cmd.leaveId) ?: throw DomainException(DomainError.NotFound("LEAVE"))
+        requireEmployee(leave.employeeId, cmd.scope)
+        ensure(!leave.cancelled) { DomainError.InvalidState("LEAVE", "CANCELLED") }
+        ensure(payroll.runs(cmd.scope).none { it.status == RunStatus.APPROVED && leave.date >= it.from && leave.date <= it.to }) { DomainError.InvalidState("ATTENDANCE", "PERIOD_APPROVED") }
+        store().saveLeave(leave.copy(cancelled = true))
+        ctx.audit(AuditDraft("LEAVE_CANCEL", "EMPLOYEE", leave.employeeId.value, "day=${leave.date.epochDay};${leave.kind}"))
+        leave.id
+    }
+
+    fun leaveBalance(e: Employee, on: BusinessDate): LeaveBalance = LeaveRules.balance(e, elements?.leaves(e.id).orEmpty(), settings(), on)
+
+    private fun store(): PayElementStore = elements ?: throw DomainException(DomainError.InvalidState("PAY_ELEMENTS", "NOT_AVAILABLE"))
 
     fun registerEmployee(c: RegisterEmployee): CommandOutcome = bus.execute(ModuleId.PAYROLL, c) { cmd, ctx ->
         val name = cmd.name.trim()
@@ -450,7 +531,7 @@ class PayrollOperations(
     /** One day's attendance under the attendance rules; also used when a day's punches are confirmed (ADR-0038). */
     internal fun applyAttendance(
         ctx: ir.sabou.platform.CommandContext, scope: Scope.Branch, employeeId: GlobalId, date: BusinessDate,
-        worked: Int, overtime: Int, absent: Int, source: AttendanceRecord.Source,
+        worked: Int, overtime: Int, absent: Int, source: AttendanceRecord.Source, night: Int = 0,
     ): GlobalId {
         val employee = requireEmployee(employeeId, scope)
         ensure(employee.employedDays(date, date) == 1) { DomainError.InvalidState("EMPLOYEE", "NOT_EMPLOYED_ON_DATE") }
@@ -459,7 +540,7 @@ class PayrollOperations(
             DomainError.InvalidState("ATTENDANCE", "PERIOD_APPROVED")
         }
         val existing = personnel.attendanceOn(employee.id, date)
-        val record = AttendanceRecord(existing?.id ?: GlobalId.new(), employee.id, date, worked, overtime, absent, source)
+        val record = AttendanceRecord(existing?.id ?: GlobalId.new(), employee.id, date, worked, overtime, absent, source, night)
         personnel.saveAttendance(record)
         ctx.audit(AuditDraft(if (existing == null) "ATTENDANCE_RECORD" else "ATTENDANCE_CORRECT", "EMPLOYEE", employee.id.value,
             "day=${date.epochDay};w=$worked;ot=$overtime;abs=$absent;src=$source" + (existing?.let { ";was=${it.workedMinutes}/${it.overtimeMinutes}/${it.absentMinutes}/${it.source}" } ?: "")))
@@ -625,10 +706,88 @@ class PayrollOperations(
                 OvertimeMode.FIXED_HOURLY -> Money.of(Ratio.mulDiv(options.overtimeHourlyRate.rial, overtimeMinutes, 60))
                 OvertimeMode.NONE -> Money.ZERO
             }
+            // Leave on a day covers its absence; unpaid and sick leave are deducted like absence (insurance pays sick days).
+            val leaves = elements?.leaves(e.id).orEmpty().filter { !it.cancelled && it.date in days }
+            val leaveOn = leaves.groupBy { it.date }.mapValues { (_, l) -> l.sumOf { it.minutes } }
             // Absence is deducted only from days paid monthly (a daily or hourly wage pays only the time worked).
-            val absent = records.filter { it.date in monthlyDays }.sumOf { it.absentMinutes.toLong() }
+            val absent = records.filter { it.date in monthlyDays }.sumOf { maxOf(0, it.absentMinutes - (leaveOn[it.date] ?: 0)).toLong() } +
+                leaves.filter { it.kind != Leave.Kind.ANNUAL && it.date in monthlyDays }.sumOf { it.minutes.toLong() }
+            val baseAmount = base ?: if (partial) Money.of(minOf(monthly.rial, Ratio.mulDiv(monthly.rial, employed.toLong(), policy.prorationDays.toLong()))) else monthly
+            val earnings = extraLines(e, scope, from, to, days, partial, employed, periodDays, monthly, baseAmount, records, leaves, policy, options)
             policy.calculate(e.id, monthly, absent, overtimeMinutes,
-                payableDays = employed.takeIf { partial && monthlyDays.size == days.size }, base = base, overtimePay = overtimePay, lines = advanceLines(e, to))
+                payableDays = employed.takeIf { partial && monthlyDays.size == days.size }, base = base, overtimePay = overtimePay,
+                lines = earnings.filter { it.kind == PayLine.Kind.EARNING } + advanceLines(e, to) + earnings.filter { it.kind == PayLine.Kind.DEDUCTION })
+        }
+    }
+
+    /**
+     * Pay elements, one-off lines, night and holiday premiums, annual leave of daily / hourly workers, eidi, severance
+     * and unused leave on leaving. Rates: the month's rate over the standard month (an hour's pay).
+     */
+    private fun extraLines(
+        e: Employee, scope: Scope.Branch, from: BusinessDate, to: BusinessDate, days: List<BusinessDate>, partial: Boolean, employed: Int, periodDays: Int,
+        monthly: Money, base: Money, records: List<AttendanceRecord>, leaves: List<Leave>, policy: StatutoryPolicy, options: PayrollSettings,
+    ): List<PayLine> = buildList {
+        fun perMinute(minutes: Long, bp: Long = 10_000) = Money.of(Ratio.mulDiv(monthly.rial, Math.multiplyExact(minutes, bp), policy.standardMonthlyMinutes * 10_000L))
+        val store = elements
+        store?.elements()?.filter { it.appliesTo(e, to) }?.forEach { el ->
+            val full = el.monthly(e, base, to)
+            // Monthly amounts follow the days worked in a partial month, like the salary.
+            val amount = if (partial && el.basis != PayElement.Basis.PERCENT_OF_BASE)
+                Money.of(minOf(full.rial, Ratio.mulDiv(full.rial, employed.toLong(), policy.prorationDays.toLong()))) else full
+            if (!amount.isZero) add(PayLine("ELEMENT:${el.id.value}", el.name, amount, el.kind, el.insurable, el.taxable))
+        }
+        store?.adjustments(scope, from)?.filter { it.employeeId == e.id }?.forEach {
+            add(PayLine("ADJ:${it.id.value}", it.title, it.amount, it.kind, it.insurable, it.taxable))
+        }
+        if (options.nightPremiumBp > 0) {
+            val night = records.sumOf { it.nightMinutes.toLong() }
+            if (night > 0) add(PayLine("NIGHT", "شب‌کاری", perMinute(night, options.nightPremiumBp.toLong()), PayLine.Kind.EARNING, insurable = true, taxable = true))
+        }
+        if (options.holidayPremiumBp > 0) {
+            val holiday = records.filter { isHoliday(scope, it.date) }.sumOf { (it.workedMinutes + it.overtimeMinutes).toLong() }
+            if (holiday > 0) add(PayLine("HOLIDAY", "جمعه‌کاری و تعطیل‌کاری", perMinute(holiday, options.holidayPremiumBp.toLong()), PayLine.Kind.EARNING, insurable = true, taxable = true))
+        }
+        // Annual leave of someone paid by the day or hour: their wage for that time.
+        val paidLeave = leaves.filter { it.kind == Leave.Kind.ANNUAL && e.payTypeOn(it.date) != PayType.MONTHLY }.sumOf { l ->
+            val rate = e.salaryOn(l.date).rial
+            if (e.payTypeOn(l.date) == PayType.DAILY) Ratio.mulDiv(rate, l.minutes.toLong(), options.workdayMinutes.toLong()) else Ratio.mulDiv(rate, l.minutes.toLong(), 60)
+        }
+        if (paidLeave > 0) add(PayLine("LEAVE_PAY", "مرخصی استحقاقی", Money.of(paidLeave), PayLine.Kind.EARNING, insurable = true, taxable = true))
+
+        val year = JalaliCalendar.yearOf(to)
+        val yearStart = JalaliCalendar.date(year, 1, 1)
+        val yearEnd = JalaliCalendar.date(year, 12, JalaliCalendar.monthLength(year, 12))
+        val yearDays = yearEnd.epochDay - yearStart.epochDay + 1
+        val leaving = e.endDate != null && e.endDate >= from && e.endDate <= to
+        val dayRate = Money.of(monthly.rial / 30)
+        fun paidThisYear(code: String) = scopesOf(e).flatMap { payroll.runs(it) }.any { r ->
+            r.status == RunStatus.APPROVED && JalaliCalendar.yearOf(r.to) == year && r.payslips.any { p -> p.employeeId == e.id && p.lines.any { it.code == code } }
+        }
+        val eidiMonth = JalaliCalendar.of(to).month == options.eidiMonth
+        if (options.eidiEnabled && (eidiMonth || leaving) && !paidThisYear("EIDI:$year")) {
+            // Days of salary for a full year (capped), for the days worked this year.
+            val full = Money.of(Math.multiplyExact(dayRate.rial, options.eidiDays.toLong())).let { if (options.eidiCap.rial > 0) minOf(it, options.eidiCap) else it }
+            val worked = e.employedDays(yearStart, if (leaving) e.endDate!! else yearEnd).toLong()
+            val eidi = Money.of(Ratio.mulDiv(full.rial, worked, yearDays))
+            val exempt = minOf(eidi, Money.of(Ratio.mulDiv(options.eidiTaxExempt.rial, worked, yearDays)))
+            if (!exempt.isZero) add(PayLine("EIDI:$year", "عیدی (معاف از مالیات)", exempt, PayLine.Kind.EARNING, insurable = false, taxable = false))
+            if (eidi > exempt) add(PayLine("EIDI:$year", "عیدی", eidi - exempt, PayLine.Kind.EARNING, insurable = false, taxable = true))
+        }
+        if (options.sanavatEnabled) {
+            val start = e.startDate
+            val sanavatDays = when {
+                options.sanavatYearly && eidiMonth && !leaving && !paidThisYear("SANAVAT:$year") -> e.employedDays(yearStart, yearEnd).toLong()
+                // On leaving: the whole employment, or only this year's days when earlier years were paid yearly.
+                leaving && start != null -> if (options.sanavatYearly) e.employedDays(yearStart, e.endDate!!).toLong() else e.endDate!!.epochDay - start.epochDay + 1
+                else -> 0L
+            }
+            if (sanavatDays > 0) add(PayLine(if (leaving) "SANAVAT:EXIT" else "SANAVAT:$year", "سنوات", Money.of(Ratio.mulDiv(Math.multiplyExact(dayRate.rial, options.sanavatDays.toLong()), sanavatDays, 365)),
+                PayLine.Kind.EARNING, insurable = false, taxable = false))
+        }
+        if (leaving && options.leavePayoutOnExit && store != null) {
+            val left = LeaveRules.balance(e, store.leaves(e.id), options, e.endDate!!).left
+            if (left > 0) add(PayLine("LEAVE_PAYOUT", "مرخصی ذخیره (بازخرید)", perMinute(left), PayLine.Kind.EARNING, insurable = true, taxable = true))
         }
     }
 

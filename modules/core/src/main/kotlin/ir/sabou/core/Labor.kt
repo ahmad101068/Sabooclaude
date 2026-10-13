@@ -116,6 +116,27 @@ class Labor internal constructor(private val core: SabouCore) {
         return employee
     }
 
+    /** A person's leave (cancelled ones too, marked) and annual balance on [on]. */
+    fun leaves(employeeId: GlobalId, on: BusinessDate): Pair<List<ir.sabou.payroll.Leave>, ir.sabou.payroll.LeaveBalance> {
+        val a = actor(Permission.ATTENDANCE_RECORD, Permission.PERSONNEL_MANAGE, Permission.PERSONNEL_VIEW)
+        val employee = core.personnel.employee(employeeId) ?: throw DomainException(DomainError.NotFound("EMPLOYEE"))
+        a.require(employee.scope)
+        return core.payElementStore.leaves(employeeId).sortedByDescending { it.date } to core.payroll.leaveBalance(employee, on)
+    }
+
+    /** The restaurant's pay elements. */
+    fun payElements(): List<ir.sabou.payroll.PayElement> {
+        actor(Permission.PAYROLL_APPROVE, Permission.PAYROLL_CALCULATE, Permission.PERSONNEL_MANAGE)
+        return core.payElementStore.elements()
+    }
+
+    /** One-off lines of a branch's payroll month, with names. */
+    fun adjustments(branch: Scope.Branch, periodFrom: BusinessDate): List<Pair<ir.sabou.payroll.PayAdjustment, String>> {
+        actor(Permission.PAYROLL_CALCULATE, Permission.PAYROLL_APPROVE, Permission.PAYROLL_PAY).require(branch)
+        val names = core.personnel.employees(branch).associate { it.id to it.name }
+        return core.payElementStore.adjustments(branch, periodFrom).map { it to names[it.employeeId].orEmpty() }
+    }
+
     /** The person's latest photo, if any. */
     fun photo(employeeId: GlobalId): ir.sabou.platform.Attachment? {
         employee(employeeId)

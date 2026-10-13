@@ -92,6 +92,8 @@ data class DayTime(
     val openPunch: Boolean,
     /** Overtime shorter than this is not counted (settings). */
     val overtimeMinimum: Int = 0,
+    /** Clocked minutes inside the night hours. */
+    val night: Int = 0,
 ) {
     /** Beyond the plan (only when there was a plan), when at least the minimum. */
     val overtime: Int get() = (if (planned > 0) maxOf(0, worked - planned) else 0).takeIf { it >= overtimeMinimum } ?: 0
@@ -106,11 +108,11 @@ object TimeMath {
      */
     fun day(employeeId: GlobalId, date: BusinessDate, shifts: List<Shift>, punches: List<Punch>, settings: PayrollSettings = PayrollSettings()): DayTime {
         val sorted = Punch.effective(punches)
-        var worked = 0; var pairs = 0; var open: Punch? = null
+        var worked = 0; var pairs = 0; var open: Punch? = null; var night = 0
         for (p in sorted) {
             when (p.kind) {
                 Punch.Kind.IN -> if (open == null) open = p
-                Punch.Kind.OUT -> open?.let { worked += p.minute - it.minute; pairs++; open = null }
+                Punch.Kind.OUT -> open?.let { worked += p.minute - it.minute; night += nightMinutes(it.minute, p.minute, settings); pairs++; open = null }
             }
         }
         val deduct = settings.deductPlannedBreaks
@@ -121,7 +123,17 @@ object TimeMath {
         val firstIn = sorted.firstOrNull { it.kind == Punch.Kind.IN }?.minute
         val start = shifts.minOfOrNull { it.startMinute }
         val late = if (firstIn != null && start != null) maxOf(0, firstIn - start - settings.lateGraceMinutes) else 0
-        return DayTime(employeeId, date, planned, maxOf(0, worked - if (worked > breaks) breaks else 0), late, open != null, settings.overtimeMinimumMinutes)
+        return DayTime(employeeId, date, planned, maxOf(0, worked - if (worked > breaks) breaks else 0), late, open != null, settings.overtimeMinimumMinutes, night)
+    }
+
+    /** Minutes of [from]..[to] (from the work day's midnight, past 24:00 for a night shift) inside the night hours. */
+    fun nightMinutes(from: Int, to: Int, settings: PayrollSettings): Int {
+        val start = settings.nightStartMinute; val end = settings.nightEndMinute
+        return (-1..1).sumOf { k ->
+            val a = k * 1_440 + start
+            val b = if (start > end) (k + 1) * 1_440 + end else k * 1_440 + end
+            maxOf(0, minOf(to, b) - maxOf(from, a))
+        }
     }
 
     /** A night shift's IN still open the next morning is closed by an OUT up to this long after it. */
@@ -373,7 +385,7 @@ class ShiftOperations(
             // A day typed by hand is someone's decision: kept unless the manager chose to replace it.
             if (!cmd.replaceManual && personnel.attendanceOn(t.employeeId, cmd.date)?.source == AttendanceRecord.Source.MANUAL) { kept++; return@forEach }
             val regular = if (t.planned > 0) minOf(t.worked, t.planned) else t.worked
-            payroll.applyAttendance(ctx, cmd.scope, t.employeeId, cmd.date, regular, t.overtime, t.absent, AttendanceRecord.Source.CLOCK)
+            payroll.applyAttendance(ctx, cmd.scope, t.employeeId, cmd.date, regular, t.overtime, t.absent, AttendanceRecord.Source.CLOCK, t.night)
         }
         ctx.audit(AuditDraft("DAY_TIME_CONFIRM", "ATTENDANCE", cmd.date.epochDay.toString(), "employees=${times.size};kept_manual=$kept"))
         GlobalId.new()

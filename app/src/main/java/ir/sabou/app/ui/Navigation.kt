@@ -94,6 +94,7 @@ sealed interface Route : java.io.Serializable {
     /** One employee: details, salary history, clock PIN, end or return. */
     data class Employee(val employeeId: GlobalId) : Route
     data object PayrollSettings : Route
+    data object PayElements : Route
     data object Payroll : Route
 
     // Settings

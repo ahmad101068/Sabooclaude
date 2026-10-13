@@ -142,6 +142,11 @@ object EmployeeScreens {
                         }
                     }
 
+                    if (session.can(Permission.ATTENDANCE_RECORD) || session.can(Permission.PERSONNEL_VIEW) || manage) {
+                        SectionTitle("مرخصی")
+                        SCard { Leaves(e, open == "leave", { open = if (it) "leave" else null }) }
+                    }
+
                     if (session.can(Permission.PAYROLL_PAY) || session.can(Permission.PERSONNEL_VIEW) || manage) {
                         SectionTitle("مساعده و وام")
                         SCard { Advances(e, open == "advance", { open = if (it) "advance" else null }) }
@@ -232,7 +237,7 @@ object EmployeeScreens {
         val pay = session.can(Permission.PAYROLL_PAY)
         var changed by rememberSaveable { mutableStateOf(0) }
         val data by load(session, e.id, changed) { labor.advances(e.id) }
-        val accounts by load(session, e.scope, pay) { if (pay) overview.payroll(e.scope).accounts else emptyList() }
+        val accounts by load(session, e.scope, pay) { if (pay) overview.paymentAccounts(e.scope) else emptyList() }
         val list = data.orNull().orEmpty()
         if (list.isEmpty()) Text("مساعده یا وامی ثبت نشده است.", style = SabouType.body, color = Sabou.colors.muted)
         list.forEach { v ->
@@ -302,6 +307,69 @@ object EmployeeScreens {
                 if (v.deducted.isZero && v.advance.repayments.isEmpty()) Link("لغو (ثبت اشتباه)") { mode = "cancel" }
             }
         }
+    }
+
+    private fun hours(minutes: Long) = "${Fa.number(minutes / 60)}:${Fa.digits((minutes % 60).toString().padStart(2, '0'))}"
+    fun leaveName(k: ir.sabou.payroll.Leave.Kind) = when (k) {
+        ir.sabou.payroll.Leave.Kind.ANNUAL -> "استحقاقی"; ir.sabou.payroll.Leave.Kind.SICK -> "استعلاجی"; ir.sabou.payroll.Leave.Kind.UNPAID -> "بدون حقوق"
+    }
+
+    @Composable
+    private fun Leaves(e: Employee, adding: Boolean, onAdding: (Boolean) -> Unit) {
+        val session = LocalSession.current
+        var changed by rememberSaveable { mutableStateOf(0) }
+        val data by load(session, e.id, changed) { labor.leaves(e.id, session.today) }
+        val settings by load(session) { payrollSettings.current() }
+        val record = session.can(Permission.ATTENDANCE_RECORD)
+        val action = rememberAction()
+        Loaded(data) { (list, balance) ->
+            val day = settings.orNull()?.workdayMinutes?.toLong() ?: 440L
+            KeyValue("مانده‌ی مرخصی استحقاقی ${Fa.digits(balance.year.toString())}",
+                "${Fa.number(balance.left / day)} روز و ${hours(balance.left % day)} ساعت", strong = true)
+            Text("از سال قبل ${hours(balance.carried)} · امسال ${hours(balance.earned)} · استفاده ${hours(balance.used)} (ساعت)", style = SabouType.caption, color = Sabou.colors.muted)
+            list.filter { !it.cancelled }.take(30).forEach { l ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${Fa.date(l.date)} · ${leaveName(l.kind)} · " + (if (l.minutes.toLong() == day) "یک روز" else hours(l.minutes.toLong()) + " ساعت") +
+                        (if (l.note.isNotBlank()) " · ${l.note}" else ""), style = SabouType.caption, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                    if (record) Text("لغو", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable(enabled = !action.busy) {
+                        action.run({ payroll.cancelLeave(ir.sabou.payroll.CancelLeave(GlobalId.new(), e.scope, l.id)) }) { changed++ }
+                    }.padding(6.dp))
+                }
+            }
+            action.error?.let { Banner(it) }
+            if (record && e.endDate == null) {
+                if (adding) LeaveForm(e) { onAdding(false); changed++ }
+                else Link("+ ثبت مرخصی") { onAdding(true) }
+            }
+        }
+    }
+
+    @Composable
+    private fun LeaveForm(e: Employee, onDone: () -> Unit) {
+        val session = LocalSession.current
+        var kind by rememberSaveable { mutableStateOf(ir.sabou.payroll.Leave.Kind.ANNUAL) }
+        var from by rememberSaveable { mutableStateOf(session.today) }
+        var to by rememberSaveable { mutableStateOf(session.today) }
+        var hourly by rememberSaveable { mutableStateOf(false) }
+        var minutes by rememberSaveable { mutableStateOf<Int?>(null) }
+        var note by rememberSaveable { mutableStateOf("") }
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
+        val action = rememberAction()
+        Picker("نوع مرخصی", ir.sabou.payroll.Leave.Kind.entries.map { Choice(it, leaveName(it)) }, kind, { kind = it })
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { hourly = !hourly }) {
+            Checkbox(checked = hourly, onCheckedChange = { hourly = it })
+            Text("ساعتی (چند ساعت از یک روز)", style = SabouType.body, color = Sabou.colors.ink)
+        }
+        DateInput(if (hourly) "روز" else "از", from, { from = it; if (to < it) to = it }, session.today)
+        if (hourly) ir.sabou.app.ui.components.TimeInput("مدت", minutes, { minutes = it }, duration = true)
+        else DateInput("تا", to, { to = it }, session.today)
+        TextInput("توضیح", note, { note = it })
+        Text("جمعه‌ها و تعطیلات جزو مرخصی حساب نمی‌شوند. مرخصی بدون حقوق و استعلاجی از حقوق کم می‌شود (استعلاجی را بیمه می‌پردازد).",
+            style = SabouType.caption, color = Sabou.colors.muted)
+        action.error?.let { Banner(it) }
+        Buttons("ثبت مرخصی", action.busy, !hourly || (minutes != null && minutes!! >= 15), {
+            action.run({ payroll.recordLeave(ir.sabou.payroll.RecordLeave(id.value, e.scope, e.id, from, if (hourly) from else to, kind, minutes.takeIf { hourly }, note)) }) { onDone() }
+        }, onDone)
     }
 
     @Composable
@@ -417,6 +485,101 @@ object EmployeeScreens {
         }, onDone)
     }
 
+    // ------------------------------------------------------------ Pay elements
+
+    fun basisName(b: ir.sabou.payroll.PayElement.Basis) = when (b) {
+        ir.sabou.payroll.PayElement.Basis.FIXED -> "مبلغ ثابت ماهانه"
+        ir.sabou.payroll.PayElement.Basis.PER_CHILD -> "برای هر فرزند"
+        ir.sabou.payroll.PayElement.Basis.PER_SERVICE_YEAR -> "برای هر سال سابقه"
+        ir.sabou.payroll.PayElement.Basis.PERCENT_OF_BASE -> "درصدی از حقوق پایه"
+    }
+
+    /** Housing, food voucher, child allowance, seniority pay, monthly deductions: defined once, on every payslip. */
+    @Composable
+    fun Elements(nav: Nav) {
+        val session = LocalSession.current
+        var changed by rememberSaveable { mutableStateOf(0) }
+        var editing by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var adding by rememberSaveable { mutableStateOf(false) }
+        val data by load(session, changed) { labor.payElements() to overview.branches().flatMap { b -> runCatching { overview.employees(ir.sabou.kernel.Scope.Branch(b.id)) }.getOrDefault(emptyList()) } }
+        val manage = session.can(Permission.PAYROLL_APPROVE)
+        Column(Modifier.fillMaxSize()) {
+            Header("عوامل حقوقی", onBack = nav.back)
+            Page {
+                Text("مزایا و کسوراتی که هر ماه روی فیش می‌آیند. مبلغ‌های قانونی هر سال (مسکن، بن، حق اولاد، پایه سنوات) را پس از تأیید کارشناس وارد کنید؛ برنامه چیزی فرض نمی‌کند.",
+                    style = SabouType.caption, color = Sabou.colors.muted)
+                Loaded(data) { (list, people) ->
+                    if (list.isEmpty()) ir.sabou.app.ui.components.EmptyState("هنوز عاملی تعریف نشده است.")
+                    list.forEach { el ->
+                        SCard {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(el.name, style = SabouType.bodyStrong, color = if (el.active) Sabou.colors.ink else Sabou.colors.muted, modifier = Modifier.weight(1f))
+                                Chip(if (el.kind == ir.sabou.payroll.PayLine.Kind.EARNING) "مزایا" else "کسور", if (el.active) ChipKind.PRIMARY else ChipKind.NEUTRAL)
+                            }
+                            Text(basisName(el.basis) + ": " + (if (el.basis == ir.sabou.payroll.PayElement.Basis.PERCENT_OF_BASE) "${pct(el.amount.toInt())}٪" else Fa.rial(el.amount) + " ریال") +
+                                (if (el.insurable) " · مشمول بیمه" else "") + (if (el.taxable) " · مشمول مالیات" else "") +
+                                (el.from?.let { " · از ${Fa.date(it)}" } ?: "") +
+                                (if (el.employees.isEmpty()) " · همه" else " · ${Fa.number(el.employees.size.toLong())} نفر") + if (!el.active) " · غیرفعال" else "",
+                                style = SabouType.caption, color = Sabou.colors.muted)
+                            if (manage) {
+                                if (editing == el.id) ElementForm(el, people) { editing = null; changed++ }
+                                else Link("ویرایش") { editing = el.id; adding = false }
+                            }
+                        }
+                    }
+                    if (manage) {
+                        if (adding) FormCard("عامل تازه") { ElementForm(null, people) { adding = false; changed++ } }
+                        else PrimaryButton("+ عامل حقوقی", { adding = true; editing = null })
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun ElementForm(el: ir.sabou.payroll.PayElement?, people: List<Employee>, onDone: () -> Unit) {
+        val session = LocalSession.current
+        var name by rememberSaveable { mutableStateOf(el?.name ?: "") }
+        var kind by rememberSaveable { mutableStateOf(el?.kind ?: ir.sabou.payroll.PayLine.Kind.EARNING) }
+        var basis by rememberSaveable { mutableStateOf(el?.basis ?: ir.sabou.payroll.PayElement.Basis.FIXED) }
+        var amount by rememberSaveable { mutableStateOf<Money?>(el?.takeIf { it.basis != ir.sabou.payroll.PayElement.Basis.PERCENT_OF_BASE }?.amount?.let { Money.of(it) }) }
+        var percent by rememberSaveable { mutableStateOf(el?.takeIf { it.basis == ir.sabou.payroll.PayElement.Basis.PERCENT_OF_BASE }?.let { pct(it.amount.toInt()) } ?: "") }
+        var insurable by rememberSaveable { mutableStateOf(el?.insurable ?: true) }
+        var taxable by rememberSaveable { mutableStateOf(el?.taxable ?: true) }
+        var from by rememberSaveable { mutableStateOf(el?.from?.epochDay) }
+        var active by rememberSaveable { mutableStateOf(el?.active ?: true) }
+        val chosen = ir.sabou.app.ui.rememberValueList { el?.employees?.toList().orEmpty() }
+        var everyone by rememberSaveable { mutableStateOf(el?.employees.isNullOrEmpty()) }
+        val action = rememberAction()
+        val bp = Fa.parseQuantity(percent)?.let { (it.micros / 10_000).toInt() }
+        val isPercent = basis == ir.sabou.payroll.PayElement.Basis.PERCENT_OF_BASE
+        TextInput("نام", name, { name = it }, placeholder = "حق مسکن، بن خواربار…")
+        Picker("نوع", listOf(Choice(ir.sabou.payroll.PayLine.Kind.EARNING, "مزایا"), Choice(ir.sabou.payroll.PayLine.Kind.DEDUCTION, "کسور")), kind, { kind = it })
+        Picker("محاسبه", ir.sabou.payroll.PayElement.Basis.entries.map { Choice(it, basisName(it)) }, basis, { basis = it })
+        if (isPercent) TextInput("درصد", percent, { percent = it }, keyboard = KeyboardType.Decimal)
+        else MoneyInput(when (basis) {
+            ir.sabou.payroll.PayElement.Basis.PER_CHILD -> "مبلغ ماهانه برای هر فرزند"
+            ir.sabou.payroll.PayElement.Basis.PER_SERVICE_YEAR -> "مبلغ ماهانه برای هر سال سابقه"
+            else -> "مبلغ ماهانه"
+        }, amount, { amount = it })
+        if (kind == ir.sabou.payroll.PayLine.Kind.EARNING) {
+            Check("مشمول بیمه", insurable) { insurable = it }
+            Check("مشمول مالیات", taxable) { taxable = it }
+        }
+        ir.sabou.app.ui.components.OptionalDateInput("از تاریخ", from?.let(::BusinessDate), { from = it?.epochDay }, session.today)
+        Check("برای همه‌ی کارکنان", everyone) { everyone = it }
+        if (!everyone) people.forEach { p -> Check(p.name, p.id in chosen) { on -> if (on) chosen.add(p.id) else chosen.remove(p.id) } }
+        if (el != null) Check("فعال", active) { active = it }
+        action.error?.let { Banner(it) }
+        val ok = name.trim().length >= 2 && (if (isPercent) bp != null && bp in 1..10_000 else amount != null) && (everyone || chosen.isNotEmpty())
+        Buttons("ذخیره", action.busy, ok, {
+            val element = ir.sabou.payroll.PayElement(el?.id ?: GlobalId.new(), name, kind, basis, if (isPercent) bp!!.toLong() else amount!!.rial,
+                insurable && kind == ir.sabou.payroll.PayLine.Kind.EARNING, taxable && kind == ir.sabou.payroll.PayLine.Kind.EARNING,
+                from?.let(::BusinessDate), active, if (everyone) emptySet() else chosen.toSet())
+            action.run({ payroll.savePayElement(ir.sabou.payroll.SavePayElement(GlobalId.new(), element)) }) { onDone() }
+        }, onDone)
+    }
+
     // ------------------------------------------------------------ Payroll settings
 
     /** The restaurant's own payroll options: breaks, overtime, lateness (owner). */
@@ -440,8 +603,30 @@ object EmployeeScreens {
         var rate by rememberSaveable { mutableStateOf<Money?>(current.overtimeHourlyRate.takeIf { it.rial > 0 }) }
         var minimum by rememberSaveable { mutableStateOf(Fa.number(current.overtimeMinimumMinutes.toLong())) }
         var grace by rememberSaveable { mutableStateOf(Fa.number(current.lateGraceMinutes.toLong())) }
+        var nightPct by rememberSaveable { mutableStateOf(pct(current.nightPremiumBp)) }
+        var nightStart by rememberSaveable { mutableStateOf<Int?>(current.nightStartMinute) }
+        var nightEnd by rememberSaveable { mutableStateOf<Int?>(current.nightEndMinute) }
+        var holidayPct by rememberSaveable { mutableStateOf(pct(current.holidayPremiumBp)) }
+        var leaveDays by rememberSaveable { mutableStateOf(Fa.number(current.leaveDaysPerYear.toLong())) }
+        var workday by rememberSaveable { mutableStateOf<Int?>(current.workdayMinutes) }
+        var carry by rememberSaveable { mutableStateOf(Fa.number(current.leaveCarryDays.toLong())) }
+        var payout by rememberSaveable { mutableStateOf(current.leavePayoutOnExit) }
+        var bonusIns by rememberSaveable { mutableStateOf(current.bonusInsurable) }
+        var bonusTax by rememberSaveable { mutableStateOf(current.bonusTaxable) }
+        var eidi by rememberSaveable { mutableStateOf(current.eidiEnabled) }
+        var eidiDays by rememberSaveable { mutableStateOf(Fa.number(current.eidiDays.toLong())) }
+        var eidiCap by rememberSaveable { mutableStateOf<Money?>(current.eidiCap.takeIf { it.rial > 0 }) }
+        var eidiMonth by rememberSaveable { mutableStateOf(current.eidiMonth) }
+        var eidiExempt by rememberSaveable { mutableStateOf<Money?>(current.eidiTaxExempt.takeIf { it.rial > 0 }) }
+        var sanavat by rememberSaveable { mutableStateOf(current.sanavatEnabled) }
+        var sanavatDays by rememberSaveable { mutableStateOf(Fa.number(current.sanavatDays.toLong())) }
+        var sanavatYearly by rememberSaveable { mutableStateOf(current.sanavatYearly) }
         val action = rememberAction()
         var saved by rememberSaveable { mutableStateOf(false) }
+        fun int(t: String) = Fa.latinDigits(t).trim().ifBlank { "0" }.toIntOrNull()
+        fun bp(t: String) = if (t.isBlank()) 0 else Fa.parseQuantity(t)?.let { (it.micros / 10_000).toInt() }
+        val nightBp = bp(nightPct); val holidayBp = bp(holidayPct)
+        val leaveD = int(leaveDays); val carryD = int(carry); val eidiD = int(eidiDays); val sanavatD = int(sanavatDays)
         val min = Fa.latinDigits(minimum).trim().toIntOrNull()
         val lateGrace = Fa.latinDigits(grace).trim().toIntOrNull()
         FormCard("کارکرد") {
@@ -469,12 +654,68 @@ object EmployeeScreens {
             TextInput("اضافه‌کار کمتر از چند دقیقه در روز حساب نشود", minimum, { minimum = it }, keyboard = KeyboardType.Number,
                 error = if (min == null || min !in 0..240) "عددی بین ۰ تا ۲۴۰" else null)
         }
+        FormCard("شب‌کاری و جمعه‌کاری") {
+            TextInput("درصد اضافه برای شب‌کاری (۰ = پرداخت نمی‌شود)", nightPct, { nightPct = it }, keyboard = KeyboardType.Decimal, placeholder = "طبق قانون ۳۵",
+                error = if (nightBp == null || nightBp !in 0..20_000) "درصد معتبر وارد کنید" else null)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ir.sabou.app.ui.components.TimeInput("شب از", nightStart, { nightStart = it }, Modifier.weight(1f))
+                ir.sabou.app.ui.components.TimeInput("تا", nightEnd, { nightEnd = it }, Modifier.weight(1f))
+            }
+            TextInput("درصد اضافه برای جمعه و تعطیل (۰ = پرداخت نمی‌شود)", holidayPct, { holidayPct = it }, keyboard = KeyboardType.Decimal, placeholder = "طبق قانون ۴۰",
+                error = if (holidayBp == null || holidayBp !in 0..20_000) "درصد معتبر وارد کنید" else null)
+            Text("از ساعت‌زنی حساب می‌شود؛ تعطیلات رسمی را در «روزهای خاص» پیش‌بینی فروش به‌عنوان تعطیل ثبت کنید.", style = SabouType.caption, color = Sabou.colors.muted)
+        }
+        FormCard("مرخصی") {
+            TextInput("روز مرخصی استحقاقی در سال", leaveDays, { leaveDays = it }, keyboard = KeyboardType.Number, error = if (leaveD == null || leaveD !in 0..60) "۰ تا ۶۰" else null)
+            ir.sabou.app.ui.components.TimeInput("یک روز کاری", workday, { workday = it }, duration = true)
+            TextInput("حداکثر روز قابل انتقال به سال بعد", carry, { carry = it }, keyboard = KeyboardType.Number, error = if (carryD == null || carryD !in 0..60) "۰ تا ۶۰" else null)
+            Check("مرخصی ذخیره هنگام پایان همکاری پرداخت شود", payout) { payout = it }
+        }
+        FormCard("پاداش") {
+            Text("پاداش تازه به‌طور پیش‌فرض:", style = SabouType.caption, color = Sabou.colors.muted)
+            Check("مشمول بیمه", bonusIns) { bonusIns = it }
+            Check("مشمول مالیات", bonusTax) { bonusTax = it }
+        }
+        FormCard("عیدی") {
+            Check("عیدی و پاداش سالانه پرداخت شود", eidi) { eidi = it }
+            if (eidi) {
+                TextInput("چند روز حقوق برای سال کامل", eidiDays, { eidiDays = it }, keyboard = KeyboardType.Number, placeholder = "طبق قانون ۶۰", error = if (eidiD == null || eidiD !in 0..365) "عدد معتبر" else null)
+                MoneyInput("سقف عیدی (سه برابر حداقل دستمزد امسال؛ خالی = بدون سقف)", eidiCap, { eidiCap = it })
+                Picker("در حقوق ماه", (1..12).map { Choice(it, Fa.monthNames[it - 1]) }, eidiMonth, { eidiMonth = it })
+                MoneyInput("بخش معاف از مالیات (امسال)", eidiExempt, { eidiExempt = it })
+                Text("کسی که وسط سال کار را تمام کند، عیدی روزهای کارش را در آخرین حقوق می‌گیرد. عیدی مشمول بیمه نیست.", style = SabouType.caption, color = Sabou.colors.muted)
+            }
+        }
+        FormCard("سنوات") {
+            Check("سنوات پرداخت شود", sanavat) { sanavat = it }
+            if (sanavat) {
+                TextInput("چند روز حقوق برای هر سال کار", sanavatDays, { sanavatDays = it }, keyboard = KeyboardType.Number, placeholder = "طبق قانون ۳۰",
+                    error = if (sanavatD == null || sanavatD !in 0..365) "عدد معتبر" else null)
+                Check("هر سال با عیدی پرداخت شود (وگرنه هنگام پایان همکاری)", sanavatYearly) { sanavatYearly = it }
+            }
+        }
         if (saved) Banner("ذخیره شد. لیست‌های حقوقی که هنوز تأیید نشده‌اند را دوباره محاسبه کنید.", ChipKind.PRIMARY)
         action.error?.let { Banner(it) }
         PrimaryButton("ذخیره", {
             val s = current.copy(deductPlannedBreaks = deduct, overtimeMode = mode, overtimeHourlyRate = rate ?: Money.ZERO,
-                overtimeMinimumMinutes = min!!, lateGraceMinutes = lateGrace!!, clockPhotoRequired = photo)
+                overtimeMinimumMinutes = min!!, lateGraceMinutes = lateGrace!!, clockPhotoRequired = photo,
+                nightPremiumBp = nightBp!!, nightStartMinute = nightStart ?: current.nightStartMinute, nightEndMinute = nightEnd ?: current.nightEndMinute,
+                holidayPremiumBp = holidayBp!!, leaveDaysPerYear = leaveD!!, workdayMinutes = workday ?: current.workdayMinutes, leaveCarryDays = carryD!!,
+                leavePayoutOnExit = payout, bonusInsurable = bonusIns, bonusTaxable = bonusTax, eidiEnabled = eidi, eidiDays = eidiD!!,
+                eidiCap = eidiCap ?: Money.ZERO, eidiMonth = eidiMonth, eidiTaxExempt = eidiExempt ?: Money.ZERO,
+                sanavatEnabled = sanavat, sanavatDays = sanavatD!!, sanavatYearly = sanavatYearly)
             action.run({ payrollSettings.save(SavePayrollSettings(GlobalId.new(), s)) }) { saved = true }
-        }, enabled = min != null && min in 0..240 && lateGrace != null && lateGrace in 0..60 && (mode != OvertimeMode.FIXED_HOURLY || rate != null) && !action.busy, busy = action.busy)
+        }, enabled = min != null && min in 0..240 && lateGrace != null && lateGrace in 0..60 && (mode != OvertimeMode.FIXED_HOURLY || rate != null) &&
+            nightBp != null && holidayBp != null && leaveD != null && carryD != null && eidiD != null && sanavatD != null && !action.busy, busy = action.busy)
+    }
+
+    private fun pct(bp: Int) = if (bp == 0) "" else Fa.quantity(ir.sabou.kernel.Quantity.of(bp.toLong() * 10_000))
+
+    @Composable
+    private fun Check(text: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onChange(!checked) }) {
+            Checkbox(checked = checked, onCheckedChange = onChange)
+            Text(text, style = SabouType.body, color = Sabou.colors.ink)
+        }
     }
 }

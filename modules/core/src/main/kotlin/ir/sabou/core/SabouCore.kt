@@ -145,11 +145,16 @@ class SabouCore private constructor(
     val payrollPolicies = PolicyAdministration(bus, SqlPolicyStore(db))
     internal val policyRegistry = StatutoryPolicyRegistry { payrollPolicies.policies() + policies }
     val fixedAssets = ir.sabou.assets.AssetOperations(bus, ledger, registry.issue(ModuleId.ASSETS), treasuryGateway, assetStore)
+    internal val payElementStore = ir.sabou.persistence.SqlPayElementStore(db)
     val payrollSettings = ir.sabou.payroll.PayrollSettingsAdministration(bus, ir.sabou.persistence.SqlPayrollSettingsStore(db))
     val payroll = PayrollOperations(bus, ledger, registry.issue(ModuleId.PAYROLL), treasuryGateway, personnel, payrollStore, policyRegistry,
         settings = payrollSettings::current,
         otherApproverExists = { me -> users.all().any { it.isActive && it.id != me && it.role.allows(ir.sabou.platform.Permission.PAYROLL_APPROVE) } },
-        hasShiftsFrom = { employee, scope, from -> shiftStore.shifts(scope, from, from.plusDays(3_650)).any { it.employeeId == employee } })
+        hasShiftsFrom = { employee, scope, from -> shiftStore.shifts(scope, from, from.plusDays(3_650)).any { it.employeeId == employee } },
+        elements = payElementStore,
+        isHoliday = { scope, date ->
+            ir.sabou.kernel.JalaliCalendar.weekdayIndex(date) == 6 || specialDays.of(scope).any { it.date == date && it.kind == ir.sabou.sales.SpecialDay.Kind.HOLIDAY }
+        })
     internal val shiftStore = ir.sabou.persistence.SqlShiftStore(db)
     val shifts = ir.sabou.payroll.ShiftOperations(bus, personnel, shiftStore, payroll, payrollSettings::current, { payrollStore.runs(it) }, attachments)
     internal val staffDocumentStore = ir.sabou.persistence.SqlStaffDocumentStore(db)

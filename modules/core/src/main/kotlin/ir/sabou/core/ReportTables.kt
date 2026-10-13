@@ -221,6 +221,46 @@ object ReportTables {
         notes = listOf(RIAL),
     )
 
+    /**
+     * Preparation sheet for the monthly insurance list (لیست بیمه): per person the days, wages and the insurable
+     * amounts and contributions. It is not the portal's upload file: copy the figures, or check its columns against the
+     * official format before uploading.
+     */
+    fun insuranceList(run: ir.sabou.payroll.PayrollRun, people: Map<ir.sabou.kernel.GlobalId, ir.sabou.payroll.Employee>, branch: String) = ReportTable(
+        "پیش‌نویس لیست بیمه", "$branch · ${period(run.from, run.to)}",
+        listOf("ردیف", "شماره بیمه", "کد ملی", "نام", "نام پدر", "روز کارکرد", "دستمزد روزانه", "دستمزد ماهانه", "مزایای مشمول", "جمع مشمول", "سهم کارمند", "سهم کارفرما", "بیکاری"),
+        run.payslips.mapIndexed { i, p ->
+            val e = people[p.employeeId]
+            val days = p.payableDays ?: (run.to.epochDay - run.from.epochDay + 1).toInt()
+            val insurableExtra = p.lines.filter { it.kind == ir.sabou.payroll.PayLine.Kind.EARNING && it.insurable }.sumOf { it.amount.rial } + p.overtimePay.rial
+            val wage = p.baseSalary.rial - p.absenceDeduction.rial
+            listOf(Cell.Count((i + 1).toLong()), Cell.of(e?.profile?.insuranceNumber.orEmpty()), Cell.of(e?.nationalId.orEmpty()), Cell.of(e?.name.orEmpty()),
+                Cell.of(e?.profile?.fatherName.orEmpty()), Cell.Count(days.toLong()), Cell.Amount(if (days > 0) wage / days else 0), Cell.Amount(wage),
+                Cell.Amount(insurableExtra), Cell.Amount(p.insurableBase.rial), Cell.Amount(p.employeeInsurance.rial), Cell.Amount(p.employerInsurance.rial),
+                Cell.Amount(p.unemploymentInsurance.rial))
+        },
+        footer = listOf(Cell.of("جمع")) + List(8) { Cell.EMPTY } + listOf(
+            Cell.Amount(run.payslips.sumOf { it.insurableBase.rial }), Cell.Amount(run.payslips.sumOf { it.employeeInsurance.rial }),
+            Cell.Amount(run.payslips.sumOf { it.employerInsurance.rial }), Cell.Amount(run.payslips.sumOf { it.unemploymentInsurance.rial }),
+        ),
+        notes = listOf(RIAL, "پیش‌نویس برای تهیه‌ی لیست در سامانه‌ی تأمین اجتماعی؛ فایل بارگذاری سامانه نیست."),
+    )
+
+    /** Preparation sheet for the monthly salary tax list (لیست مالیات حقوق), likewise not the portal's file. */
+    fun taxList(run: ir.sabou.payroll.PayrollRun, people: Map<ir.sabou.kernel.GlobalId, ir.sabou.payroll.Employee>, branch: String) = ReportTable(
+        "پیش‌نویس لیست مالیات حقوق", "$branch · ${period(run.from, run.to)}",
+        listOf("ردیف", "کد ملی", "نام", "ناخالص", "غیرمشمول و معافیت", "درآمد مشمول مالیات", "مالیات"),
+        run.payslips.mapIndexed { i, p ->
+            val e = people[p.employeeId]
+            listOf(Cell.Count((i + 1).toLong()), Cell.of(e?.nationalId.orEmpty()), Cell.of(e?.name.orEmpty()), Cell.Amount(p.gross.rial),
+                Cell.Amount(maxOf(0L, p.gross.rial - p.taxableIncome.rial)), Cell.Amount(p.taxableIncome.rial), Cell.Amount(p.incomeTax.rial))
+        },
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.Amount(run.payslips.sumOf { it.gross.rial }),
+            Cell.Amount(run.payslips.sumOf { maxOf(0L, it.gross.rial - it.taxableIncome.rial) }), Cell.Amount(run.payslips.sumOf { it.taxableIncome.rial }),
+            Cell.Amount(run.payslips.sumOf { it.incomeTax.rial })),
+        notes = listOf(RIAL, "پیش‌نویس برای تهیه‌ی لیست در سامانه‌ی مالیات حقوق؛ فایل بارگذاری سامانه نیست."),
+    )
+
     /** One employee's payslip as a two-column table (printed one per page). */
     fun payslip(run: ir.sabou.payroll.PayrollRun, slip: ir.sabou.payroll.Payslip, name: String, branch: String) = ReportTable(
         "فیش حقوقی", "$name · $branch · ${period(run.from, run.to)}", listOf("شرح", "مبلغ (ریال)"),
