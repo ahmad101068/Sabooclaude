@@ -33,8 +33,8 @@ data class LaborDay(
 
 data class TimeRow(val employee: Employee, val time: DayTime)
 
-/** A staff document with its files. */
-data class StaffDocumentView(val document: ir.sabou.payroll.StaffDocument, val files: List<ir.sabou.platform.Attachment>)
+/** A staff document with its files (those of every earlier version it corrected too) and how many times it was corrected. */
+data class StaffDocumentView(val document: ir.sabou.payroll.StaffDocument, val files: List<ir.sabou.platform.Attachment>, val corrections: Int = 0)
 
 /** An employee's document that needs attention (ADR-0039). */
 data class DocumentIssueView(val employee: Employee, val issue: ir.sabou.payroll.DocumentIssue)
@@ -95,13 +95,17 @@ class Labor internal constructor(private val core: SabouCore) {
         return employee
     }
 
-    /** An employee's documents, newest first, with their files. */
+    /** An employee's documents in use (renewed ones included as history), newest first, with their files. */
     fun documents(employeeId: GlobalId): List<StaffDocumentView> {
         val a = actor(Permission.PERSONNEL_MANAGE, Permission.PERSONNEL_VIEW)
         val employee = core.personnel.employee(employeeId) ?: throw DomainException(DomainError.NotFound("EMPLOYEE"))
         a.require(employee.scope)
-        return core.staffDocumentStore.of(employeeId).sortedByDescending { it.recordedAtEpochMillis }
-            .map { StaffDocumentView(it, core.attachments.of(ir.sabou.payroll.StaffDocumentOperations.OWNER, it.id)) }
+        val all = core.staffDocumentStore.of(employeeId)
+        // Corrected and removed versions stay in the history (and the audit), not in the list.
+        return ir.sabou.payroll.StaffDocumentRules.live(all).sortedByDescending { it.recordedAtEpochMillis }.map { d ->
+            val versions = ir.sabou.payroll.StaffDocumentRules.versions(d, all)
+            StaffDocumentView(d, versions.flatMap { core.attachments.of(ir.sabou.payroll.StaffDocumentOperations.OWNER, it.id) }, versions.size - 1)
+        }
     }
 
     /** Missing health cards / contracts and documents expired or expiring within 30 days, for the branch's staff. */

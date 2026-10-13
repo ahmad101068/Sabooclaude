@@ -184,11 +184,14 @@ class PayrollTest {
         assertEquals("INVALID_INPUT:birthDate", code {
             ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "خردسال", "0067749828", rial(1_000), birthDate = ir.sabou.kernel.JalaliDay(1345, 1, 1)))
         })
-        ops.updateEmployeeDetails(UpdateEmployeeDetails(GlobalId.new(), branch, chef, " سرآشپز ارشد ", ir.sabou.kernel.JalaliDay(1318, 12, 29)))
+        ops.updateEmployeeDetails(UpdateEmployeeDetails(GlobalId.new(), branch, chef, " سرآشپز ارشد ", "۰۰۶۷۷۴۹۸۲۸", ir.sabou.kernel.JalaliDay(1318, 12, 29)))
         with(personnel.employee(chef)!!) {
-            assertEquals("سرآشپز ارشد", name); assertEquals(1318, birthDate!!.year); assertEquals(1, personnelNumber)
+            assertEquals("سرآشپز ارشد", name); assertEquals("0067749828", nationalId); assertEquals(1318, birthDate!!.year); assertEquals(1, personnelNumber)
         }
-        assertTrue(code { ops.updateEmployeeDetails(UpdateEmployeeDetails(GlobalId.new(), branch, waiter, "x", null)) }.startsWith("INVALID"))
+        assertTrue(code { ops.updateEmployeeDetails(UpdateEmployeeDetails(GlobalId.new(), branch, waiter, "x", "0499370899", null)) }.startsWith("INVALID"))
+        assertEquals("INVALID_INPUT:nationalId", code { ops.updateEmployeeDetails(UpdateEmployeeDetails(GlobalId.new(), branch, chef, "سرآشپز", "1111111111", null)) })
+        val helper = ops.registerEmployee(RegisterEmployee(GlobalId.new(), branch, "کمک", "0499370899", rial(1_000))).resultId
+        assertEquals("INVALID_STATE:EMPLOYEE:DUPLICATE_NATIONAL_ID", code { ops.updateEmployeeDetails(UpdateEmployeeDetails(GlobalId.new(), branch, helper, "کمک", "0067749828", null)) })
         assertEquals(28, ir.sabou.kernel.JalaliDay(1320, 5, 3).yearsUntil(ir.sabou.kernel.JalaliCalendar.of(0L)))
     }
 

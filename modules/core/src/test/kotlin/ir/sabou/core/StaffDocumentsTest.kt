@@ -7,6 +7,8 @@ import ir.sabou.kernel.JalaliCalendar
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Scope
 import ir.sabou.payroll.AddStaffDocument
+import ir.sabou.payroll.CorrectStaffDocument
+import ir.sabou.payroll.RemoveStaffDocument
 import ir.sabou.payroll.RegisterEmployee
 import ir.sabou.payroll.StaffDocument
 import ir.sabou.persistence.JdbcSqlDatabase
@@ -54,5 +56,25 @@ class StaffDocumentsTest {
         core.staffDocuments.add(AddStaffDocument(id(), branch, cook, StaffDocument.Kind.HEALTH_CARD, "", day.plusDays(375), "", listOf(photo)))
         assertEquals(emptyList(), core.labor.documentIssues(branch, day))
         assertEquals(3, core.labor.documents(cook).size)
+    }
+
+    @Test fun aWrongDocumentIsCorrectedOrRemovedAndTheEarlierVersionStays() {
+        core.bootstrap("شعبه یک", "مالک", "owner", "123456".toCharArray())
+        val branch = Scope.Branch(core.overview.branches().single().id)
+        val cook = core.payroll.registerEmployee(RegisterEmployee(id(), branch, "رضا", "0012345679", Money.of(150_000_000), JalaliCalendar.date(1405, 1, 1))).resultId
+        val card = core.staffDocuments.add(AddStaffDocument(id(), branch, cook, StaffDocument.Kind.HEALTH_CARD, "", day.plusDays(5), "", listOf(photo))).resultId
+        // The expiry was typed wrong: corrected, with the same photo kept and one more added.
+        val fixed = core.staffDocuments.correct(CorrectStaffDocument(id(), branch, card, StaffDocument.Kind.HEALTH_CARD, "", day.plusDays(200), "", listOf(photo))).resultId
+        assertEquals(emptyList(), core.labor.documentIssues(branch, day).filter { it.issue.kind == StaffDocument.Kind.HEALTH_CARD })
+        val view = core.labor.documents(cook).single()
+        assertEquals(fixed, view.document.id); assertEquals(2, view.files.size); assertEquals(1, view.corrections)
+        // Only the latest version can be changed.
+        assertEquals("INVALID_STATE:STAFF_DOCUMENT:ALREADY_CHANGED", assertFailsWith<DomainException> {
+            core.staffDocuments.remove(RemoveStaffDocument(id(), branch, card, "اشتباه"))
+        }.error.code)
+        // Entered for the wrong person: removed with a reason; the card is missing again.
+        core.staffDocuments.remove(RemoveStaffDocument(id(), branch, fixed, "برای کارمند دیگری بود"))
+        assertEquals(emptyList(), core.labor.documents(cook))
+        assertTrue(core.labor.documentIssues(branch, day).any { it.issue.kind == StaffDocument.Kind.HEALTH_CARD && it.issue.missing })
     }
 }
