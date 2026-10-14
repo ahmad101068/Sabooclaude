@@ -312,7 +312,7 @@ object ReportsScreens {
                     PeriodPicker(from, to) { f, t -> from = f; to = t }
                     Loaded(data) { m ->
                         SCard { KeyValue("فروش ناخالص (ریال)", Fa.rial(m.gross), strong = true); KeyValue("روزهای فروش", Fa.number(m.days.toLong())) }
-                        Text(COST_BASIS_NOTE, style = SabouType.caption, color = Sabou.colors.muted)
+                        Text(MIX_COST_NOTE, style = SabouType.caption, color = Sabou.colors.muted)
                         if (m.rows.isEmpty()) EmptyState("در این بازه فروش ثبت نهایی نشده است.")
                         m.rows.forEach { r ->
                             SCard {
@@ -330,6 +330,15 @@ object ReportsScreens {
                                     } ?: "بهای مواد معلوم نیست (رسپی یا قیمت خرید ندارد)",
                                     style = SabouType.caption, color = if (r.unitCost == null) Sabou.colors.danger else Sabou.colors.muted,
                                 )
+                                r.actualUnitCost?.let { c ->
+                                    val basis = if (r.fullyCosted) "" else " · بر پایه‌ی ${Fa.quantity(r.costedPortions)} از ${Fa.quantity(r.portions)} پرس"
+                                    Text(
+                                        "بهای واقعی هنگام فروش ${Fa.rial(c)} · حاشیه ${r.actualUnitMargin?.let { Fa.rial(it) } ?: "—"} · بهای غذا ${r.actualCostBp?.let { Fa.percent(it) } ?: "—"}$basis",
+                                        style = SabouType.caption, color = Sabou.colors.ink,
+                                    )
+                                    if (r.actualCostShort) Text("بخشی از مواد هنگام فروش در موجودی دفتری نبود؛ این بها تا تعیین تکلیف کسری کمتر از واقع است.",
+                                        style = SabouType.caption, color = Sabou.colors.danger)
+                                }
                             }
                         }
                     }
@@ -634,3 +643,6 @@ object ReportsScreens {
 /** Product mix and menu engineering use today's ingredient costs; the period's profit is the P&L (from the books). */
 internal const val COST_BASIS_NOTE =
     "بهای مواد در این صفحه با قیمت امروز مواد حساب می‌شود (برای تصمیم قیمت و منو). سود واقعی این بازه را «سود و زیان» از دفاتر نشان می‌دهد."
+
+internal const val MIX_COST_NOTE =
+    "«بهای مواد هر پرس» با قیمت امروز مواد است (برای تصمیم قیمت و منو). «بهای واقعی هنگام فروش» همان است که هر فروش هنگام ثبت از انبار برداشت؛ سود کل این بازه را «سود و زیان» از دفاتر نشان می‌دهد."
