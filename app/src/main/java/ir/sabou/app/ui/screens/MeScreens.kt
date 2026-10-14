@@ -95,6 +95,7 @@ object MeScreens {
         Role.ACCOUNTANT -> "حسابدار"
         Role.CASHIER -> "صندوقدار"
         Role.STOREKEEPER -> "انباردار"
+        Role.KITCHEN -> "آشپزخانه"
         Role.RESTRICTED -> "فقط مشاهده محدود"
     }
 

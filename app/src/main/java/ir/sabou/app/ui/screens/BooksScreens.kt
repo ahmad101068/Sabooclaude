@@ -420,6 +420,7 @@ object BooksScreens {
                 var payAccount by rememberSaveable { mutableStateOf<GlobalId?>(null) }
                 var accumulated by rememberSaveable { mutableStateOf<Money?>(null) }
                 var through by rememberSaveable { mutableStateOf(session.today) }
+                var seller by rememberSaveable { mutableStateOf("") }
                 val id = rememberCommandId()
                 val action = rememberAction()
                 Page {
@@ -445,9 +446,12 @@ object BooksScreens {
                             Text("نرخ‌ها پیشنهاد اولیه از جدول استهلاکات است؛ با مشاور مالیاتی تطبیق دهید.", style = SabouType.caption, color = Sabou.colors.muted)
                         }
                         FormCard("پرداخت") {
-                            Segmented(listOf("خرید و پرداخت", "از قبل داشتیم"), funding, { funding = it })
+                            Segmented(listOf("خرید و پرداخت", "نسیه یا اقساط", "از قبل داشتیم"), funding, { funding = it })
                             if (funding == 0) Picker("از حساب", accountChoices(list), payAccount, { payAccount = it })
-                            else {
+                            else if (funding == 1) {
+                                TextInput("فروشنده", seller, { seller = it })
+                                Text("بدهی در «بستانکاران خرید دارایی» می‌ماند؛ هر قسط را از «پرداخت» با همین حساب بپردازید.", style = SabouType.caption, color = Sabou.colors.muted)
+                            } else {
                                 MoneyInput("استهلاک انباشته تا امروز (اختیاری)", accumulated, { accumulated = it })
                                 if (accumulated != null && !accumulated!!.isZero) DateInput("استهلاک تا این تاریخ ثبت شده", through, { through = it }, session.today)
                                 Text("ارزش آن به حساب سرمایه ثبت می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
@@ -457,15 +461,50 @@ object BooksScreens {
                         val rateBp = rate.trim().toLongOrNull()?.let { it * 100 }
                         action.error?.let { Banner(it) }
                         PrimaryButton("ثبت دارایی", {
-                            val f = if (funding == 0) Funding.Paid(payAccount!!) else Funding.Existing(accumulated ?: Money.ZERO, through.takeIf { accumulated?.isZero == false })
+                            val f = when (funding) {
+                                0 -> Funding.Paid(payAccount!!)
+                                1 -> Funding.OnCredit(seller)
+                                else -> Funding.Existing(accumulated ?: Money.ZERO, through.takeIf { accumulated?.isZero == false })
+                            }
                             val m = if (method == 0) DepreciationMethod.STRAIGHT_LINE else DepreciationMethod.DECLINING_BALANCE
                             action.run({ fixedAssets.acquire(AcquireAsset(id.value, branch, name, category, cost!!, salvage ?: Money.ZERO, date, m,
                                 lifeMonths.takeIf { method == 0 }, rateBp.takeIf { method == 1 }, f)) }) { nav.back() }
-                        }, enabled = name.trim().length >= 2 && cost != null && (funding == 1 || payAccount != null) &&
+                        }, enabled = name.trim().length >= 2 && cost != null && (funding == 2 || (funding == 0 && payAccount != null) || (funding == 1 && seller.trim().length >= 2)) &&
                             (if (method == 0) lifeMonths != null else rateBp != null), busy = action.busy)
                     }
                 }
             }
+        }
+    }
+
+    /** Name and group of an asset, and moving it to another branch (ADR-0045). */
+    @Composable
+    private fun AssetEdit(a: ir.sabou.assets.FixedAsset) {
+        val session = LocalSession.current
+        val branches by load(session) { overview.branches() }
+        var name by rememberSaveable { mutableStateOf(a.name) }
+        var category by rememberSaveable { mutableStateOf(a.category) }
+        var to by rememberSaveable { mutableStateOf<ir.sabou.kernel.BranchId?>(null) }
+        var date by rememberSaveable { mutableStateOf(session.today) }
+        val action = rememberAction()
+        FormCard("ویرایش و انتقال") {
+            TextInput("نام", name, { name = it })
+            TextInput("گروه", category, { category = it })
+            SecondaryButton("ذخیره‌ی نام و گروه", {
+                action.run({ fixedAssets.update(ir.sabou.assets.UpdateAsset(GlobalId.new(), a.scope, a.id, name, category)) })
+            }, enabled = name.trim().length >= 2 && !action.busy)
+            Loaded(branches) { list ->
+                val others = list.filter { it.id != a.scope.branchId }
+                if (others.isNotEmpty()) {
+                    Picker("انتقال به شعبه", others.map { Choice(it.id, it.name) }, to, { to = it })
+                    DateInput("تاریخ انتقال", date, { date = it }, session.today)
+                    Text("پیش از انتقال، استهلاک را تا این تاریخ در همین شعبه ثبت کنید.", style = SabouType.caption, color = Sabou.colors.muted)
+                    SecondaryButton("انتقال دارایی", {
+                        action.run({ fixedAssets.transfer(ir.sabou.assets.TransferAsset(GlobalId.new(), a.scope, a.id, Scope.Branch(to!!), date)) })
+                    }, enabled = to != null && !action.busy)
+                }
+            }
+            action.error?.let { Banner(it) }
         }
     }
 
@@ -498,6 +537,7 @@ object BooksScreens {
                         a.depreciatedThrough?.let { KeyValue("استهلاک ثبت‌شده تا", Fa.date(it)) }
                         if (a.status == AssetStatus.DISPOSED) Chip("واگذارشده ${a.disposedOn?.let(Fa::date) ?: ""}", ChipKind.NEUTRAL)
                     }
+                    if (a.status == AssetStatus.ACTIVE && session.can(Permission.ASSET_MANAGE)) AssetEdit(a)
                     if (a.status == AssetStatus.ACTIVE && session.can(Permission.ASSET_MANAGE)) FormCard("فروش یا کنار گذاشتن") {
                         DateInput("تاریخ", date, { date = it }, session.today)
                         MoneyInput("مبلغ فروش (خالی = بدون فروش)", proceeds, { proceeds = it })

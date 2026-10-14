@@ -58,3 +58,11 @@ could never be reversed. (A reversed invoice already freed its number: the uniqu
   recorded, kept with the day (not booked).
 - **Alerts** — supplier invoices due within two days or late; customers' debts past due.
 - Schema 25: `supplier_advances`, `customer_deposits`, `shift_counts`.
+
+## Decision — stage 4 (assets and access)
+- **Assets** — `Funding.OnCredit`: bought on credit or in instalments, owed in 2110 (an open account) and paid from
+  treasury against it. `UpdateAsset` renames or regroups (cost and depreciation never change). `TransferAsset` moves an
+  asset with its cost and depreciation so far to another branch, both sides through the inter-branch account;
+  depreciation after the move is the new branch's.
+- **Kitchen role** — `Role.KITCHEN`: sees stock, asks the storeroom for goods (requests), records waste and production,
+  counts; does not move stock, buy, pay or see the books.

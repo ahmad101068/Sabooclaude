@@ -80,6 +80,13 @@ enum class Role(val permissions: Set<Permission>) {
             Permission.TIME_CLOCK,
         ),
     ),
+    /** The kitchen: sees stock, asks the storeroom for goods, records waste and production, counts; buys and pays nothing. */
+    KITCHEN(
+        setOf(
+            Permission.INVENTORY_VIEW, Permission.INVENTORY_WASTE, Permission.INVENTORY_PRODUCE, Permission.INVENTORY_COUNT,
+            Permission.TIME_CLOCK,
+        ),
+    ),
     RESTRICTED(emptySet());
 
     fun allows(permission: Permission): Boolean = permission in permissions
