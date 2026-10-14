@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The CI check of the minified build: a separate app, never for real data. -->
+    <string name="app_name">سابو بررسی نسخه</string>
+</resources>
