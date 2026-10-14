@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Device-first (ADR-0001): no internet use. The network is used only between two phones of the same
-         restaurant on its Wi-Fi (ADR-0042): an encrypted link the owner pairs on both screens. -->
+    <!-- Device-first (ADR-0001): the books never leave the phone over the internet. The network is used between two
+         phones of the same restaurant on its Wi-Fi (ADR-0042), and — only if the owner turns it on — to send SMS
+         through an SMS service (ADR-0046) or invoices to the tax system (ADR-0047). -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -15,6 +16,9 @@
     <!-- Alerts on the phone (ADR-0024); the periodic check survives a reboot. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- SMS alerts and orders through the phone's own SIM card (ADR-0046), asked for only when the owner picks it. -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <application
         android:name=".SabouApplication"
         android:allowBackup="false"

@@ -60,6 +60,7 @@ class SqlSupplierStore(db: SqlDatabase) : SqlTable(db), SupplierStore {
         deliveryDays = d.strsOr("deliveryDays").map { it.toInt() }.toSet(), cutoffMinutes = d.longOrNull("cutoff")?.toInt(),
         leadDays = d.intOr("leadDays", 1), note = d.strOr("note", ""),
         taxId = d.strOr("taxId", ""), address = d.strOr("address", ""), sheba = d.strOr("sheba", ""),
+        orderSms = d.boolOr("orderSms", false),
     )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM suppliers WHERE id = ?", id.value)?.let(::read)
     override fun all() = docs("SELECT doc FROM suppliers ORDER BY rowid").map(::read)
@@ -69,7 +70,7 @@ class SqlSupplierStore(db: SqlDatabase) : SqlTable(db), SupplierStore {
             "id" to supplier.id.value, "name" to supplier.name, "phone" to supplier.phone, "active" to supplier.isActive,
             "deliveryDays" to supplier.deliveryDays.sorted().map { it.toString() }, "cutoff" to supplier.cutoffMinutes?.toLong(),
             "leadDays" to supplier.leadDays.toLong(), "note" to supplier.note,
-            "taxId" to supplier.taxId, "address" to supplier.address, "sheba" to supplier.sheba,
+            "taxId" to supplier.taxId, "address" to supplier.address, "sheba" to supplier.sheba, "orderSms" to supplier.orderSms,
         ))),
     )
     override fun aliases(supplierId: GlobalId): Map<String, GlobalId> =

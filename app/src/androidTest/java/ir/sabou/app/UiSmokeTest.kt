@@ -32,7 +32,7 @@ class UiSmokeTest {
         *ir.sabou.app.ui.screens.MeScreens.Group.entries.map { Route.MeGroup(it) }.toTypedArray(),
         Route.Stock, Route.Waste, Route.Count, Route.StockTransfer, Route.Recipes, Route.Purchases, Route.NewPurchase,
         Route.Suppliers, Route.Personnel, Route.Attendance, Route.Payroll,
-        Route.Branches, Route.Users, Route.Items, Route.Locations, Route.Menu, Route.Accounts, Route.Customers, Route.Policies, Route.Backup, Route.Security, Route.PosImport, Route.MenuEngineering,
+        Route.Branches, Route.Users, Route.Items, Route.Locations, Route.Menu, Route.Accounts, Route.Customers, Route.Policies, Route.Backup, Route.Security, Route.Sms, Route.PosImport, Route.MenuEngineering,
         Route.Reports, Route.ProfitLoss, Route.DayFlash, Route.ProductMix, Route.Usage, Route.AttendanceReport,
         Route.PrepRecipes, Route.Production,
         Route.Orders, Route.NewOrder(), Route.ReviewQueue, Route.PriceChanges, Route.Suggestions,

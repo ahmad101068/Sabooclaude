@@ -25,6 +25,8 @@ data class Supplier(
     val taxId: String = "",
     val address: String = "",
     val sheba: String = "",
+    /** Orders to this supplier are sent to [phone] by SMS as soon as they are placed (ADR-0046). */
+    val orderSms: Boolean = false,
 ) {
     /** The first delivery whose order deadline has not passed (null when no delivery days are set). */
     fun nextDelivery(today: BusinessDate, minutesNow: Int): Delivery? {

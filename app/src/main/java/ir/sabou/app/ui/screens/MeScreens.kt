@@ -104,7 +104,7 @@ object MeScreens {
         RESTAURANT("رستوران و دسترسی‌ها", "شعب، کاربران، صندوق‌ها و انبارها", R.drawable.ic_branch),
         CATALOG("کالا، منو و مشتریان", "کالاها، منو و رسپی، مشتریان اعتباری", R.drawable.ic_recipe),
         RULES("حقوق، مالیات و بودجه", "پارامترهای حقوق، قانون‌های تأیید، اطلاعات مالیاتی، بودجه", R.drawable.ic_finance),
-        SAFETY("امنیت و داده‌ها", "رمز و اعلان‌ها، پشتیبان، دو گوشی", R.drawable.ic_lock),
+        SAFETY("امنیت و داده‌ها", "رمز و اعلان‌ها، پیامک، پشتیبان، دو گوشی", R.drawable.ic_lock),
     }
 
     private class Entry(val icon: Int, val title: String, val subtitle: String?, val route: Route)
@@ -134,6 +134,7 @@ object MeScreens {
             Entry(R.drawable.ic_lock, "امنیت و اعلان‌ها", "تغییر رمز، اثر انگشت، اعلان هشدارها" + if (session.actor.role == Role.OWNER) "، کد بازیابی" else "", Route.Security),
             // Backups are the main phone's: a second phone's data is a copy of it (ADR-0042).
             Entry(R.drawable.ic_backup, "پشتیبان‌گیری و بازیابی", null, Route.Backup).takeIf { session.can(Permission.BACKUP_CREATE) && !replica },
+            Entry(R.drawable.ic_alert, "پیامک", "هشدار پیامکی و ارسال سفارش به تأمین‌کننده", Route.Sms).takeIf { session.actor.role == Role.OWNER && !replica },
             Entry(R.drawable.ic_transfer, "دو گوشی، یک دفتر", "همگام‌سازی گوشی اصلی و گوشی دوم روی وای‌فای", Route.TwoPhones),
         )
     }

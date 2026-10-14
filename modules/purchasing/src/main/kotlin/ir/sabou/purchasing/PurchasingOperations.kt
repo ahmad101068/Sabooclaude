@@ -67,11 +67,13 @@ data class UpdateSupplier(
     val taxId: String? = null,
     val address: String? = null,
     val sheba: String? = null,
+    /** Send orders by SMS to the supplier's mobile; null keeps it as it is. */
+    val orderSms: Boolean? = null,
 ) : Command {
     override val requiredPermission = Permission.SUPPLIER_MANAGE
     override val scope: Scope = Scope.Organization
     override val sharedCatalog = true
-    override fun fingerprint() = "$supplierId|$name|$phone|$isActive|${deliveryDays.sorted()}|$cutoffMinutes|$leadDays|$note|$taxId|$address|$sheba"
+    override fun fingerprint() = "$supplierId|$name|$phone|$isActive|${deliveryDays.sorted()}|$cutoffMinutes|$leadDays|$note|$taxId|$address|$sheba|$orderSms"
 }
 
 /** [cheque]: our new cheque from a cheque book; [chequeId]: a customer's cheque passed on from a cheque box. */
@@ -440,12 +442,16 @@ class PurchasingOperations(
         ensure(sheba.isEmpty() || ir.sabou.kernel.Sheba.isValid(sheba)) { DomainError.InvalidInput("sheba", "شماره شبا معتبر نیست.") }
         val address = cmd.address?.trim() ?: current.address
         ensure(address.length <= 300) { DomainError.InvalidInput("address", "نشانی طولانی است.") }
+        val orderSms = cmd.orderSms ?: current.orderSms
+        // An order by SMS needs a mobile number to go to.
+        ensure(!orderSms || ir.sabou.kernel.Mobile.isValid(cmd.phone)) { DomainError.InvalidInput("phone", "برای ارسال پیامکی سفارش، شماره همراه (۰۹…) لازم است.") }
         val updated = current.copy(
             name = name, phone = cmd.phone.trim(), isActive = cmd.isActive, deliveryDays = cmd.deliveryDays,
             cutoffMinutes = cmd.cutoffMinutes, leadDays = cmd.leadDays, note = cmd.note.trim(), taxId = taxId, address = address, sheba = sheba,
+            orderSms = orderSms,
         )
         suppliers.save(updated)
-        ctx.audit(AuditDraft("SUPPLIER_UPDATE", "SUPPLIER", current.id.value, "active=${updated.isActive};days=${updated.deliveryDays.sorted()};cutoff=${updated.cutoffMinutes};lead=${updated.leadDays}"))
+        ctx.audit(AuditDraft("SUPPLIER_UPDATE", "SUPPLIER", current.id.value, "active=${updated.isActive};days=${updated.deliveryDays.sorted()};cutoff=${updated.cutoffMinutes};lead=${updated.leadDays};orderSms=${updated.orderSms}"))
         current.id
     }
 

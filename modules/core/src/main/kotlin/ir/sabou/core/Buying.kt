@@ -127,6 +127,23 @@ class Buying internal constructor(private val core: SabouCore) {
             core.numbers.of(ir.sabou.platform.DocumentSeries.PURCHASE_ORDER, order.id)?.text)
     }
 
+    /** The order as an SMS for its supplier (ADR-0046): branch, number, delivery, items and quantities. */
+    fun orderSms(id: GlobalId): OrderSms {
+        val row = order(id)
+        val o = row.order
+        val supplier = core.suppliers.byId(o.supplierId)
+        val branch = core.branches.all().firstOrNull { it.id == o.scope.branchId }?.name.orEmpty()
+        val items = core.items.all().associateBy { it.id }
+        val head = listOfNotNull(
+            "سفارش خرید $branch" + " · شماره ${row.number?.let(Fa::digits) ?: Fa.number(o.number)}",
+            "تحویل: ${Fa.dayTitle(o.expectedDate)} (${Fa.date(o.expectedDate)})" + if (row.location.isNotBlank()) " · ${row.location}" else "",
+        ).joinToString("\n")
+        val lines = o.lines.map { l -> val item = items[l.itemId]; "- ${item?.name.orEmpty()}: ${Fa.quantity(l.quantity)} ${item?.let { SmsText.unit(it.unit) }.orEmpty()}".trimEnd() }
+        val tail = listOfNotNull(o.note.takeIf { it.isNotBlank() }, "لطفاً دریافت سفارش را اعلام کنید.")
+        val body = SmsText.fitLines(head, lines + tail, SmsText.ORDER_MAX_CHARS) { n -> "… و ${Fa.number(n.toLong())} ردیف دیگر (فهرست کامل در PDF سفارش)" }
+        return OrderSms(supplier?.phone?.let(ir.sabou.kernel.Mobile::normalize), body, supplier?.orderSms == true)
+    }
+
     // ------------------------------------------------------------ Supplier account
 
     fun supplierAccount(supplierId: GlobalId): SupplierAccount {
