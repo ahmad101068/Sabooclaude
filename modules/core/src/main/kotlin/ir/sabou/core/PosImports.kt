@@ -65,6 +65,8 @@ data class PosPreview(
     val cash: Long,
     val card: Long,
     val credits: List<PosCredit>,
+    /** Net sales (before service and tax) by the invoices' «نوع فروش» (ADR-0052); empty without invoices or types. */
+    val channels: List<ir.sabou.sales.ChannelShare>,
     val alreadyImported: Boolean,
     val problems: List<String>,
 ) {
@@ -161,7 +163,7 @@ class PosImports internal constructor(private val core: SabouCore) {
         return PosPreview(
             described, date, fileDates.isNotEmpty(), currency, stated.isNotEmpty(), lines, gross, discount, service, tax, payable,
             invoices != null, counted.count { it.status == InvoiceStatus.NORMAL }, invoices?.invoices.orEmpty().count { it.status == InvoiceStatus.VOID },
-            counted.count { it.status == InvoiceStatus.RETURN }, cash, card, credits, already, problems,
+            counted.count { it.status == InvoiceStatus.RETURN }, cash, card, credits, channelsOf(counted, f), already, problems,
         )
     }
 
@@ -189,7 +191,7 @@ class PosImports internal constructor(private val core: SabouCore) {
             p.credits.forEach { add(Settlement.Credit(it.customer!!.id, Money.of(it.amount), date)) }
         } else listOf(Settlement.Liquid(accounts.single ?: throw DomainException(DomainError.InvalidInput("account", "حساب دریافت فروش را انتخاب کنید.")), Money.of(p.payable)))
         val sale = SaveSaleDraft(GlobalId.new(), branch, date, kitchen, saleLines, Money.of(p.discount + rounding), Money.of(p.service), Money.of(p.tax), settlements,
-            transactions = p.bills, discountReason = if (p.discount + rounding != 0L) "تخفیف و گرد کردن ثبت‌شده در صندوق" else "")
+            transactions = p.bills, discountReason = if (p.discount + rounding != 0L) "تخفیف و گرد کردن ثبت‌شده در صندوق" else "", channels = p.channels)
         val learned = p.lines.filter { it.key in choices.matches }.associate { it.key to it.menuItem!!.id }
         val bills = if (p.hasInvoices) files.flatMap { f ->
             runCatching { (PosReports.parse(Sheets.read(f.name, f.bytes)) as? Parsed.Invoices)?.report?.invoices.orEmpty() }.getOrDefault(emptyList())
@@ -197,11 +199,32 @@ class PosImports internal constructor(private val core: SabouCore) {
         return core.salesOps.importPosDay(ImportPosSale(commandId, branch, pos, files.map { it.name }, files.map { sha256(it.bytes) }, bills, sale, learned))
     }
 
+    /** Net sales of the counted bills by channel; a channel whose returns outweigh its sales is left out. */
+    private fun channelsOf(counted: List<ir.sabou.posimport.PosInvoice>, f: Long): List<ir.sabou.sales.ChannelShare> =
+        counted.mapNotNull { b -> channelOf(b.saleType)?.let { it to b } }.groupBy({ it.first }, { it.second }).mapNotNull { (channel, bills) ->
+            val net = bills.sumOf { it.total - it.discount } * f
+            if (net <= 0) null else ir.sabou.sales.ChannelShare(channel, Money.of(net), bills.count { it.status == InvoiceStatus.NORMAL })
+        }.sortedBy { it.channel.ordinal }
+
     private fun sha256(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     private fun posName(pos: String) = if (pos == SEPAND) "سپند" else pos
 
     companion object {
+        /** The channel a POS «نوع فروش» names (ADR-0052); null when the bill has no type. */
+        fun channelOf(saleType: String?): ir.sabou.sales.SalesChannel? {
+            val t = Text.key(saleType ?: return null).takeIf { it.isNotEmpty() } ?: return null
+            fun has(vararg words: String) = words.any { t.contains(Text.key(it)) }
+            return when {
+                has("شرکت", "سازمان", "قرارداد", "اداره", "کترینگ") -> ir.sabou.sales.SalesChannel.CORPORATE
+                has("اسنپ", "snapp", "آنلاین", "اینترنت", "تپسی", "online", "سایت", "اپلیکیشن") -> ir.sabou.sales.SalesChannel.ONLINE
+                has("پیک", "ارسال", "دلیوری", "delivery") -> ir.sabou.sales.SalesChannel.DELIVERY
+                has("بیرون", "takeaway", "take away") -> ir.sabou.sales.SalesChannel.TAKEAWAY
+                has("سالن", "حضوری", "میز", "داخل", "dine") -> ir.sabou.sales.SalesChannel.DINE_IN
+                else -> ir.sabou.sales.SalesChannel.OTHER
+            }
+        }
+
         const val SEPAND = "SEPAND"
     }
 }

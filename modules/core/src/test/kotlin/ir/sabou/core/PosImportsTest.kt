@@ -100,10 +100,10 @@ class PosImportsTest {
         val arian = core.salesOps.registerCustomer(RegisterCustomer(GlobalId.new(), branch, "شرکت آرین", CustomerType.COMPANY, "021", Money.of(100_000_000))).resultId
         // A matching pair in Toman, as CSV: 2 pizzas and 1 unknown name.
         val items = "از تاریخ : 1405/07/18 تا تاریخ : 1405/07/18\nنام کالا,تعداد,فی (تومان),مبلغ (تومان),تخفیف,مبلغ خالص\nپیتزا مخصوص,2,450000,900000,0,900000\nسالاد ویژه,1,240000,240000,0,240000\n"
-        val bills = "شماره فاکتور,تاریخ,مشتری,جمع کل,تخفیف,سرویس,مالیات,قابل پرداخت,نقدی,کارتخوان,اعتباری,وضعیت\n" +
-            "1,1405/07/18,,450000,50000,0,0,400000,400000,0,0,عادی\n" +
-            "2,1405/07/18,شرکت آرین,690000,0,69000,0,759000,0,259000,500000,عادی\n" +
-            "3,1405/07/18,,300000,0,0,0,300000,300000,0,0,ابطال شده\n"
+        val bills = "شماره فاکتور,تاریخ,نوع فروش,مشتری,جمع کل,تخفیف,سرویس,مالیات,قابل پرداخت,نقدی,کارتخوان,اعتباری,وضعیت\n" +
+            "1,1405/07/18,سالن,,450000,50000,0,0,400000,400000,0,0,عادی\n" +
+            "2,1405/07/18,پیک,شرکت آرین,690000,0,69000,0,759000,0,259000,500000,عادی\n" +
+            "3,1405/07/18,سالن,,300000,0,0,0,300000,300000,0,0,ابطال شده\n"
         val files = listOf(PosFile("items.csv", items.toByteArray()), PosFile("bills.csv", bills.toByteArray()))
         val p = core.posImports.preview(branch, files, PosChoices())
         assertEquals(FileCurrency.TOMAN, p.currency)
@@ -122,9 +122,27 @@ class PosImportsTest {
         val sale = core.sales.sale(saleId)!!
         assertEquals(Money.of(11_590_000), sale.payable)
         assertEquals(5_000_000L, core.salesOps.customerBalance(arian).rial)
+        // ADR-0052: net sales by the bills' «نوع فروش» (the void bill left out), adding up to the sale's net sales.
+        assertEquals(listOf(
+            ir.sabou.sales.ChannelShare(ir.sabou.sales.SalesChannel.DINE_IN, Money.of(4_000_000), 1),
+            ir.sabou.sales.ChannelShare(ir.sabou.sales.SalesChannel.DELIVERY, Money.of(6_900_000), 1),
+        ), sale.channels)
+        assertEquals(sale.netFood, Money.sum(sale.channels.map { it.amount }))
         assertEquals(2_590_000L, core.overview.treasury().single { it.account.id == card }.balance)
         // The match is remembered for the next day's file.
         assertEquals(menu.getValue("سالاد سزار"), core.posImportStore.aliases(PosImports.SEPAND)[Text.key("سالاد ویژه")])
+    }
+
+    @Test fun saleTypesNameTheirChannel() {
+        fun c(t: String?) = PosImports.channelOf(t)
+        assertEquals(ir.sabou.sales.SalesChannel.DINE_IN, c("سالن"))
+        assertEquals(ir.sabou.sales.SalesChannel.TAKEAWAY, c("بیرون بر"))
+        assertEquals(ir.sabou.sales.SalesChannel.TAKEAWAY, c("بیرون‌بر"))
+        assertEquals(ir.sabou.sales.SalesChannel.DELIVERY, c("پیک"))
+        assertEquals(ir.sabou.sales.SalesChannel.ONLINE, c("اسنپ فود"))
+        assertEquals(ir.sabou.sales.SalesChannel.CORPORATE, c("فروش شرکتی"))
+        assertEquals(ir.sabou.sales.SalesChannel.OTHER, c("مهمانی"))
+        assertEquals(null, c("  ")); assertEquals(null, c(null))
     }
 
     @Test fun twoReportsThatDoNotAgreeAreNotImported() {

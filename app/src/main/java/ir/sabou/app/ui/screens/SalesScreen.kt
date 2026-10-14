@@ -352,6 +352,11 @@ private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
     /** Covers and bills of the day (optional, 0 = not recorded): average spend per guest and per bill. */
     var guests by mutableStateOf(sale?.guests?.takeIf { it > 0 }?.let { Fa.number(it.toLong()) } ?: "")
     var transactions by mutableStateOf(sale?.transactions?.takeIf { it > 0 }?.let { Fa.number(it.toLong()) } ?: "")
+    /** One channel for the whole sale (ADR-0052); a split the POS import recorded is kept unless one is chosen. */
+    var channel by mutableStateOf(sale?.channels?.singleOrNull()?.channel)
+    val split: List<ir.sabou.sales.ChannelShare> = sale?.channels?.takeIf { it.size > 1 } ?: emptyList()
+    fun channels(): List<ir.sabou.sales.ChannelShare> =
+        channel?.let { listOf(ir.sabou.sales.ChannelShare(it, Money.of(1), count(transactions) ?: 0)) } ?: split
     val liquid = mutableStateMapOf<GlobalId, Money?>().apply {
         sale?.settlements?.filterIsInstance<Settlement.Liquid>()?.filter { it.cheque == null }?.forEach { put(it.treasuryAccountId, it.amount) }
     }
@@ -412,7 +417,7 @@ private fun saleFormSaver(data: SalesData, today: BusinessDate) = androidx.compo
             HashMap(f.portions), HashMap<GlobalId, Money?>(), f.kitchen, f.discount, f.service, f.tax, HashMap(f.liquid),
             ArrayList(f.credits.map { arrayListOf(it.customer, it.amount, it.due) }), f.step, f.guests, f.transactions,
             ArrayList(f.cheques.map { it.fields() }),
-            HashMap(f.unitPrice), HashMap(f.reason), f.discountReason,
+            HashMap(f.unitPrice), HashMap(f.reason), f.discountReason, f.channel?.name,
         )
     },
     restore = { l ->
@@ -427,6 +432,7 @@ private fun saleFormSaver(data: SalesData, today: BusinessDate) = androidx.compo
             if (l.size > 11) (l[11] as List<List<Any?>>).forEach { cheques.add(ChequeRow.of(it)) }
             if (l.size > 13) { unitPrice.putAll(l[12] as Map<GlobalId, Money?>); reason.putAll(l[13] as Map<GlobalId, String>) }
             if (l.size > 14) discountReason = l[14] as String
+            if (l.size > 15) channel = (l[15] as String?)?.let { runCatching { ir.sabou.sales.SalesChannel.valueOf(it) }.getOrNull() }
         } }.getOrNull()   // a draft that does not fit the form starts it fresh
     },
 )
@@ -515,6 +521,11 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData, sa
                         error = if (form.count(form.transactions) == null) "عدد معتبر نیست" else null)
                 }
                 Text("اختیاری؛ برای میانگین خرید هر مهمان و هر فاکتور در گزارش پایان روز.", style = SabouType.caption, color = Sabou.colors.muted)
+                Picker("کانال فروش", listOf(Choice<ir.sabou.sales.SalesChannel?>(null, "نامشخص")) +
+                    ir.sabou.sales.SalesChannel.entries.map { Choice<ir.sabou.sales.SalesChannel?>(it, ir.sabou.core.ReportTables.channelName(it)) },
+                    form.channel, { form.channel = it })
+                if (form.channel == null && form.split.isNotEmpty()) Text("تفکیک صندوق: " + form.split.joinToString("، ") { "${ir.sabou.core.ReportTables.channelName(it.channel)} ${Fa.rialShort(it.amount.rial)}" },
+                    style = SabouType.caption, color = Sabou.colors.muted)
                 PrimaryButton("ادامه: تسویه", { form.step = 1 }, enabled = form.linesComplete() && form.countsValid() && form.discountComplete())
             }
             1 -> FormCard("روش‌های تسویه") {
@@ -606,7 +617,7 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData, sa
                 action.error?.let { Banner(it) }
                 val kitchen = form.kitchen
                 fun draft() = SaveSaleDraft(draftId.value, branch, date, kitchen!!, form.lines(), form.discount ?: Money.ZERO,
-                    form.service ?: Money.ZERO, form.tax ?: Money.ZERO, form.settlements(), form.count(form.guests) ?: 0, form.count(form.transactions) ?: 0, saleId, form.discountReason.trim())
+                    form.service ?: Money.ZERO, form.tax ?: Money.ZERO, form.settlements(), form.count(form.guests) ?: 0, form.count(form.transactions) ?: 0, saleId, form.discountReason.trim(), form.channels())
                 SecondaryButton("ذخیره پیش‌نویس", {
                     action.run({ salesOps.saveDraft(draft()) }) { saved -> saleId = saved.resultId; draftId.value = GlobalId.new() }
                 }, enabled = kitchen != null && !action.busy)
@@ -684,6 +695,7 @@ private fun SaleDetail(branch: Scope.Branch, date: BusinessDate, data: SalesData
             Divider()
             KeyValue("جمع تسویه‌شده (ریال)", Fa.rial(sale.payable), strong = true)
             if (sale.guests > 0) KeyValue("مهمان · میانگین هر نفر", "${Fa.number(sale.guests.toLong())} · ${Fa.rial(sale.netFood.rial / sale.guests)}")
+            if (sale.channels.isNotEmpty()) KeyValue("کانال فروش", sale.channels.joinToString("، ") { "${ir.sabou.core.ReportTables.channelName(it.channel)} ${Fa.rialShort(it.amount.rial)}" })
             KeyValue("بهای تمام‌شده مواد", Fa.rial(sale.cost))
             if (!sale.netFood.isZero) {
                 KeyValue("درصد بهای غذا (Food cost)", Fa.percent(ir.sabou.kernel.Ratio.mulDiv(sale.cost.rial, 10_000, sale.netFood.rial)))
