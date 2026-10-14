@@ -158,6 +158,17 @@ object ReportTables {
         null -> "نامشخص"
     }
 
+    /** ADR-0053: from the base profit through each cause to the current profit. */
+    fun profitBridge(b: ProfitBridge) = ReportTable(
+        "چرا سود تغییر کرد", "${b.branchName} · ${period(b.current.from, b.current.to)} در برابر ${period(b.base.from, b.base.to)}",
+        listOf("عامل", "اثر بر سود", "بیشترین سهم‌ها"),
+        listOf(listOf(Cell.of("سود دوره‌ی مبنا"), Cell.Amount(b.base.profit), Cell.EMPTY)) +
+            b.steps.map { s -> listOf(Cell.of(ProfitBridges.stepName(s.kind)), Cell.Amount(s.amount), Cell.of(s.details.joinToString("؛ ") { "${it.name} ${Fa.rial(it.amount)}" })) } +
+            listOf(listOf(Cell.of("سود این دوره"), Cell.Amount(b.current.profit), Cell.EMPTY)),
+        notes = listOf(RIAL) + b.summary + listOf(
+            "عامل‌ها دقیقاً با تغییر سود در دفاتر برابرند. تعداد، ترکیب، قیمت و بهای مواد از ردیف‌های فروش و بهای واقعی‌شان (ADR-0050) است؛ بقیه از حساب‌های سود و زیان."),
+    )
+
     fun dayFlash(f: DayFlash): ReportTable {
         val rows = buildList {
             fun kv(k: String, v: Cell) = add(listOf(Cell.of(k), v))
