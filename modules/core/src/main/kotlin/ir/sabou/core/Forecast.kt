@@ -20,6 +20,13 @@ data class SalesForecast(
     val trendBp: Long,
     /** Mean absolute percentage error of the same method over the last 28 days (back-tested), or null without history. */
     val errorBp: Long?,
+    /**
+     * Over the same back-test (ADR-0055): the total absolute error over total actual sales (WAPE), which weighs a busy
+     * day more than a quiet one, and the bias, Σ(forecast − actual) over Σ actual: above zero the method expects too
+     * much, below zero too little. Null without enough days.
+     */
+    val wapeBp: Long? = null,
+    val biasBp: Long? = null,
 )
 
 /** Sales forecast per day (ADR-0041): the weekday pattern of recent weeks × the days the owner marked. */
@@ -37,7 +44,8 @@ class Forecasts internal constructor(private val core: SabouCore) {
         val special = core.specialDays.of(branch).associateBy { it.date }
         val trend = trend(history, from)
         val forecast = (0 until days).map { i -> day(from.plusDays(i.toLong()), history, special[from.plusDays(i.toLong())]) }
-        return SalesForecast(forecast, trend, backtest(branch, from))
+        val test = backtest(branch, from)
+        return SalesForecast(forecast, trend, test?.mapeBp, test?.wapeBp, test?.biasBp)
     }
 
     /** The forecast of one day from [history] (net sales of each recorded day, see [tradingDays]). */
@@ -76,16 +84,24 @@ class Forecasts internal constructor(private val core: SabouCore) {
      * and with that day's own mark (holiday, event). A day that sold nothing cannot be scored as a percentage and
      * is skipped here, though it counts in the history.
      */
-    private fun backtest(branch: Scope.Branch, from: BusinessDate): Long? {
+    private class Backtest(val mapeBp: Long, val wapeBp: Long, val biasBp: Long)
+
+    private fun backtest(branch: Scope.Branch, from: BusinessDate): Backtest? {
         val days = core.tradingDays(branch, (from.epochDay - 28 - HISTORY_DAYS until from.epochDay).map { BusinessDate(it) })
         val history = normalized(days)
         val special = core.specialDays.of(branch).associateBy { it.date }
-        val errors = days.filter { it.date >= from.plusDays(-28) }.mapNotNull { d ->
+        val pairs = days.filter { it.date >= from.plusDays(-28) }.mapNotNull { d ->
             val actual = d.sales.sumOf { it.netFood.rial }
             val f = day(d.date, history.filterKeys { it < d.date }, special[d.date])
-            if (f.samples == 0 || actual <= 0) null else Ratio.mulDiv(kotlin.math.abs(actual - f.expected), 10_000, actual)
+            if (f.samples == 0 || actual <= 0) null else f.expected to actual
         }
-        return if (errors.size < 7) null else errors.sum() / errors.size
+        if (pairs.size < 7) return null
+        val mape = pairs.sumOf { (f, a) -> Ratio.mulDiv(kotlin.math.abs(a - f), 10_000, a) } / pairs.size
+        val actual = pairs.sumOf { it.second }
+        val wape = Ratio.mulDiv(pairs.sumOf { (f, a) -> kotlin.math.abs(a - f) }, 10_000, actual)
+        val over = pairs.sumOf { (f, a) -> f - a }
+        val bias = Ratio.mulDiv(kotlin.math.abs(over), 10_000, actual).let { if (over < 0) -it else it }
+        return Backtest(mape, wape, bias)
     }
 
     /** Net sales (before service and tax) of each recorded day, scaled to a normal day where the day was marked. */
