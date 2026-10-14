@@ -45,6 +45,8 @@ object StandardAccounts {
     val CHEQUES_RECEIVABLE = AccountCode.of("1105")
     /** Customers' cheques that bounced: what the drawers owe us until settled. */
     val BOUNCED_CHEQUES_RECEIVABLE = AccountCode.of("1107")
+    /** VAT paid on purchases, set against what sales owe (اعتبار مالیاتی خرید). */
+    val VAT_RECEIVABLE = AccountCode.of("1108")
     val SALES_CLEARING = AccountCode.of("1190")
     val RECEIVABLE = AccountCode.of("1201")
     val INVENTORY = AccountCode.of("1301")
@@ -81,6 +83,8 @@ object StandardAccounts {
     val CASH_OVER_SHORT = AccountCode.of("6108")
     val DEPRECIATION = AccountCode.of("6110")
     val BANK_CHARGES = AccountCode.of("6111")
+    /** Customers' debts given up as uncollectible. */
+    val BAD_DEBTS = AccountCode.of("6112")
     /** Food given away: complimentary dishes, staff meals, donations (part of food cost, not waste). */
     val COMPS = AccountCode.of("6109")
 
@@ -95,6 +99,7 @@ object StandardAccounts {
             a(CARD_CLEARING, "وجوه کارت‌خوان", AccountType.ASSET, t),
             a(CHEQUES_RECEIVABLE, "اسناد دریافتنی (چک‌های نزد صندوق)", AccountType.ASSET, t),
             a(BOUNCED_CHEQUES_RECEIVABLE, "چک‌های دریافتی برگشتی", AccountType.ASSET, t),
+            a(VAT_RECEIVABLE, "مالیات بر ارزش افزوده‌ی خرید (اعتبار مالیاتی)", AccountType.ASSET, p, s),
             a(SALES_CLEARING, "حساب واسط تسویه فروش", AccountType.ASSET, s),
             a(RECEIVABLE, "حساب‌های دریافتنی", AccountType.ASSET, s),
             a(INVENTORY, "موجودی مواد و کالا", AccountType.ASSET, i),
@@ -128,6 +133,7 @@ object StandardAccounts {
             a(COMPS, "پذیرایی، غذای پرسنل و اهدایی", AccountType.EXPENSE, i),
             a(DEPRECIATION, "هزینه استهلاک", AccountType.EXPENSE, f),
             a(BANK_CHARGES, "کارمزد بانکی", AccountType.EXPENSE),
+            a(BAD_DEBTS, "مطالبات سوخت‌شده", AccountType.EXPENSE),
         )
     }
 }

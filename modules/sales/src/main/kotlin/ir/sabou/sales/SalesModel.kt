@@ -14,6 +14,7 @@ data class Customer(
     val type: CustomerType,
     val phone: String,
     val creditLimit: Money,
+    /** The branch that registered the customer; any branch may sell to them on credit. */
     val registeredIn: Scope.Branch,
     val isActive: Boolean = true,
     /** National ID, legal-entity ID or economic code, for invoices with the buyer's details (ADR-0037). */
@@ -90,6 +91,8 @@ data class DailySale(
     /** Statistics for reports (average check, covers); no accounting effect. */
     val guests: Int = 0,
     val transactions: Int = 0,
+    /** Why the [discount] was given (required with a discount). */
+    val discountReason: String = "",
 ) {
     val gross: Money get() = Money.sum(lines.map { it.gross })
     val netFood: Money get() = gross - discount
@@ -106,6 +109,9 @@ data class Receivable(
     val amount: Money,
     val dueDate: BusinessDate,
     val voided: Boolean,
+    /** Written off as uncollectible (bad debt), with its reason. */
+    val writtenOff: Money = Money.ZERO,
+    val writeOffReason: String = "",
 )
 
 data class Collection(

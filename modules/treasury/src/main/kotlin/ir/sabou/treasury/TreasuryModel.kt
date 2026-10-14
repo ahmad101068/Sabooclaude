@@ -66,4 +66,7 @@ interface MovementStore {
     fun balance(accountId: GlobalId): Long
     /** Every movement of the account, in recording order. */
     fun byAccount(accountId: GlobalId): List<TreasuryMovement>
+    /** Receipts minus payments dated on or before [date] (whatever the order they were recorded in). */
+    fun balanceAsOf(accountId: GlobalId, date: BusinessDate): Long =
+        byAccount(accountId).filter { it.date <= date }.fold(0L) { a, m -> if (m.direction == Direction.RECEIPT) Math.addExact(a, m.amount.rial) else Math.subtractExact(a, m.amount.rial) }
 }

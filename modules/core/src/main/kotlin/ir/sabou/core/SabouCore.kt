@@ -121,7 +121,9 @@ class SabouCore private constructor(
     private val treasuryCapability = registry.issue(ModuleId.TREASURY)
 
     val accounting = ManualAccounting(bus, ledger, registry.issue(ModuleId.LEDGER_MANUAL), periods)
-    internal val treasuryGateway = TreasuryGateway(ledger, treasuryCapability, treasuryAccounts, treasuryMovements, cheques)
+    internal val treasuryGateway = TreasuryGateway(ledger, treasuryCapability, treasuryAccounts, treasuryMovements, cheques) { scope, date ->
+        scope is ir.sabou.kernel.Scope.Branch && sales.day(scope, date)?.closed == true
+    }
     val treasury = TreasuryOperations(bus, treasuryGateway, treasuryCapability, treasuryAccounts)
     internal val bankStatementStore = ir.sabou.persistence.SqlBankStatementStore(db)
     val bankStatements = ir.sabou.treasury.BankStatementOperations(bus, treasuryAccounts, treasuryMovements, bankStatementStore, treasury)
@@ -145,6 +147,7 @@ class SabouCore private constructor(
     internal val countPlans = ir.sabou.persistence.SqlCountPlanStore(db)
     val counts = ir.sabou.inventory.StockCountOperations(bus, inventoryGateway, stockCounts, countPlans)
     val stockRecords = StockRecords(this)
+    val ledgerReads by lazy { AccountingReads(this) }
     val countPlanOps = ir.sabou.inventory.CountPlanOperations(bus, inventoryGateway, countPlans, stockCounts)
     internal val recipeBook = RecipeBook(recipes)
     val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases, attachments, approvalRules)

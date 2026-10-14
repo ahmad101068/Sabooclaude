@@ -51,6 +51,7 @@ import ir.sabou.app.ui.components.Page
 import ir.sabou.app.ui.components.PrimaryButton
 import ir.sabou.app.ui.components.SecondaryButton
 import ir.sabou.app.ui.components.TextInput
+import ir.sabou.app.ui.screens.AccountingScreens
 import ir.sabou.app.ui.screens.BankRecScreens
 import ir.sabou.app.ui.screens.BooksScreens
 import ir.sabou.app.ui.screens.ClosingScreens
@@ -558,6 +559,7 @@ private fun Pages(route: Route, nav: Nav) {
         is Route.StockCard -> InventoryScreens.StockCard(nav, route.itemId, route.locationId)
         Route.StockDocuments -> InventoryScreens.Documents(nav)
         Route.StockTransits -> InventoryScreens.Transits(nav)
+        Route.SalesTax -> AccountingScreens.SalesTax(nav)
         Route.StockRequests -> InventoryScreens.Requests(nav)
         Route.PayrollSettings -> EmployeeScreens.Settings(nav)
         Route.PayElements -> EmployeeScreens.Elements(nav)

@@ -97,6 +97,9 @@ private class SalesData(
     val prices: Map<GlobalId, Money> = emptyMap(),
     val cashBoxes: List<ir.sabou.core.AccountBalance> = emptyList(),
     val countNumber: String? = null,
+    val serviceBp: Long? = null,
+    val vatBp: Long? = null,
+    val noRecipe: Set<GlobalId> = emptySet(),
 )
 
 private const val NEW_SALE = "new"
@@ -120,6 +123,9 @@ fun SalesScreen(nav: Nav) {
                     prices = overview.menuPrices(branch, date).mapNotNull { v -> v.price?.let { v.item.id to it } }.toMap(),
                     cashBoxes = view.cashBoxes,
                     countNumber = view.countNumber,
+                    serviceBp = view.serviceBp,
+                    vatBp = view.vatBp,
+                    noRecipe = view.noRecipe,
                 )
             }
             // The open sale: null = the day's list, NEW_SALE = a new draft, otherwise a sale id.
@@ -291,6 +297,8 @@ private class SaleForm(sale: DailySale?, data: SalesData, today: BusinessDate) {
     var discount by mutableStateOf(sale?.discount)
     var service by mutableStateOf(sale?.serviceCharge)
     var tax by mutableStateOf(sale?.tax)
+    var discountReason by mutableStateOf(sale?.discountReason ?: "")
+    fun discountComplete() = (discount?.rial ?: 0L) == 0L || discountReason.trim().length >= 3
     /** Covers and bills of the day (optional, 0 = not recorded): average spend per guest and per bill. */
     var guests by mutableStateOf(sale?.guests?.takeIf { it > 0 }?.let { Fa.number(it.toLong()) } ?: "")
     var transactions by mutableStateOf(sale?.transactions?.takeIf { it > 0 }?.let { Fa.number(it.toLong()) } ?: "")
@@ -354,7 +362,7 @@ private fun saleFormSaver(data: SalesData, today: BusinessDate) = androidx.compo
             HashMap(f.portions), HashMap<GlobalId, Money?>(), f.kitchen, f.discount, f.service, f.tax, HashMap(f.liquid),
             ArrayList(f.credits.map { arrayListOf(it.customer, it.amount, it.due) }), f.step, f.guests, f.transactions,
             ArrayList(f.cheques.map { it.fields() }),
-            HashMap(f.unitPrice), HashMap(f.reason),
+            HashMap(f.unitPrice), HashMap(f.reason), f.discountReason,
         )
     },
     restore = { l ->
@@ -368,6 +376,7 @@ private fun saleFormSaver(data: SalesData, today: BusinessDate) = androidx.compo
             if (l.size > 10) { guests = l[9] as String; transactions = l[10] as String }
             if (l.size > 11) (l[11] as List<List<Any?>>).forEach { cheques.add(ChequeRow.of(it)) }
             if (l.size > 13) { unitPrice.putAll(l[12] as Map<GlobalId, Money?>); reason.putAll(l[13] as Map<GlobalId, String>) }
+            if (l.size > 14) discountReason = l[14] as String
         } }.getOrNull()   // a draft that does not fit the form starts it fresh
     },
 )
@@ -424,13 +433,31 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData, sa
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(m.name, style = SabouType.bodyStrong, color = Sabou.colors.ink)
                             SaleLineEditor(form, m.id, session.can(Permission.SALES_PRICE_OVERRIDE))
+                            if (m.id in data.noRecipe && form.portions[m.id]?.isZero == false) {
+                                Text("رسپی ندارد: فروش ثبت می‌شود ولی از انبار چیزی کم نمی‌شود. از «منو و رسپی» رسپی بگذارید.", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
+                            }
                         }
                     }
                 }
                 Divider()
                 MoneyInput("تخفیف", form.discount, { form.discount = it })
+                if ((form.discount?.rial ?: 0L) > 0L) {
+                    TextInput("دلیل تخفیف", form.discountReason, { form.discountReason = it }, placeholder = "مثلاً مشتری دائمی",
+                        error = if (!form.discountComplete()) "دلیل تخفیف لازم است" else null)
+                    if (!session.can(Permission.SALES_DISCOUNT)) Text("تخفیف با ثبت نهایی مدیر تأیید می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
+                }
                 MoneyInput("حق سرویس", form.service, { form.service = it })
                 MoneyInput("مالیات و عوارض", form.tax, { form.tax = it })
+                if (data.serviceBp != null || data.vatBp != null) {
+                    Text("محاسبه‌ی خودکار" + (data.serviceBp?.let { " · حق سرویس ${Fa.percent(it)}" } ?: "") + (data.vatBp?.let { " · مالیات و عوارض ${Fa.percent(it)}" } ?: ""),
+                        style = SabouType.label, color = Sabou.colors.primary,
+                        modifier = Modifier.clickable {
+                            val base = maxOf(0L, form.grossTotal() - (form.discount?.rial ?: 0L))
+                            val service = data.serviceBp?.let { ir.sabou.kernel.Ratio.mulDiv(base, it, 10_000) } ?: (form.service?.rial ?: 0L)
+                            form.service = Money.of(service)
+                            data.vatBp?.let { form.tax = Money.of(ir.sabou.kernel.Ratio.mulDiv(base + service, it, 10_000)) }
+                        }.padding(vertical = 4.dp))
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextInput("تعداد مهمان", form.guests, { form.guests = it }, Modifier.weight(1f), keyboard = androidx.compose.ui.text.input.KeyboardType.Number,
                         error = if (form.count(form.guests) == null) "عدد معتبر نیست" else null)
@@ -438,7 +465,7 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData, sa
                         error = if (form.count(form.transactions) == null) "عدد معتبر نیست" else null)
                 }
                 Text("اختیاری؛ برای میانگین خرید هر مهمان و هر فاکتور در گزارش پایان روز.", style = SabouType.caption, color = Sabou.colors.muted)
-                PrimaryButton("ادامه: تسویه", { form.step = 1 }, enabled = form.linesComplete() && form.countsValid())
+                PrimaryButton("ادامه: تسویه", { form.step = 1 }, enabled = form.linesComplete() && form.countsValid() && form.discountComplete())
             }
             1 -> FormCard("روش‌های تسویه") {
                 if (data.accounts.isEmpty()) Banner("برای این شعبه صندوق یا کارت‌خوانی تعریف نشده است.", ChipKind.ACCENT)
@@ -529,7 +556,7 @@ private fun Editor(branch: Scope.Branch, date: BusinessDate, data: SalesData, sa
                 action.error?.let { Banner(it) }
                 val kitchen = form.kitchen
                 fun draft() = SaveSaleDraft(draftId.value, branch, date, kitchen!!, form.lines(), form.discount ?: Money.ZERO,
-                    form.service ?: Money.ZERO, form.tax ?: Money.ZERO, form.settlements(), form.count(form.guests) ?: 0, form.count(form.transactions) ?: 0, saleId)
+                    form.service ?: Money.ZERO, form.tax ?: Money.ZERO, form.settlements(), form.count(form.guests) ?: 0, form.count(form.transactions) ?: 0, saleId, form.discountReason.trim())
                 SecondaryButton("ذخیره پیش‌نویس", {
                     action.run({ salesOps.saveDraft(draft()) }) { saved -> saleId = saved.resultId; draftId.value = GlobalId.new() }
                 }, enabled = kitchen != null && !action.busy)
@@ -601,6 +628,7 @@ private fun SaleDetail(branch: Scope.Branch, date: BusinessDate, data: SalesData
             if (sale.status == SaleStatus.REVERSED) Banner("این فروش برگشت خورده است؛ آثار آن با سند برگشتی خنثی شده.", ChipKind.NEUTRAL)
             KeyValue("فروش ناخالص", Fa.rial(sale.gross))
             KeyValue("تخفیف", "− " + Fa.rial(sale.discount), Sabou.colors.danger)
+            if (sale.discountReason.isNotBlank()) Text("دلیل تخفیف: ${sale.discountReason}", style = SabouType.caption, color = Sabou.colors.muted)
             KeyValue("حق سرویس", Fa.rial(sale.serviceCharge))
             KeyValue("مالیات و عوارض", Fa.rial(sale.tax))
             Divider()

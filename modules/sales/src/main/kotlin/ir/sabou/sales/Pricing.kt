@@ -32,6 +32,9 @@ interface MenuPriceStore {
     /** Target food cost, basis points of the menu price (e.g. 3000 = 30 %), or null when not set. */
     fun foodCostTarget(): Long?
     fun saveFoodCostTarget(bp: Long?)
+    /** Service charge, basis points of the food after discount (e.g. 1000 = 10 %), or null when none is charged. */
+    fun serviceCharge(): Long?
+    fun saveServiceCharge(bp: Long?)
 }
 
 /** The price list: which price applies to a menu item, in a branch, on a day. */

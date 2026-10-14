@@ -217,6 +217,15 @@ class IdentityService(
         branch.id
     }
 
+    fun renameBranch(id: BranchId, name: String) = asOwner { actor ->
+        hubOnly()
+        val branch = branches.byId(id) ?: throw DomainException(DomainError.NotFound("BRANCH"))
+        val trimmed = name.trim()
+        ensure(trimmed.length in 2..80 && branches.all().none { it.id != id && it.name == trimmed }) { DomainError.InvalidInput("name", "نام شعبه معتبر یا تکراری است.") }
+        branches.save(branch.copy(name = trimmed))
+        trail.append(AuditDraft("BRANCH_RENAME", "BRANCH", id.value.value, "${branch.name}->$trimmed"), actor, ModuleId.PLATFORM, "ORG", GlobalId.new().value, clock.nowEpochMillis(), epochProvider())
+    }
+
     fun createUser(username: String, displayName: String, role: Role, grants: Set<BranchId>, pin: CharArray): GlobalId = asOwner { actor ->
         hubOnly()
         ensure(role != Role.OWNER || grants.isEmpty()) { DomainError.InvalidInput("grants", "مالک به همه شعب دسترسی دارد.") }

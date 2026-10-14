@@ -60,9 +60,11 @@ data class SaveSaleDraft(
     val guests: Int = 0,
     val transactions: Int = 0,
     val saleId: GlobalId? = null,
+    /** Why the discount was given; required with a discount, which needs [Permission.SALES_DISCOUNT]. */
+    val discountReason: String = "",
 ) : Command {
     override val requiredPermission = Permission.SALES_RECORD
-    override fun fingerprint() = "$saleId|$scope|${date.epochDay}|$kitchenLocationId|${discount.rial}|${serviceCharge.rial}|${tax.rial}|$guests|$transactions|" +
+    override fun fingerprint() = "$saleId|$scope|${date.epochDay}|$kitchenLocationId|${discount.rial}|$discountReason|${serviceCharge.rial}|${tax.rial}|$guests|$transactions|" +
         lines.joinToString(";") { "${it.menuItemId}:${it.portions.micros}:${it.unitPrice?.rial}:${it.overrideReason}" } + "|" +
         settlements.joinToString(";") { s -> when (s) {
             is Settlement.Liquid -> "L:${s.treasuryAccountId}:${s.amount.rial}:${s.cheque?.fingerprint()}"
@@ -185,6 +187,63 @@ data class CloseSalesDay(
     override fun fingerprint() = "$scope|${date.epochDay}|$cashAccountId|${countedCash.rial}"
 }
 
+/** Edits a customer: name, phone, kind, credit limit; an inactive customer buys no more on credit. */
+@NoDocument
+data class UpdateCustomer(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val customerId: GlobalId,
+    val name: String,
+    val type: CustomerType,
+    val phone: String,
+    val creditLimit: Money,
+    val isActive: Boolean,
+) : Command {
+    override val requiredPermission = Permission.CUSTOMER_MANAGE
+    override fun fingerprint() = "$scope|$customerId|$name|$type|$phone|${creditLimit.rial}|$isActive"
+}
+
+/** The service charge added to sales, basis points of the food after discount, or null for none. */
+@NoDocument
+data class SetServiceCharge(override val commandId: GlobalId, val bp: Long?) : Command {
+    override val requiredPermission = Permission.MENU_PRICE_MANAGE
+    override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
+    override fun fingerprint() = "$bp"
+}
+
+/**
+ * Pays the branch's VAT and levies to the tax office: [amount] off what sales owe (2103), from a treasury account.
+ * [inputCredit] is VAT paid on purchases (1108) set against it, so only the difference leaves the account.
+ */
+@IssuesDocument(DocumentSeries.PAYMENT)
+data class PaySalesTax(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val treasuryAccountId: GlobalId,
+    val amount: Money,
+    val date: BusinessDate,
+    val note: String,
+    val inputCredit: Money = Money.ZERO,
+) : Command {
+    override val requiredPermission = Permission.TREASURY_PAYMENT
+    override fun fingerprint() = "$scope|$treasuryAccountId|${amount.rial}|${inputCredit.rial}|${date.epochDay}|$note"
+}
+
+/** Gives up (part of) a customer's debt as uncollectible: bad-debt expense against the receivable. */
+@NoDocument
+data class WriteOffReceivable(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val receivableId: GlobalId,
+    val amount: Money,
+    val date: BusinessDate,
+    val reason: String,
+) : Command {
+    override val requiredPermission = Permission.CREDIT_OVERRIDE
+    override fun fingerprint() = "$scope|$receivableId|${amount.rial}|${date.epochDay}|$reason"
+}
+
 @NoDocument
 data class ReopenSalesDay(override val commandId: GlobalId, override val scope: Scope.Branch, val date: BusinessDate, val reason: String) : Command {
     override val requiredPermission = Permission.SALES_DAY_REOPEN
@@ -212,7 +271,7 @@ class SalesOperations(
     fun outstanding(receivableId: GlobalId): Money {
         val r = sales.receivable(receivableId) ?: throw DomainException(DomainError.NotFound("RECEIVABLE"))
         if (r.voided) return Money.ZERO
-        return r.amount - Money.sum(sales.collections(r.id).filter { !it.reversed }.map { it.amount })
+        return r.amount - r.writtenOff - Money.sum(sales.collections(r.id).filter { !it.reversed }.map { it.amount })
     }
 
     fun customerBalance(customerId: GlobalId): Money = Money.sum(sales.receivablesOfCustomer(customerId).map { outstanding(it.id) })
@@ -243,8 +302,11 @@ class SalesOperations(
             id = existing?.id ?: GlobalId.new(), scope = cmd.scope, date = cmd.date, kitchenLocationId = cmd.kitchenLocationId,
             lines = lines, discount = cmd.discount, serviceCharge = cmd.serviceCharge, tax = cmd.tax,
             settlements = cmd.settlements, status = SaleStatus.DRAFT, revenueJournalId = null, cost = Money.ZERO,
-            guests = cmd.guests, transactions = cmd.transactions,
+            guests = cmd.guests, transactions = cmd.transactions, discountReason = cmd.discountReason.trim(),
         )
+        // A discount takes money off the books like a price change: it carries its reason, and whoever posts the
+        // sale needs the right to give it (a cashier may record one; the manager who posts approves it).
+        ensure(cmd.discount.isZero || cmd.discountReason.trim().length in 3..200) { DomainError.InvalidInput("discountReason", "دلیل تخفیف را بنویسید.") }
         ensure(cmd.guests in 0..100_000 && cmd.transactions in 0..100_000) { DomainError.InvalidInput("guests", "تعداد مهمان یا تراکنش معتبر نیست.") }
         ensure(sale.discount <= sale.gross) { DomainError.InvalidInput("discount", "تخفیف از فروش بیشتر است.") }
         cmd.settlements.filterIsInstance<Settlement.Liquid>().forEach { s ->
@@ -321,12 +383,12 @@ class SalesOperations(
         requireDayOpen(sale.scope, sale.date)
         ensure(sale.remaining == 0L) { DomainError.InvalidState("DAILY_SALE", "SETTLEMENT_MISMATCH:${sale.remaining}") }
         ensure(sale.settlements.none { it.amount.isZero }) { DomainError.InvalidInput("settlement", "مبلغ تسویه صفر مجاز نیست.") }
+        ensure(sale.discount.isZero || ctx.actor.role.allows(Permission.SALES_DISCOUNT)) { DomainError.PermissionDenied(Permission.SALES_DISCOUNT.name) }
 
         // Credit limits are checked against what the customer already owes.
         sale.settlements.filterIsInstance<Settlement.Credit>().groupBy { it.customerId }.forEach { (customerId, rows) ->
             val customer = customers.byId(customerId) ?: throw DomainException(DomainError.NotFound("CUSTOMER"))
             ensure(customer.isActive) { DomainError.InvalidState("CUSTOMER", "INACTIVE") }
-            ensure(customer.registeredIn == sale.scope) { DomainError.InvalidInput("customer", "این مشتری متعلق به این شعبه نیست.") }
             val after = customerBalance(customerId) + Money.sum(rows.map { it.amount })
             ensure(after <= customer.creditLimit || ctx.actor.role.allows(Permission.CREDIT_OVERRIDE)) {
                 DomainError.InvalidState("CUSTOMER", "CREDIT_LIMIT_EXCEEDED")
@@ -335,7 +397,8 @@ class SalesOperations(
         }
 
         ctx.number(DocumentSeries.DAILY_SALE, sale.date, sale.id)
-        val requirements = sale.lines.flatMap { recipes.requirements(it.menuItemId, sale.date, it.portions) }
+        // A dish with no recipe yet is sold all the same; it takes no stock (shown as "without recipe" in the day).
+        val requirements = sale.lines.filter { recipes.hasRecipeOn(it.menuItemId, sale.date) }.flatMap { recipes.requirements(it.menuItemId, sale.date, it.portions) }
         // Sold is sold: a book-stock shortage does not stop the sale; it waits as an open shortage (ADR-0022).
         val consumption = inventory.consume(ctx, capability, sale.kitchenLocationId, requirements, sale.date, CONSUMPTION, sale.id, "مصرف فروش", allowShortage = true)
 
@@ -391,8 +454,10 @@ class SalesOperations(
         val sale = requireSale(cmd.saleId, cmd.scope)
         ensure(sale.status == SaleStatus.POSTED) { DomainError.InvalidState("DAILY_SALE", sale.status.name) }
         requireDayOpen(sale.scope, sale.date)
+        requireDayOpen(sale.scope, cmd.date)
         val receivables = sales.receivablesOfSale(sale.id)
         ensure(receivables.all { r -> sales.collections(r.id).none { !it.reversed } }) { DomainError.InvalidState("DAILY_SALE", "HAS_COLLECTIONS") }
+        ensure(receivables.all { it.writtenOff.isZero }) { DomainError.InvalidState("DAILY_SALE", "HAS_WRITE_OFFS") }
         if (sale.settlements.any { it is Settlement.Liquid }) treasury.reverseDocument(ctx, capability, SETTLEMENT, sale.id, cmd.date, cmd.reason)
         ledger.reverse(ctx, capability, emptySet(), requireNotNull(sale.revenueJournalId), cmd.date, cmd.reason)
         if (sale.consumed) inventory.reverseDocument(ctx, capability, CONSUMPTION, sale.id, cmd.date, cmd.reason)
@@ -432,6 +497,67 @@ class SalesOperations(
         sales.saveCollection(collection.copy(reversed = true))
         ctx.audit(AuditDraft("COLLECTION_REVERSE", "RECEIVABLE", r.id.value, cmd.reason.trim()))
         collection.id
+    }
+
+    fun updateCustomer(c: UpdateCustomer): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        val customer = customers.byId(cmd.customerId) ?: throw DomainException(DomainError.NotFound("CUSTOMER"))
+        val name = cmd.name.trim()
+        ensure(name.length in 2..120) { DomainError.InvalidInput("name", "نام مشتری الزامی است.") }
+        ensure(cmd.phone.trim().length <= 20) { DomainError.InvalidInput("phone", "شماره تلفن معتبر نیست.") }
+        ensure(customers.all().none { it.id != customer.id && it.name == name && it.phone == cmd.phone.trim() }) { DomainError.InvalidState("CUSTOMER", "DUPLICATE") }
+        customers.save(customer.copy(name = name, type = cmd.type, phone = cmd.phone.trim(), creditLimit = cmd.creditLimit, isActive = cmd.isActive))
+        ctx.audit(AuditDraft("CUSTOMER_UPDATE", "CUSTOMER", customer.id.value, "name=$name;limit=${cmd.creditLimit.rial};active=${cmd.isActive}"))
+        customer.id
+    }
+
+    fun serviceCharge(): Long? = prices.serviceCharge()
+
+    fun setServiceCharge(c: SetServiceCharge): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        ensure(cmd.bp == null || cmd.bp in 1..3_000) { DomainError.InvalidInput("service", "حق سرویس بین ۰ و ۳۰ درصد است.") }
+        prices.saveServiceCharge(cmd.bp)
+        ctx.audit(AuditDraft("SERVICE_CHARGE_SET", "MENU", "service", "bp=${cmd.bp}"))
+        GlobalId.new()
+    }
+
+    /** What the branch's sales owe in VAT and levies now (2103), net of what was paid. */
+    fun salesTaxOwed(scope: Scope.Branch): Money = Money.of(maxOf(0L, -ledger.balance(StandardAccounts.SALES_TAX_PAYABLE, scope).rial))
+
+    fun paySalesTax(c: PaySalesTax): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        ensure(!cmd.amount.isZero) { DomainError.InvalidInput("amount", "مبلغ باید بیشتر از صفر باشد.") }
+        ensure(cmd.amount <= salesTaxOwed(cmd.scope)) { DomainError.InvalidState("SALES_TAX", "MORE_THAN_OWED") }
+        ensure(cmd.inputCredit <= cmd.amount) { DomainError.InvalidInput("inputCredit", "اعتبار مالیاتی خرید از مبلغ تسویه بیشتر است.") }
+        ensure(cmd.note.length <= 200) { DomainError.InvalidInput("note", "توضیح طولانی است.") }
+        ensure(treasury.account(cmd.treasuryAccountId).scope == cmd.scope) { DomainError.InvalidInput("account", "حساب پرداخت متعلق به این شعبه نیست.") }
+        val docId = GlobalId.new()
+        ctx.number(DocumentSeries.PAYMENT, cmd.date, docId)
+        val title = "پرداخت مالیات و عوارض فروش" + if (cmd.note.isBlank()) "" else ": ${cmd.note.trim()}"
+        if (!cmd.inputCredit.isZero) {
+            ensure(cmd.inputCredit.rial <= ledger.balance(StandardAccounts.VAT_RECEIVABLE, cmd.scope).rial) { DomainError.InvalidState("SALES_TAX", "CREDIT_MORE_THAN_HELD") }
+            ledger.post(ctx, capability, JournalDraft(cmd.date, cmd.scope, TAX_PAYMENT, docId, "تهاتر اعتبار مالیاتی خرید", listOf(
+                LineDraft(StandardAccounts.SALES_TAX_PAYABLE, debit = cmd.inputCredit, by = capability),
+                LineDraft(StandardAccounts.VAT_RECEIVABLE, credit = cmd.inputCredit, by = capability),
+            )))
+        }
+        val cash = cmd.amount - cmd.inputCredit
+        if (!cash.isZero) treasury.settle(ctx, capability, cmd.treasuryAccountId, Direction.PAYMENT, cash, cmd.date, TAX_PAYMENT, docId, title,
+            listOf(LineDraft(StandardAccounts.SALES_TAX_PAYABLE, debit = cash, memo = cmd.note.trim(), by = capability)))
+        ctx.audit(AuditDraft("SALES_TAX_PAY", "SALES_TAX", docId.value, "amount=${cmd.amount.rial};credit=${cmd.inputCredit.rial}"))
+        docId
+    }
+
+    fun writeOff(c: WriteOffReceivable): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        val r = sales.receivable(cmd.receivableId) ?: throw DomainException(DomainError.NotFound("RECEIVABLE"))
+        ensure(r.scope == cmd.scope) { DomainError.InvalidInput("scope", "این مطالبه متعلق به این شعبه نیست.") }
+        ensure(!cmd.amount.isZero && cmd.amount <= outstanding(r.id)) { DomainError.InvalidState("RECEIVABLE", "AMOUNT_EXCEEDS_OUTSTANDING") }
+        ensure(cmd.reason.trim().length in 3..200) { DomainError.InvalidInput("reason", "دلیل سوخت شدن را بنویسید.") }
+        val docId = GlobalId.new()
+        ledger.post(ctx, capability, JournalDraft(cmd.date, r.scope, WRITE_OFF, docId, "سوخت مطالبات: ${cmd.reason.trim()}", listOf(
+            LineDraft(StandardAccounts.BAD_DEBTS, debit = cmd.amount, by = capability),
+            LineDraft(StandardAccounts.RECEIVABLE, credit = cmd.amount, memo = customers.byId(r.customerId)?.name.orEmpty(), by = capability),
+        )))
+        sales.saveReceivable(r.copy(writtenOff = r.writtenOff + cmd.amount, writeOffReason = cmd.reason.trim()))
+        ctx.audit(AuditDraft("RECEIVABLE_WRITE_OFF", "RECEIVABLE", r.id.value, "amount=${cmd.amount.rial};reason=${cmd.reason.trim()}"))
+        docId
     }
 
     fun closeDay(c: CloseSalesDay): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
@@ -475,5 +601,7 @@ class SalesOperations(
         const val SETTLEMENT = "DAILY_SALE_SETTLEMENT"
         const val COLLECTION = "RECEIVABLE_COLLECTION"
         const val DAY_COUNT = "SALES_DAY_CASH_COUNT"
+        const val TAX_PAYMENT = "SALES_TAX_PAYMENT"
+        const val WRITE_OFF = "RECEIVABLE_WRITE_OFF"
     }
 }

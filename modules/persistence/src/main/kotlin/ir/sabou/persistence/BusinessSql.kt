@@ -314,7 +314,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
         },
         status = SaleStatus.valueOf(d.str("status")), revenueJournalId = Codec.idOrNull(d.strOrNull("revenueJournal")),
         cost = Codec.money(d.long("cost")), consumed = d.bool("consumed"),
-        guests = d.intOr("guests", 0), transactions = d.intOr("transactions", 0),
+        guests = d.intOr("guests", 0), transactions = d.intOr("transactions", 0), discountReason = d.strOr("discountReason", ""),
     )
 
     /**
@@ -358,7 +358,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
                         }
                     },
                     "status" to sale.status.name, "revenueJournal" to sale.revenueJournalId?.value, "cost" to sale.cost.rial, "consumed" to sale.consumed,
-                    "guests" to sale.guests, "transactions" to sale.transactions,
+                    "guests" to sale.guests, "transactions" to sale.transactions, "discountReason" to sale.discountReason,
                 ),
             ),
         ),
@@ -366,7 +366,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
 
     private fun receivableOf(d: Doc) = Receivable(
         Codec.id(d.str("id")), Codec.id(d.str("customer")), Codec.branchOf(d.str("scope")), Codec.id(d.str("sale")),
-        Codec.money(d.long("amount")), Codec.date(d.long("due")), d.bool("voided"),
+        Codec.money(d.long("amount")), Codec.date(d.long("due")), d.bool("voided"), Codec.money(d.longOr("writtenOff", 0)), d.strOr("writeOffReason", ""),
     )
     override fun receivable(id: GlobalId) = doc("SELECT doc FROM receivables WHERE id = ?", id.value)?.let(::receivableOf)
     override fun receivablesOfSale(saleId: GlobalId) = docs("SELECT doc FROM receivables WHERE sale_id = ? ORDER BY rowid", saleId.value).map(::receivableOf)
@@ -380,6 +380,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
                 mapOf(
                     "id" to receivable.id.value, "customer" to receivable.customerId.value, "scope" to Codec.scope(receivable.scope),
                     "sale" to receivable.saleId.value, "amount" to receivable.amount.rial, "due" to receivable.dueDate.epochDay, "voided" to receivable.voided,
+                    "writtenOff" to receivable.writtenOff.rial, "writeOffReason" to receivable.writeOffReason,
                 ),
             ),
         ),
@@ -662,6 +663,8 @@ class SqlMenuPriceStore(db: SqlDatabase) : SqlTable(db), ir.sabou.sales.MenuPric
     private val meta = DatabaseMeta(db)
     override fun foodCostTarget(): Long? = meta.get("menu.food_cost_target_bp")?.toLongOrNull()?.takeIf { it > 0 }
     override fun saveFoodCostTarget(bp: Long?) = meta.put("menu.food_cost_target_bp", (bp ?: 0L).toString())
+    override fun serviceCharge(): Long? = meta.get("menu.service_charge_bp")?.toLongOrNull()?.takeIf { it > 0 }
+    override fun saveServiceCharge(bp: Long?) = meta.put("menu.service_charge_bp", (bp ?: 0L).toString())
     private fun priceOf(d: Doc) = ir.sabou.sales.MenuPrice(
         Codec.id(d.str("id")), Codec.id(d.str("menuItem")), Codec.scopeOf(d.str("scope")), Codec.date(d.long("from")),
         d.longOrNull("price")?.let(Codec::money), d.long("sequence"),

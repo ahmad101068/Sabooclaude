@@ -51,6 +51,13 @@ data class OpenTreasuryAccount(
     override fun fingerprint() = "$scope|$name|$kind"
 }
 
+/** Renames a cash box or bank account, or closes it (only when it is empty and holds no cheque). */
+@NoDocument
+data class UpdateTreasuryAccount(override val commandId: GlobalId, override val scope: Scope, val accountId: GlobalId, val name: String, val isActive: Boolean) : Command {
+    override val requiredPermission = Permission.TREASURY_ACCOUNT_MANAGE
+    override fun fingerprint() = "$scope|$accountId|$name|$isActive"
+}
+
 /** [cheque]: details when the money is a cheque received into a cheque box. */
 @IssuesDocument(DocumentSeries.RECEIPT)
 data class RecordReceipt(
@@ -161,6 +168,21 @@ class TreasuryOperations(
         val account = TreasuryAccount(GlobalId.new(), name, cmd.kind, cmd.scope, gl, allowOverdraft = cmd.kind == TreasuryKind.ISSUED_CHEQUES)
         accounts.save(account)
         ctx.audit(AuditDraft("TREASURY_ACCOUNT_OPEN", "TREASURY_ACCOUNT", account.id.value, "${cmd.kind}:$name"))
+        account.id
+    }
+
+    fun updateAccount(c: UpdateTreasuryAccount): CommandOutcome = bus.execute(ModuleId.TREASURY, c) { cmd, ctx ->
+        val account = accounts.byId(cmd.accountId) ?: throw ir.sabou.kernel.DomainException(DomainError.NotFound("TREASURY_ACCOUNT"))
+        ensure(account.scope == cmd.scope) { DomainError.InvalidInput("scope", "محدوده فرمان با حساب خزانه یکسان نیست.") }
+        val name = cmd.name.trim()
+        ensure(name.length in 2..80) { DomainError.InvalidInput("name", "نام حساب الزامی است.") }
+        ensure(accounts.all().none { it.id != account.id && it.scope == cmd.scope && it.name == name }) { DomainError.InvalidState("TREASURY_ACCOUNT", "DUPLICATE_NAME") }
+        if (account.isActive && !cmd.isActive) {
+            ensure(gateway.balance(account.id) == 0L) { DomainError.InvalidState("TREASURY_ACCOUNT", "HAS_BALANCE") }
+            ensure(!gateway.holdsCheques(account.id)) { DomainError.InvalidState("TREASURY_ACCOUNT", "HAS_CHEQUES") }
+        }
+        accounts.save(account.copy(name = name, isActive = cmd.isActive))
+        ctx.audit(AuditDraft("TREASURY_ACCOUNT_UPDATE", "TREASURY_ACCOUNT", account.id.value, "name=$name;active=${cmd.isActive}"))
         account.id
     }
 

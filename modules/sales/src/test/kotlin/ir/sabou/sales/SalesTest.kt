@@ -100,7 +100,7 @@ class SalesTest {
     /** 20 pizzas at 50,000 = 1,000,000 gross, 100,000 discount, 50,000 service, 90,000 tax = 1,040,000 payable. */
     private fun draft(settlements: List<Settlement>, portions: Long = 20, date: BusinessDate = day) =
         ops.saveDraft(SaveSaleDraft(GlobalId.new(), branch, date, kitchen, listOf(SaleLineInput(pizza, Quantity.units(portions), rial(50_000))),
-            rial(100_000), rial(50_000), rial(90_000), settlements)).resultId
+            rial(100_000), rial(50_000), rial(90_000), settlements, discountReason = "مشتری دائمی")).resultId
 
     private fun standardSettlements() = listOf(
         Settlement.Liquid(cash, rial(400_000)), Settlement.Liquid(card, rial(440_000)),

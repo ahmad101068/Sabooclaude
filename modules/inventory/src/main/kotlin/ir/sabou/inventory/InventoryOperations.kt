@@ -690,6 +690,9 @@ class InventoryOperations(
 class RecipeBook(private val recipes: RecipeStore) {
     fun menuItem(id: GlobalId): MenuItem? = recipes.menuItem(id)
 
+    /** Whether the menu item has a recipe in force on [date] (one without is sold without taking stock). */
+    fun hasRecipeOn(menuItemId: GlobalId, date: BusinessDate): Boolean = recipes.versions(menuItemId).any { it.effectiveFrom <= date }
+
     fun versionOn(menuItemId: GlobalId, date: BusinessDate): RecipeVersion =
         recipes.versions(menuItemId).filter { it.effectiveFrom <= date }.maxByOrNull { it.effectiveFrom }
             ?: throw DomainException(DomainError.InvalidState("RECIPE", "NO_VERSION_ON_DATE"))
