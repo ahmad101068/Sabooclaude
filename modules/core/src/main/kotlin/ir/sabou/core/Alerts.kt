@@ -97,6 +97,9 @@ class Alerts internal constructor(private val core: SabouCore) {
                             ?.takeIf { it.assumptions.liquidBp != null }?.firstShortWeek?.let { w ->
                             add(Alert("CASH:${b.id.value}:${w.from.epochDay}", Alert.Kind.CASH_LOW, "کمبود نقدینگی در هفته‌ی ${Fa.number(w.index.toLong())}",
                                 "${b.name}: مانده‌ی پیش‌بینی‌شده تا ${Fa.date(w.to)} به ${Fa.rial(w.closing)} ریال می‌رسد؛ «پیش‌بینی نقدینگی» را ببینید."))
+                        }
+                    }
+                }
                 if (actor.role.allows(Permission.PURCHASE_ORDER) || actor.role.allows(Permission.PURCHASE_RECORD)) {
                     // ADR-0054: what the expected dishes use up before the next delivery.
                     core.branches.all().filter { actor.canAccess(Scope.Branch(it.id)) }.forEach { b ->
