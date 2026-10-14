@@ -70,8 +70,10 @@ object TaxScreens {
         Column(Modifier.fillMaxSize()) {
             Header("اطلاعات مالیاتی", "آمادگی برای سامانه‌ی مودیان", onBack = nav.back)
             Page {
-                Text("صورتحساب هر فیش را صندوق (سپند) برای سامانه‌ی مودیان صادر می‌کند. اینجا اطلاعاتی نگه داشته می‌شود که برای صورتحساب‌های با مشخصات خریدار (مشتریان حقوقی) و گزارش‌های مالیاتی لازم است. چیزی از اینجا ارسال نمی‌شود.",
+                Text("صورتحساب هر فیش را صندوق (سپند) برای سامانه‌ی مودیان صادر می‌کند. اینجا اطلاعاتی نگه داشته می‌شود که برای صورتحساب‌های با مشخصات خریدار (مشتریان حقوقی) و گزارش‌های مالیاتی لازم است.",
                     style = SabouType.caption, color = Sabou.colors.muted)
+                if (session.can(Permission.TAX_SETTINGS)) ir.sabou.app.ui.components.NavRow(ir.sabou.app.R.drawable.ic_finance, "صورتحساب الکترونیکی",
+                    "صدور با مشخصات خریدار و ارسال به سامانه‌ی مودیان", onClick = { nav.go(ir.sabou.app.ui.Route.TaxInvoices) })
                 Loaded(data) { r ->
                     if (r.ready) Banner("اطلاعات مالیاتی کامل است.", ChipKind.PRIMARY, ir.sabou.app.R.drawable.ic_check)
                     else SCard { r.problems.forEach { Text("• $it", style = SabouType.body, color = Sabou.colors.ink) } }

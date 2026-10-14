@@ -157,6 +157,20 @@ object Messages {
         "SALES_DAY:CLOSED" to "این روز فروش بسته و صندوقش شمرده شده است؛ برای ثبت یا برگشت در این تاریخ، اول روز را بازگشایی کنید.",
         "SALES_DAY:NOT_CLOSED" to "این روز فروش بسته نیست.",
         "STOCK_MOVEMENT:ALREADY_REVERSED" to "این گردش انبار قبلاً برگشت خورده است.",
+        // Electronic invoices (ADR-0047)
+        "TAX_PROFILE:MISSING_MEMORY_ID" to "شناسه‌ی مالیاتی فروشنده یا شناسه‌ی یکتای حافظه‌ی مالیاتی وارد نشده است.",
+        "TAX_PROFILE:NO_VAT_RATE" to "برای تاریخ این فروش نرخ مالیات بر ارزش افزوده تعیین نشده است.",
+        "TAX_INVOICE:ALREADY_ISSUED" to "برای این فروش قبلاً صورتحساب صادر شده است.",
+        "TAX_INVOICE:CANCELLATION_EXISTS" to "ابطال این صورتحساب قبلاً صادر شده است.",
+        "TAX_INVOICE:READY" to "این صورتحساب هنوز در سامانه پذیرفته نشده است.",
+        "TAX_INVOICE:SENT" to "نتیجه‌ی این صورتحساب هنوز از سامانه نیامده است؛ استعلام کنید.",
+        "TAX_INVOICE:REJECTED" to "این صورتحساب در سامانه رد شده است.",
+        "TAX_INVOICE:CANCELLED" to "این صورتحساب ابطال شده است.",
+        "SALE:NOT_ONE_CREDIT_CUSTOMER" to "صورتحساب با مشخصات خریدار برای فروشی صادر می‌شود که (تمام یا بخشی از آن) نسیه‌ی یک مشتری است.",
+        "CUSTOMER:NO_TAX_ID" to "کد ملی، شناسه‌ی ملی یا کد اقتصادی این مشتری ثبت نشده است.",
+        "SALE:SERVICE_CHARGE" to "فروش با حق سرویس جداگانه در صورتحساب نمی‌آید؛ سرویس را به‌صورت یک آیتم منو با شناسه‌ی خدمت ثبت کنید.",
+        "SALE:DRAFT" to "این فروش هنوز ثبت نهایی نشده است.",
+        "SALE:REVERSED" to "این فروش برگشت خورده است.",
         "SUPPLIER:DUPLICATE_NAME" to "تأمین‌کننده‌ای با این نام وجود دارد.",
         "SUPPLIER:INACTIVE" to "این تأمین‌کننده غیرفعال است.",
         "SUPPLIER_PAYMENT:ALREADY_REVERSED" to "این پرداخت قبلاً برگشت خورده است.",
@@ -199,6 +213,11 @@ object Messages {
         } else if (error.entity == "LEAVE" && error.state.startsWith("NOT_ENOUGH:")) {
             val minutes = error.state.substringAfter(':').toLongOrNull() ?: 0
             "مانده‌ی مرخصی استحقاقی کافی نیست؛ مانده: ${Fa.number(minutes / 60)} ساعت و ${Fa.number(minutes % 60)} دقیقه."
+        } else if (error.entity == "MENU_ITEM" && (error.state.startsWith("NO_PRODUCT_ID:") || error.state.startsWith("NO_UNIT_CODE:"))) {
+            val what = if (error.state.startsWith("NO_PRODUCT_ID:")) "شناسه‌ی کالا/خدمت" else "کد واحد اندازه‌گیری"
+            "«${error.state.substringAfter(':')}» $what ندارد؛ آن را در «من › حقوق، مالیات و بودجه › اطلاعات مالیاتی» وارد کنید."
+        } else if (error.entity == "SALE" && error.state.startsWith("VAT_MISMATCH:")) {
+            "مالیات بر ارزش افزوده‌ی ثبت‌شده روی این فروش با نرخ قانونی اقلامش (${Fa.rial(error.state.substringAfter(':').toLongOrNull() ?: 0)} ریال) جور نیست؛ فروش را اصلاح کنید."
         } else states["${error.entity}:${error.state.substringBefore(':')}"] ?: error.userMessage
         else -> error.userMessage
     }
