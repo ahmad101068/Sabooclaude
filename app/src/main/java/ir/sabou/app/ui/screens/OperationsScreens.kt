@@ -173,7 +173,8 @@ object OperationsScreens {
             if (session.can(Permission.INVENTORY_VIEW)) item { NavRow(R.drawable.ic_operations, "موجودی", lowCount?.let { if (it > 0) "${Fa.number(it.toLong())} کالا زیر حداقل" else "همه کالاها بالای حداقل" }, onClick = { nav.go(Route.Stock) }) }
             if (session.can(Permission.INVENTORY_COUNT) || session.can(Permission.INVENTORY_ADJUST)) item { NavRow(R.drawable.ic_count, "انبارگردانی", "شمارش، بررسی و تأیید اختلاف با دلیل", onClick = { nav.go(Route.Count) }) }
             if (session.can(Permission.INVENTORY_TRANSFER)) item { NavRow(R.drawable.ic_transfer, "انتقال", "بین انبارها و شعب", onClick = { nav.go(Route.StockTransfer) }) }
-            if (session.can(Permission.INVENTORY_WASTE)) item { NavRow(R.drawable.ic_waste, "ضایعات", "ثبت با دلیل", onClick = { nav.go(Route.Waste) }) }
+            if (session.can(Permission.INVENTORY_WASTE)) item { NavRow(R.drawable.ic_waste, "ضایعات", "ثبت با دلیل؛ چند کالا یا یک غذا", onClick = { nav.go(Route.Waste) }) }
+            if (session.can(Permission.INVENTORY_VIEW)) item { NavRow(R.drawable.ic_count, "اسناد انبار", "ضایعات، انتقال، تولید و موجودی اول دوره؛ برگشت سند اشتباه", onClick = { nav.go(Route.StockDocuments) }) }
             if (kitchen) item { SectionTitle("آشپزخانه") }
             if (session.can(Permission.INVENTORY_PRODUCE)) item { NavRow(R.drawable.ic_calendar, "برنامه‌ی آماده‌سازی امروز", "چه چیزی، چقدر، به چه ترتیبی", onClick = { nav.go(Route.PrepPlan) }) }
             if (session.can(Permission.INVENTORY_PRODUCE)) item { NavRow(R.drawable.ic_recipe, "تولید اقلام آماده", "مواد از انبار کم و قلم آماده اضافه می‌شود", onClick = { nav.go(Route.Production) }) }
@@ -256,14 +257,24 @@ object OperationsScreens {
                                 if (session.can(Permission.INVENTORY_WASTE) && lots.any { it.lot.daysLeft(session.today) < 0 }) SecondaryButton("ثبت ضایعات", { nav.go(Route.Waste) })
                             }
                         }
+                        var search by rememberSaveable { mutableStateOf("") }
+                        TextInput("جستجوی کالا (نام یا کد)", search, { search = it })
                         Loaded(balances) { list ->
                             val byItem = list.associateBy { it.itemId }
+                            val q0 = Fa.latinDigits(search.trim())
+                            val shown = d.items.filter { q0.isBlank() || it.name.contains(q0) || it.code.contains(q0) || it.category.contains(q0) }
+                                .sortedWith(compareBy({ it.category.ifBlank { "\uFFFF" } }, { it.name }))
+                            var lastCategory: String? = null
                             SCard {
-                                d.items.forEach { item ->
+                                shown.forEach { item ->
+                                    if (item.category != lastCategory && shown.any { it.category.isNotBlank() }) {
+                                        lastCategory = item.category
+                                        Text(item.category.ifBlank { "بدون گروه" }, style = SabouType.bodyStrong, color = Sabou.colors.primary)
+                                    }
                                     val b = byItem[item.id]
                                     val q = b?.quantity ?: Quantity.ZERO
-                                    val low = !item.minimumStock.isZero && q < item.minimumStock
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val low = loc != null && item.watchedAt(loc, b != null) && q < item.minimumAt(loc)
+                                    Row(Modifier.clickable(enabled = loc != null) { nav.go(Route.StockCard(item.id, loc!!)) }, verticalAlignment = Alignment.CenterVertically) {
                                         Column(Modifier.weight(1f)) {
                                             Text(item.name, style = SabouType.bodyStrong, color = Sabou.colors.ink)
                                             val avg = if (b != null && q.micros > 0 && b.value.rial >= 0) " · میانگین ${Fa.rial(ir.sabou.kernel.Ratio.mulDiv(b.value.rial, Quantity.SCALE, q.micros))} ریال" else ""
@@ -277,6 +288,7 @@ object OperationsScreens {
                                     Divider()
                                 }
                             }
+                            Text("روی هر کالا بزنید تا کاردکس آن (همه‌ی ورود و خروج‌ها با مانده) باز شود.", style = SabouType.caption, color = Sabou.colors.muted)
                             if (loc != null) ExportButtons("موجودی-انبار") {
                                 val place = d.locations.firstOrNull { it.id == loc }?.name ?: "انبار"
                                 val items = overview.items().associateBy { it.id }
@@ -299,17 +311,33 @@ object OperationsScreens {
         var itemId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
         var qty by rememberSaveable { mutableStateOf<Quantity?>(null) }
         var value by rememberSaveable { mutableStateOf<Money?>(null) }
+        var date by rememberSaveable { mutableStateOf(session.today) }
+        var round by rememberSaveable { mutableStateOf(0) }
+        val lines = ir.sabou.app.ui.rememberRows<ReceiptLine>({ listOf(it.itemId, it.quantity, it.value) }, { ReceiptLine(it[0] as GlobalId, it[1] as Quantity, it[2] as Money) }) { emptyList() }
         val action = rememberAction()
-        val id = rememberSaveable { GlobalId.new() }
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
         FormCard("موجودی اول دوره") {
-            Text("کالایی که از قبل در انبار دارید با ارزش آن ثبت می‌شود (طرف مقابل: سرمایه).", style = SabouType.caption, color = Sabou.colors.muted)
+            Text("کالایی که از قبل در انبار دارید با ارزش آن ثبت می‌شود (طرف مقابل: سرمایه). چند کالا را در یک سند بیاورید.", style = SabouType.caption, color = Sabou.colors.muted)
+            DateInput("تاریخ (مثلاً اول سال)", date, { date = it }, session.today)
             Picker("کالا", d.items.map { Choice(it.id, it.name, unitName(it.unit)) }, itemId, { itemId = it })
-            ItemQuantityInput("مقدار", d.items.firstOrNull { it.id == itemId }, { qty = it })
-            MoneyInput("ارزش کل", value, { value = it })
+            key(round) {
+                ItemQuantityInput("مقدار", d.items.firstOrNull { it.id == itemId }, { qty = it })
+                MoneyInput("ارزش کل این کالا", value, { value = it })
+            }
+            SecondaryButton("افزودن به فهرست", {
+                lines.add(ReceiptLine(itemId!!, qty!!, value!!)); itemId = null; qty = null; value = null; round++
+            }, enabled = itemId != null && qty != null && !qty!!.isZero && value != null && lines.none { it.itemId == itemId })
+            lines.forEachIndexed { i, l ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${d.items.firstOrNull { it.id == l.itemId }?.name.orEmpty()} · ${Fa.quantity(l.quantity)} · ${Fa.rial(l.value)}", style = SabouType.body,
+                        color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                    Text("حذف", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable { lines.removeAt(i) }.padding(6.dp))
+                }
+            }
             action.error?.let { Banner(it) }
-            PrimaryButton("ثبت", {
-                action.run({ inventory.openingStock(RecordOpeningStock(id, branch, locationId!!, listOf(ReceiptLine(itemId!!, qty!!, value!!)), session.today)) }) { done() }
-            }, enabled = locationId != null && itemId != null && qty != null && value != null, busy = action.busy)
+            PrimaryButton("ثبت ${Fa.number(lines.size.toLong())} کالا", {
+                action.run({ inventory.openingStock(RecordOpeningStock(id.value, branch, locationId!!, lines.toList(), date)) }) { done() }
+            }, enabled = locationId != null && lines.isNotEmpty() && !action.busy, busy = action.busy)
         }
     }
 
@@ -327,9 +355,12 @@ object OperationsScreens {
             Header("ثبت ضایعات", onBack = nav.back)
             WithBranch { branch ->
                 val inv by invData(branch)
+                val dishes by load(session) { runCatching { overview.menu() }.getOrDefault(emptyList()).filter { it.item.isActive && it.latest != null }.map { it.item } }
                 var locationId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
-                var itemId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
-                var qty by rememberSaveable { mutableStateOf<Quantity?>(null) }
+                var byDish by rememberSaveable { mutableStateOf(false) }
+                var dishId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+                var portions by rememberSaveable { mutableStateOf("") }
+                val lines = ir.sabou.app.ui.rememberRows<IssueLine>({ listOf(it.itemId, it.quantity) }, { IssueLine(it[0] as GlobalId, it[1] as Quantity) }) { emptyList() }
                 var reason by rememberSaveable { mutableStateOf(WasteReason.SPOILAGE) }
                 var note by rememberSaveable { mutableStateOf("") }
                 var date by rememberSaveable { mutableStateOf(session.today) }
@@ -338,18 +369,29 @@ object OperationsScreens {
                 Page {
                     Loaded(inv) { d ->
                         val loc = locationId ?: d.locations.firstOrNull()?.id
+                        val available = InventoryScreens.availability(loc)
+                        val count = Fa.parseQuantity(portions)
                         FormCard {
                             if (d.locations.size > 1) Picker("انبار", d.locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
-                            Picker("کالا", d.items.map { Choice(it.id, it.name, unitName(it.unit)) }, itemId, { itemId = it })
-                            ItemQuantityInput("مقدار", d.items.firstOrNull { it.id == itemId }, { qty = it })
+                            Picker("چه چیزی", listOf(Choice(false, "کالاها"), Choice(true, "غذای آماده (مواد رسپی کم می‌شود)")), byDish, { byDish = it })
+                            if (byDish) {
+                                Picker("غذا", dishes.orNull().orEmpty().map { Choice(it.id, it.name) }, dishId, { dishId = it })
+                                TextInput("تعداد پرس", portions, { portions = it }, keyboard = KeyboardType.Decimal)
+                            } else InventoryScreens.ItemLines(d.items, lines) { available[it] }
                             Picker("دلیل", wasteReasons, reason, { reason = it })
                             TextInput("توضیح", note, { note = it })
                             DateInput("تاریخ", date, { date = it }, session.today)
                             action.error?.let { Banner(it) }
+                            val ready = loc != null && (if (byDish) dishId != null && count != null && !count.isZero else lines.isNotEmpty()) &&
+                                (reason != WasteReason.OTHER || note.isNotBlank())
                             PrimaryButton("ثبت ضایعات", {
-                                action.run({ inventory.waste(RecordWaste(id.value, branch, loc!!, itemId!!, qty!!, reason, note, date)) }) { nav.back() }
-                            }, enabled = loc != null && itemId != null && qty != null && (reason != WasteReason.OTHER || note.isNotBlank()), busy = action.busy)
-                            Text("ضایعات به بهای میانگین از انبار کم و به هزینه ضایعات منظور می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
+                                action.run({
+                                    inventory.waste(if (byDish) RecordWaste(id.value, branch, loc!!, null, null, reason, note, date, dishId = dishId, portions = count)
+                                        else RecordWaste(id.value, branch, loc!!, null, null, reason, note, date, lines = lines.toList()))
+                                }) { nav.back() }
+                            }, enabled = ready && !action.busy, busy = action.busy)
+                            Text("ضایعات به بهای میانگین از انبار کم و به هزینه ضایعات منظور می‌شود. سند اشتباه را از «اسناد انبار» برگشت بزنید.",
+                                style = SabouType.caption, color = Sabou.colors.muted)
                         }
                     }
                 }
@@ -582,10 +624,9 @@ object OperationsScreens {
                 }
                 var source by rememberSaveable { mutableStateOf<GlobalId?>(null) }
                 var target by rememberSaveable { mutableStateOf<GlobalId?>(null) }
-                var itemId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
-                var qty by rememberSaveable { mutableStateOf<Quantity?>(null) }
                 val lines = ir.sabou.app.ui.rememberRows<IssueLine>({ listOf(it.itemId, it.quantity) }, { IssueLine(it[0] as GlobalId, it[1] as Quantity) }) { emptyList() }
                 var note by rememberSaveable { mutableStateOf("") }
+                var date by rememberSaveable { mutableStateOf(session.today) }
                 val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
                 val action = rememberAction()
                 Page {
@@ -594,14 +635,13 @@ object OperationsScreens {
                             Picker("از انبار", own.map { Choice(it.id, it.name) }, source, { source = it })
                             Picker("به انبار", all.filter { it.id != source }.map { Choice(it.id, it.name, if (it.scope != branch) "شعبه دیگر" else null) }, target, { target = it })
                             Divider()
-                            Picker("کالا", items.map { Choice(it.id, it.name, unitName(it.unit)) }, itemId, { itemId = it })
-                            ItemQuantityInput("مقدار", items.firstOrNull { it.id == itemId }, { qty = it })
-                            SecondaryButton("افزودن به فهرست", { lines.add(IssueLine(itemId!!, qty!!)); itemId = null }, enabled = itemId != null && qty != null)
-                            lines.forEach { l -> KeyValue(items.firstOrNull { it.id == l.itemId }?.name ?: "", Fa.quantity(l.quantity)) }
+                            val available = InventoryScreens.availability(source)
+                            InventoryScreens.ItemLines(items, lines) { if (source == null) null else available[it] ?: Quantity.ZERO }
                             TextInput("توضیح", note, { note = it })
+                            DateInput("تاریخ", date, { date = it }, session.today)
                             action.error?.let { Banner(it) }
                             PrimaryButton("ثبت انتقال", {
-                                action.run({ inventory.transfer(TransferStock(id.value, branch, source!!, target!!, lines.toList(), session.today, note)) }) { nav.back() }
+                                action.run({ inventory.transfer(TransferStock(id.value, branch, source!!, target!!, lines.toList(), date, note)) }) { nav.back() }
                             }, enabled = source != null && target != null && lines.isNotEmpty(), busy = action.busy)
                         }
                     }

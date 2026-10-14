@@ -60,6 +60,13 @@ data class UpdateItem(
     val shelfLifeDays: Int? = null,
     /** Par per delivery weekday (0..6); null keeps them as they are, an empty map clears them. */
     val parByWeekday: Map<Int, Quantity>? = null,
+    /** null keeps them as they are. */
+    val category: String? = null,
+    val code: String? = null,
+    /** Levels per location; null keeps them, an empty map clears them. */
+    val locationLevels: Map<GlobalId, StockLevels>? = null,
+    /** A new stock unit: only for an item that never moved and is in no recipe (a unit typed wrong). */
+    val unit: StockUnit? = null,
 ) : Command {
     override val requiredPermission = Permission.INVENTORY_ITEM_MANAGE
     override val scope: Scope = Scope.Organization
@@ -67,7 +74,41 @@ data class UpdateItem(
     override fun fingerprint() = "$itemId|$name|${minimumStock.micros}|${parLevel.micros}|$shelf|$allergens|$preferredSupplierId|" +
         approvedSupplierIds.map { it.value }.sorted().joinToString(",") + "|$isActive|" +
         (packs?.joinToString(";") { "${it.name}=${it.contains.micros}" } ?: "keep") + "|${shelfLifeDays ?: "-"}|" +
-        (parByWeekday?.entries?.sortedBy { it.key }?.joinToString(",") { "${it.key}=${it.value.micros}" } ?: "keep")
+        (parByWeekday?.entries?.sortedBy { it.key }?.joinToString(",") { "${it.key}=${it.value.micros}" } ?: "keep") +
+        "|$category|$code|" + (locationLevels?.entries?.sortedBy { it.key.value.toString() }?.joinToString(",") { "${it.key}=${it.value.minimum.micros}/${it.value.par.micros}" } ?: "keep") + "|$unit"
+}
+
+/** Deletes an item created by mistake that nothing refers to (no stock movement, recipe, document or price). */
+@NoDocument
+data class DeleteItem(override val commandId: GlobalId, val itemId: GlobalId) : Command {
+    override val requiredPermission = Permission.INVENTORY_ITEM_MANAGE
+    override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
+    override fun fingerprint() = itemId.toString()
+}
+
+/** Renames a storeroom or kitchen, or retires it (only when nothing is kept there and no count is waiting). */
+@NoDocument
+data class UpdateLocation(override val commandId: GlobalId, override val scope: Scope.Branch, val locationId: GlobalId, val name: String, val isActive: Boolean) : Command {
+    override val requiredPermission = Permission.INVENTORY_LOCATION_MANAGE
+    override fun fingerprint() = "$scope|$locationId|$name|$isActive"
+}
+
+/**
+ * Takes back a waste, a transfer, a production or an opening stock entered by mistake, with a reason: every movement
+ * of the document is reversed at its original value (the goods must still be where the document put them).
+ */
+@IssuesDocument(DocumentSeries.REVERSAL)
+data class ReverseInventoryDocument(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val sourceType: String,
+    val documentId: GlobalId,
+    val date: BusinessDate,
+    val reason: String,
+) : Command {
+    override val requiredPermission = Permission.INVENTORY_ADJUST
+    override fun fingerprint() = "$scope|$sourceType|$documentId|${date.epochDay}|$reason"
 }
 
 /** A new version of how a prepared item is made; [lines] yield [outputQuantity] of it. */
@@ -93,11 +134,14 @@ data class RecordProduction(
     override val scope: Scope.Branch,
     val locationId: GlobalId,
     val itemId: GlobalId,
+    /** The planned batch: ingredients are taken for this much. */
     val quantity: Quantity,
     val date: BusinessDate,
+    /** What actually came out, when it differs from [quantity] (the yield of the day); all the cost goes into it. */
+    val actualOutput: Quantity? = null,
 ) : Command {
     override val requiredPermission = Permission.INVENTORY_PRODUCE
-    override fun fingerprint() = "$scope|$locationId|$itemId|${quantity.micros}|${date.epochDay}"
+    override fun fingerprint() = "$scope|$locationId|$itemId|${quantity.micros}|${date.epochDay}|${actualOutput?.micros}"
 }
 
 @NoDocument
@@ -125,19 +169,27 @@ enum class WasteReason(val givenAway: Boolean = false) {
     COMPLIMENTARY(true), STAFF_MEAL(true), DONATION(true),
 }
 
+/**
+ * Waste of one or more items ([itemId]/[quantity] and [lines]) or of dishes: [portions] of menu item [dishId] take
+ * their recipe's ingredients (a returned pizza, a dropped plate). One reason and note for the document.
+ */
 @IssuesDocument(DocumentSeries.WASTE)
 data class RecordWaste(
     override val commandId: GlobalId,
     override val scope: Scope.Branch,
     val locationId: GlobalId,
-    val itemId: GlobalId,
-    val quantity: Quantity,
+    val itemId: GlobalId?,
+    val quantity: Quantity?,
     val reason: WasteReason,
     val note: String,
     val date: BusinessDate,
+    val lines: List<IssueLine> = emptyList(),
+    val dishId: GlobalId? = null,
+    val portions: Quantity? = null,
 ) : Command {
     override val requiredPermission = Permission.INVENTORY_WASTE
-    override fun fingerprint() = "$scope|$locationId|$itemId|${quantity.micros}|$reason|$note|${date.epochDay}"
+    override fun fingerprint() = "$scope|$locationId|$itemId|${quantity?.micros}|$reason|$note|${date.epochDay}|" +
+        lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}" } + "|$dishId|${portions?.micros}"
 }
 
 @IssuesDocument(DocumentSeries.STOCK_TRANSFER)
@@ -201,6 +253,12 @@ class InventoryOperations(
     private val recipes: RecipeStore,
     /** Whether another module refers to a menu item (prices, sales); such an item is never deleted. */
     private val menuItemInUse: (GlobalId) -> Boolean = { false },
+    /** Whether anything refers to an item (documents, prices, plans); such an item is never deleted. */
+    private val itemReferenced: (GlobalId) -> Boolean = { true },
+    private val stock: StockStore? = null,
+    /** Pending stock counts at a location (block retiring it). */
+    private val pendingCountAt: (GlobalId) -> Boolean = { false },
+    private val documents: InventoryDocumentStore = ir.sabou.inventory.memory.InMemoryInventoryDocumentStore(),
 ) {
     private val cap get() = gateway.ownCapability
 
@@ -229,6 +287,20 @@ class InventoryOperations(
         ensure(cmd.preferredSupplierId == null || cmd.approvedSupplierIds.isEmpty() || cmd.preferredSupplierId in cmd.approvedSupplierIds) {
             DomainError.InvalidInput("supplier", "تأمین‌کننده‌ی اصلی باید در فهرست مجاز باشد.")
         }
+        val code = cmd.code?.trim() ?: item.code
+        ensure(code.length <= 40 && (cmd.category?.trim()?.length ?: 0) <= 40) { DomainError.InvalidInput("code", "کد یا گروه طولانی است.") }
+        ensure(code.isEmpty() || items.all().none { it.id != item.id && it.code == code }) { DomainError.InvalidState("ITEM", "DUPLICATE_CODE") }
+        cmd.locationLevels?.forEach { (loc, l) ->
+            ensure(locations.byId(loc) != null) { DomainError.NotFound("LOCATION") }
+            ensure(l.minimum.micros >= 0 && l.par.micros >= 0 && (l.par.isZero || l.par >= l.minimum)) { DomainError.InvalidInput("levels", "سقف هر انبار باید از حداقل آن بیشتر باشد.") }
+        }
+        // The unit decides what every quantity means: it changes only for an item nothing was recorded with.
+        val unit = cmd.unit ?: item.unit
+        if (unit != item.unit) {
+            val inRecipe = recipes.menuItems().any { m -> recipes.versions(m.id).any { v -> v.lines.any { it.itemId == item.id } } } ||
+                items.all().any { p -> recipes.prepVersions(p.id).any { v -> p.id == item.id || v.lines.any { it.itemId == item.id } } }
+            ensure(stock?.hasMovements(item.id) == false && !inRecipe && item.packs.isEmpty() && cmd.packs.isNullOrEmpty()) { DomainError.InvalidState("ITEM", "UNIT_IN_USE") }
+        }
         if (item.isActive && !cmd.isActive) {
             // An inactive item can no longer leave stock (sales, waste, counts, transfers refuse it):
             // only items with nothing on hand and no current recipe may be deactivated.
@@ -243,10 +315,56 @@ class InventoryOperations(
             preferredSupplierId = cmd.preferredSupplierId, approvedSupplierIds = cmd.approvedSupplierIds, isActive = cmd.isActive,
             packs = cmd.packs?.let(Units::validatePacks) ?: item.packs, shelfLifeDays = cmd.shelfLifeDays,
             parByWeekday = cmd.parByWeekday ?: item.parByWeekday,
+            category = cmd.category?.trim() ?: item.category, code = code, locationLevels = cmd.locationLevels ?: item.locationLevels, unit = unit,
         )
         items.save(next)
-        ctx.audit(AuditDraft("ITEM_UPDATE", "ITEM", item.id.value, name))
+        ctx.audit(AuditDraft("ITEM_UPDATE", "ITEM", item.id.value, name + if (unit != item.unit) ";unit=${item.unit}->$unit" else ""))
         item.id
+    }
+
+    fun deleteItem(c: DeleteItem): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val item = items.byId(cmd.itemId) ?: throw DomainException(DomainError.NotFound("ITEM"))
+        val inRecipe = recipes.menuItems().any { m -> recipes.versions(m.id).any { v -> v.lines.any { it.itemId == item.id } } } ||
+            items.all().any { p -> recipes.prepVersions(p.id).any { v -> p.id == item.id || v.lines.any { it.itemId == item.id } } }
+        ensure(stock?.hasMovements(item.id) == false && !inRecipe && !itemReferenced(item.id)) { DomainError.InvalidState("ITEM", "IN_USE") }
+        items.delete(item.id)
+        ctx.audit(AuditDraft("ITEM_DELETE", "ITEM", item.id.value, "${item.name};${item.unit}"))
+        item.id
+    }
+
+    fun updateLocation(c: UpdateLocation): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val location = locations.byId(cmd.locationId) ?: throw DomainException(DomainError.NotFound("LOCATION"))
+        ensure(location.scope == cmd.scope) { DomainError.InvalidInput("scope", "انبار متعلق به این شعبه نیست.") }
+        val name = cmd.name.trim()
+        ensure(name.length in 2..80) { DomainError.InvalidInput("name", "نام انبار الزامی است.") }
+        ensure(locations.all().none { it.id != location.id && it.scope == cmd.scope && it.name == name }) { DomainError.InvalidState("LOCATION", "DUPLICATE_NAME") }
+        if (location.isActive && !cmd.isActive) {
+            ensure(stock?.balances(location.id)?.all { it.quantity.isZero } != false) { DomainError.InvalidState("LOCATION", "HAS_STOCK") }
+            ensure(!pendingCountAt(location.id)) { DomainError.InvalidState("STOCK_COUNT", "PENDING_EXISTS") }
+            ensure(gateway.openShortages(setOf(location.id)).isEmpty()) { DomainError.InvalidState("LOCATION", "HAS_SHORTAGES") }
+        }
+        locations.save(location.copy(name = name, isActive = cmd.isActive))
+        ctx.audit(AuditDraft("LOCATION_UPDATE", "LOCATION", location.id.value, "name=$name;active=${cmd.isActive}"))
+        location.id
+    }
+
+    /** The document series of each inventory document type (for the reversal's number). */
+    private val seriesOf = mapOf(WASTE to DocumentSeries.WASTE, COMP to DocumentSeries.WASTE, TRANSFER to DocumentSeries.STOCK_TRANSFER,
+        PRODUCTION to DocumentSeries.PRODUCTION, OPENING to DocumentSeries.OPENING_STOCK)
+
+    fun reverseDocument(c: ReverseInventoryDocument): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val series = seriesOf[cmd.sourceType] ?: throw DomainException(DomainError.InvalidInput("sourceType", "این نوع سند از اینجا برگشت نمی‌خورد."))
+        val reason = cmd.reason.trim()
+        ensure(reason.length in 3..200) { DomainError.InvalidInput("reason", "دلیل برگشت را بنویسید.") }
+        // The document must belong to this branch (a transfer: its source branch).
+        val first = stock?.movementsBySource(cmd.sourceType, cmd.documentId)?.firstOrNull { it.reversalOf == null } ?: throw DomainException(DomainError.NotFound("STOCK_MOVEMENT"))
+        val from = locations.byId(first.locationId) ?: throw DomainException(DomainError.NotFound("LOCATION"))
+        ensure(from.scope == cmd.scope) { DomainError.InvalidInput("scope", "این سند متعلق به این شعبه نیست.") }
+        gateway.reverseDocument(ctx, cap, cmd.sourceType, cmd.documentId, cmd.date, reason)
+        documents.byId(cmd.documentId)?.let { documents.save(it.copy(reversedReason = reason)) }
+        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = series to cmd.documentId)
+        ctx.audit(AuditDraft("INVENTORY_REVERSE", cmd.sourceType, cmd.documentId.value, reason))
+        cmd.documentId
     }
 
     fun publishPrepRecipe(c: PublishPrepRecipe): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
@@ -274,6 +392,8 @@ class InventoryOperations(
         val item = gateway.item(cmd.itemId)
         ensure(item.prepared) { DomainError.InvalidState("ITEM", "NOT_PREPARED") }
         ensure(!cmd.quantity.isZero) { DomainError.InvalidInput("quantity", "مقدار تولید باید بیشتر از صفر باشد.") }
+        val output = cmd.actualOutput ?: cmd.quantity
+        ensure(!output.isZero) { DomainError.InvalidInput("actualOutput", "مقدار به‌دست‌آمده باید بیشتر از صفر باشد.") }
         val requirements = RecipeBook(recipes).prepRequirements(item.id, cmd.date, cmd.quantity)
         // A quantity so small that every ingredient rounds to nothing would create stock for free.
         val recipeLines = RecipeBook(recipes).prepOn(item.id, cmd.date).lines.size
@@ -285,10 +405,12 @@ class InventoryOperations(
         val source = SourceDocument(ModuleId.INVENTORY, PRODUCTION, docId)
         // One account, one branch: no journal is needed, inventory 1301 is unchanged.
         priced.forEach { gateway.stockOut(ctx, it.itemId, location, it.quantity, it.cost, MovementKind.PRODUCTION_OUT, cmd.date, null, source, null) }
-        gateway.stockIn(ctx, item.id, location, cmd.quantity, total, MovementKind.PRODUCTION_IN, cmd.date, null, source, null,
-            listOfNotNull(gateway.shelfLifeEnd(item, cmd.date)?.let { LotPart(it, cmd.quantity) }))
+        // A batch that came out short or long carries all its cost: the unit cost of what came out shows the yield.
+        gateway.stockIn(ctx, item.id, location, output, total, MovementKind.PRODUCTION_IN, cmd.date, null, source, null,
+            listOfNotNull(gateway.shelfLifeEnd(item, cmd.date)?.let { LotPart(it, output) }))
         gateway.settleShortages(ctx, gateway.ownCapability, location, item.id, cmd.date)
-        ctx.audit(AuditDraft("PRODUCTION", "ITEM", item.id.value, "loc=${location.id};qty=${cmd.quantity.micros};cost=${total.rial}"))
+        documents.save(InventoryDocument(docId, PRODUCTION, cmd.scope, cmd.date, planned = cmd.quantity.takeIf { output != cmd.quantity }))
+        ctx.audit(AuditDraft("PRODUCTION", "ITEM", item.id.value, "loc=${location.id};planned=${cmd.quantity.micros};qty=${output.micros};cost=${total.rial}"))
         docId
     }
 
@@ -313,6 +435,7 @@ class InventoryOperations(
         requireLocationScope(cmd.locationId, cmd.scope)
         val docId = GlobalId.new()
         ctx.number(DocumentSeries.OPENING_STOCK, cmd.date, docId)
+        documents.save(InventoryDocument(docId, OPENING, cmd.scope, cmd.date))
         val total = Money.sum(cmd.lines.map { it.value })
         gateway.receive(ctx, cap, cmd.locationId, cmd.lines, cmd.date, OPENING, docId, "موجودی اول دوره",
             listOf(LineDraft(StandardAccounts.CAPITAL, credit = total, memo = "موجودی اول دوره", by = cap)))
@@ -321,18 +444,29 @@ class InventoryOperations(
 
     fun waste(c: RecordWaste): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
         val location = requireLocationScope(cmd.locationId, cmd.scope)
-        gateway.item(cmd.itemId)
-        ensure(!cmd.quantity.isZero) { DomainError.InvalidInput("quantity", "مقدار ضایعات باید بیشتر از صفر باشد.") }
         ensure(cmd.reason != WasteReason.OTHER || cmd.note.trim().length >= 3) { DomainError.InvalidInput("note", "برای «سایر» توضیح لازم است.") }
+        ensure(cmd.note.length <= 200) { DomainError.InvalidInput("note", "توضیح طولانی است.") }
+        ensure((cmd.itemId == null) == (cmd.quantity == null) && (cmd.dishId == null) == (cmd.portions == null)) { DomainError.InvalidInput("lines", "کالا و مقدار با هم لازم‌اند.") }
+        val dish = cmd.dishId?.let { d ->
+            ensure(!cmd.portions!!.isZero) { DomainError.InvalidInput("portions", "تعداد پرس باید بیشتر از صفر باشد.") }
+            RecipeBook(recipes).requirements(d, cmd.date, cmd.portions)
+        }.orEmpty()
+        val all = listOfNotNull(cmd.itemId?.let { IssueLine(it, cmd.quantity!!) }) + cmd.lines + dish
+        val merged = all.groupBy { it.itemId }.map { (id, rows) -> IssueLine(id, rows.fold(Quantity.ZERO) { a, r -> a + r.quantity }) }.filter { !it.quantity.isZero }
+        ensure(merged.isNotEmpty() && all.none { it.quantity.isZero }) { DomainError.InvalidInput("quantity", "مقدار ضایعات باید بیشتر از صفر باشد.") }
+        val priced = merged.map { gateway.item(it.itemId); IssuedCost(it.itemId, it.quantity, gateway.valueOf(gateway.balance(it.itemId, location.id), it.quantity)) }
+        val value = Money.sum(priced.map { it.cost })
         val docId = GlobalId.new()
         ctx.number(DocumentSeries.WASTE, cmd.date, docId)
-        val value = gateway.valueOf(gateway.balance(cmd.itemId, location.id), cmd.quantity)
         val (type, account, title) = if (cmd.reason.givenAway) Triple(COMP, StandardAccounts.COMPS, "پذیرایی و اهدایی") else Triple(WASTE, StandardAccounts.WASTE, "ضایعات")
-        val journal = if (value.isZero) null else gateway.postOwn(ctx, JournalDraft(cmd.date, location.scope, type, docId, "$title: ${cmd.reason}", listOf(
+        val dishName = cmd.dishId?.let { recipes.menuItem(it)?.name }?.let { " · $it × ${cmd.portions!!.micros / Quantity.SCALE}" }.orEmpty()
+        val journal = if (value.isZero) null else gateway.postOwn(ctx, JournalDraft(cmd.date, location.scope, type, docId, "$title: ${cmd.reason}$dishName", listOf(
             LineDraft(account, debit = value, memo = cmd.note, by = cap),
             LineDraft(StandardAccounts.INVENTORY, credit = value, memo = location.name, by = cap),
         )))
-        gateway.stockOut(ctx, cmd.itemId, location, cmd.quantity, value, MovementKind.WASTE, cmd.date, journal?.id, SourceDocument(ModuleId.INVENTORY, type, docId), null)
+        priced.forEach { gateway.stockOut(ctx, it.itemId, location, it.quantity, it.cost, MovementKind.WASTE, cmd.date, journal?.id, SourceDocument(ModuleId.INVENTORY, type, docId), null) }
+        documents.save(InventoryDocument(docId, type, cmd.scope, cmd.date, note = cmd.note.trim(), reason = cmd.reason.name, dish = dishName.removePrefix(" · ")))
+        ctx.audit(AuditDraft("WASTE", type, docId.value, "reason=${cmd.reason};lines=${priced.size};value=${value.rial};note=${cmd.note.trim()}$dishName"))
         docId
     }
 
@@ -352,6 +486,7 @@ class InventoryOperations(
         val docId = GlobalId.new()
         ctx.number(DocumentSeries.STOCK_TRANSFER, cmd.date, docId)
         val source = SourceDocument(ModuleId.INVENTORY, TRANSFER, docId)
+        documents.save(InventoryDocument(docId, TRANSFER, cmd.scope, cmd.date, note = cmd.note.trim()))
         var outJournal: GlobalId? = null
         var inJournal: GlobalId? = null
         if (from.scope != to.scope && !total.isZero) {

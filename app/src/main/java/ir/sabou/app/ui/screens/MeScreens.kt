@@ -301,11 +301,21 @@ object MeScreens {
             Page {
                 Loaded(data) { list ->
                     if (list.isEmpty()) EmptyState("هنوز کالایی تعریف نشده است.")
-                    list.forEach { i ->
+                    var search by rememberSaveable { mutableStateOf("") }
+                    if (list.size > 5) TextInput("جستجو (نام، کد یا گروه)", search, { search = it })
+                    val q = Fa.latinDigits(search.trim())
+                    var lastCategory: String? = null
+                    list.filter { q.isBlank() || it.name.contains(q) || it.code.contains(q) || it.category.contains(q) }
+                        .sortedWith(compareBy({ it.category.ifBlank { "\uFFFF" } }, { it.name })).forEach { i ->
+                        if (i.category != lastCategory && list.any { it.category.isNotBlank() }) {
+                            lastCategory = i.category
+                            SectionTitle(i.category.ifBlank { "بدون گروه" })
+                        }
                         SCard(onClick = { nav.go(Route.ItemEdit(i.id)) }) {
                             KeyValue(i.name + (if (!i.isActive) " (غیرفعال)" else "") + (if (i.prepared) " · تولید داخلی" else ""),
                                 unitName(i.unit) + if (!i.minimumStock.isZero) " · حداقل ${Fa.quantity(i.minimumStock)}" else "")
                             val extra = listOfNotNull(
+                                i.code.takeIf { it.isNotBlank() }?.let { "کد ${Fa.digits(it)}" },
                                 i.parLevel.takeIf { !it.isZero }?.let { "سطح مطلوب ${Fa.quantity(it)}" },
                                 i.shelf.takeIf { it.isNotBlank() }?.let { "محل: $it" },
                                 i.allergens.takeIf { it.isNotBlank() }?.let { "آلرژن: $it" },
@@ -343,7 +353,19 @@ object MeScreens {
                 val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
                 val action = rememberAction()
                 Page {
-                    Loaded(data) { list -> list.forEach { l -> SCard { Text(l.name, style = SabouType.bodyStrong, color = Sabou.colors.ink) } } }
+                    var editing by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+                    Loaded(data) { list -> list.forEach { l ->
+                        SCard {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(l.name, style = SabouType.bodyStrong, color = if (l.isActive) Sabou.colors.ink else Sabou.colors.muted, modifier = Modifier.weight(1f))
+                                if (!l.isActive) Chip("غیرفعال", ChipKind.NEUTRAL)
+                            }
+                            if (session.can(Permission.INVENTORY_LOCATION_MANAGE)) {
+                                if (editing == l.id) key(l.id) { LocationForm(branch, l) { editing = null } }
+                                else Text("ویرایش", style = SabouType.label, color = Sabou.colors.primary, modifier = Modifier.clickable { editing = l.id }.padding(vertical = 4.dp))
+                            }
+                        }
+                    } }
                     FormCard("انبار یا آشپزخانه جدید") {
                         TextInput("نام", name, { name = it })
                         action.error?.let { Banner(it) }
@@ -353,6 +375,25 @@ object MeScreens {
                     }
                 }
             }
+        }
+    }
+
+    @Composable
+    private fun LocationForm(branch: ir.sabou.kernel.Scope.Branch, l: ir.sabou.inventory.Location, onDone: () -> Unit) {
+        var name by rememberSaveable { mutableStateOf(l.name) }
+        var active by rememberSaveable { mutableStateOf(l.isActive) }
+        val action = rememberAction()
+        TextInput("نام", name, { name = it })
+        Row(Modifier.clickable { active = !active }, verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.Checkbox(checked = active, onCheckedChange = { active = it })
+            Text("فعال", style = SabouType.body, color = Sabou.colors.ink)
+        }
+        if (!active && l.isActive) Text("فقط انبار خالی (بدون موجودی، شمارش در انتظار یا کسری باز) غیرفعال می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
+        action.error?.let { Banner(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PrimaryButton("ذخیره", { action.run({ inventory.updateLocation(ir.sabou.inventory.UpdateLocation(GlobalId.new(), branch, l.id, name, active)) }) { onDone() } },
+                Modifier.weight(1f), enabled = name.trim().length >= 2 && !action.busy, busy = action.busy)
+            SecondaryButton("انصراف", onDone, Modifier.weight(1f))
         }
     }
 

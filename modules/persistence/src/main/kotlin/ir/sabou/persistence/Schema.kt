@@ -310,6 +310,14 @@ object Schema {
                 "CREATE INDEX leaves_employee ON leaves(employee_id, date)",
             ),
         ),
+        Migration(
+            23,
+            listOf(
+                // Reason, note and planned batch of waste, transfer, production and opening documents (ADR-0044).
+                "CREATE TABLE inventory_documents (id TEXT PRIMARY KEY, scope TEXT NOT NULL, date INTEGER NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX inventory_documents_day ON inventory_documents(scope, date)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

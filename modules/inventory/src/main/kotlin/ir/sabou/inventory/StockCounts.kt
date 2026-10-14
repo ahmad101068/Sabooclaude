@@ -211,9 +211,11 @@ class StockCountOperations(
                 gateway.stockOut(ctx, line.itemId, location, loss, v, MovementKind.COUNT_LOSS, count.date, journal?.id, source, null)
                 -v.rial
             } else {
-                // A gain is valued at the current average cost; with no stock left there is no reliable cost.
+                // A gain is valued at the current average cost; with nothing left, at the last cost it came in at — never at
+                // zero, which would lower the average and understate the cost of what is sold later.
                 val gain = Quantity.of(line.difference)
-                val v = if (book.quantity.isZero) Money.ZERO else Money.of(ir.sabou.kernel.Ratio.mulDiv(book.value.rial, gain.micros, book.quantity.micros))
+                val v = if (!book.quantity.isZero) Money.of(ir.sabou.kernel.Ratio.mulDiv(book.value.rial, gain.micros, book.quantity.micros))
+                    else gateway.unitCostOf(line.itemId, location.id)?.let { Money.of(ir.sabou.kernel.Ratio.mulDiv(it, gain.micros, Quantity.SCALE)) } ?: Money.ZERO
                 val journal = if (v.isZero) null else gateway.postOwn(ctx, JournalDraft(count.date, location.scope, InventoryOperations.COUNT, count.id, "اضافه انبارگردانی", listOf(
                     LineDraft(StandardAccounts.INVENTORY, debit = v, memo = location.name, by = cap),
                     LineDraft(StandardAccounts.INVENTORY_VARIANCE, credit = v, memo = memo, by = cap),

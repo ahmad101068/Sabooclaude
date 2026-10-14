@@ -235,6 +235,8 @@ class InventoryGateway(
     }
 
     /** Rial per stock unit (SCALE micro-units): the location's average, else the last cost the item came in at. */
+    fun unitCostOf(itemId: GlobalId, locationId: GlobalId): Long? = unitCost(itemId, locationId)
+
     private fun unitCost(itemId: GlobalId, locationId: GlobalId): Long? {
         val balance = stock.balance(itemId, locationId)
         if (balance.quantity.micros > 0 && balance.value.rial > 0) return Ratio.mulDiv(balance.value.rial, Quantity.SCALE, balance.quantity.micros)

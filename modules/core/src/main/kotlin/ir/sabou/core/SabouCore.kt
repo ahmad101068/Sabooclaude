@@ -130,11 +130,17 @@ class SabouCore private constructor(
     internal val shortages = ir.sabou.persistence.SqlShortageStore(db)
     internal val lots = ir.sabou.persistence.SqlLotStore(db)
     internal val inventoryGateway = InventoryGateway(ledger, registry.issue(ModuleId.INVENTORY), items, locations, stock, shortages, lots)
-    val inventory = InventoryOperations(bus, inventoryGateway, items, locations, recipes) { id ->
-        menuPrices.versions(id).isNotEmpty() || sales.usesMenuItem(id)
-    }
+    internal val inventoryDocuments = ir.sabou.persistence.SqlInventoryDocumentStore(db)
+    val inventory = InventoryOperations(bus, inventoryGateway, items, locations, recipes,
+        menuItemInUse = { id -> menuPrices.versions(id).isNotEmpty() || sales.usesMenuItem(id) },
+        itemReferenced = { id -> items.isReferenced(id) },
+        stock = stock,
+        pendingCountAt = { loc -> stockCounts.all().any { it.locationId == loc && it.status == ir.sabou.inventory.CountStatus.PENDING } },
+        documents = inventoryDocuments,
+    )
     internal val countPlans = ir.sabou.persistence.SqlCountPlanStore(db)
     val counts = ir.sabou.inventory.StockCountOperations(bus, inventoryGateway, stockCounts, countPlans)
+    val stockRecords = StockRecords(this)
     val countPlanOps = ir.sabou.inventory.CountPlanOperations(bus, inventoryGateway, countPlans, stockCounts)
     internal val recipeBook = RecipeBook(recipes)
     val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases, attachments, approvalRules)

@@ -261,6 +261,21 @@ object ReportTables {
         notes = listOf(RIAL, "پیش‌نویس برای تهیه‌ی لیست در سامانه‌ی مالیات حقوق؛ فایل بارگذاری سامانه نیست."),
     )
 
+    /** An item's stock card (کاردکس) for a period. */
+    fun stockCard(card: StockCard, from: BusinessDate, to: BusinessDate) = ReportTable(
+        "کاردکس ${card.item.name}", "${card.location} · ${period(from, to)}",
+        listOf("تاریخ", "شرح", "شماره سند", "وارده", "صادره", "ارزش", "مانده", "ارزش مانده"),
+        listOf(listOf(Cell.of(Fa.date(from)), Cell.of("مانده‌ی ابتدای دوره"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY,
+            Cell.of(Fa.quantity(ir.sabou.kernel.Quantity.of(card.openingQuantity))), Cell.Amount(card.openingValue))) +
+            card.rows.map { r ->
+                listOf(Cell.of(Fa.date(r.date)), Cell.of(r.title), Cell.of(r.number.orEmpty()),
+                    Cell.of(if (r.quantity > 0) Fa.quantity(ir.sabou.kernel.Quantity.of(r.quantity)) else ""),
+                    Cell.of(if (r.quantity < 0) Fa.quantity(ir.sabou.kernel.Quantity.of(-r.quantity)) else ""),
+                    Cell.Amount(r.value), Cell.of(Fa.quantity(ir.sabou.kernel.Quantity.of(r.balanceQuantity))), Cell.Amount(r.balanceValue))
+            },
+        notes = listOf(RIAL),
+    )
+
     /** One employee's payslip as a two-column table (printed one per page). */
     fun payslip(run: ir.sabou.payroll.PayrollRun, slip: ir.sabou.payroll.Payslip, name: String, branch: String) = ReportTable(
         "فیش حقوقی", "$name · $branch · ${period(run.from, run.to)}", listOf("شرح", "مبلغ (ریال)"),

@@ -290,7 +290,7 @@ class Buying internal constructor(private val core: SabouCore) {
             val planned = need[item.id] ?: 0L
             // The par of the weekday the goods will arrive (the supplier's next delivery), else the item's usual par.
             val delivery = item.preferredSupplierId?.let { suppliers[it] }?.takeIf { it.isActive }?.nextDelivery(date, minutesNow)?.date
-            val par = item.parFor(delivery)
+            val par = item.parAt(locationId, delivery)
             if (par.isZero && planned == 0L) return@mapNotNull null
             val raw = par.micros + planned - onHand(item.id) - (onOrder[item.id] ?: 0L)
             val suggested = roundUp(item, maxOf(0L, raw))
