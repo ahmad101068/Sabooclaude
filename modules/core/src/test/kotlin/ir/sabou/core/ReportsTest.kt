@@ -196,6 +196,47 @@ class ReportsTest {
         return listOf(ReportTables.payrollRun(run, mapOf(e to "سرآشپز"), "شعبه"), ReportTables.payslip(run, slip, "سرآشپز", "شعبه"))
     }
 
+    /** ADR-0052: a sale's channels are proportions scaled exactly to its net sales; the mix sums them by channel. */
+    @Test fun salesByChannel() {
+        core.bootstrap("شعبه ونک", "مالک", "owner", "123456".toCharArray())
+        branch = Scope.Branch(core.overview.branches().single().id)
+        kitchen = core.overview.locations(branch).single().id
+        val cash = core.overview.treasury().single().account.id
+        val tea = core.inventory.defineMenuItem(DefineMenuItem(id(), "چای")).resultId
+        fun sell(portions: Long, discount: Long, channels: List<ir.sabou.sales.ChannelShare>, bills: Int = 0): GlobalId {
+            val net = portions * 100_000 - discount
+            val s = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLineInput(tea, Quantity.units(portions), rial(100_000))),
+                rial(discount), rial(0), rial(0), listOf(Settlement.Liquid(cash, rial(net))), transactions = bills,
+                discountReason = if (discount > 0) "مشتری ثابت" else "", channels = channels)).resultId
+            core.salesOps.post(PostDailySale(id(), branch, s))
+            return s
+        }
+        val dineIn = ir.sabou.sales.SalesChannel.DINE_IN; val takeaway = ir.sabou.sales.SalesChannel.TAKEAWAY
+        // One channel for the whole sale: any amount stands for "all of it".
+        val a = sell(30, 0, listOf(ir.sabou.sales.ChannelShare(dineIn, rial(1), 12)))
+        assertEquals(listOf(ir.sabou.sales.ChannelShare(dineIn, rial(3_000_000), 12)), core.sales.sale(a)!!.channels)
+        // A split 1 : 2 of 1,999,999 net (after a discount): exact to the Rial.
+        val b = sell(20, 1, listOf(ir.sabou.sales.ChannelShare(takeaway, rial(2), 4), ir.sabou.sales.ChannelShare(dineIn, rial(1), 2)))
+        val split = core.sales.sale(b)!!.channels
+        assertEquals(listOf(dineIn, takeaway), split.map { it.channel })
+        assertEquals(1_999_999L, split.sumOf { it.amount.rial })
+        assertEquals(666_666L, split.first().amount.rial)
+        // A sale without a channel is its own row.
+        sell(10, 0, emptyList(), bills = 3)
+        val rows = core.reports.productMix(branch, day, day).channels
+        assertEquals(listOf(dineIn, takeaway, null), rows.map { it.channel })
+        assertEquals(listOf(3_666_666L, 1_333_333L, 1_000_000L), rows.map { it.net.rial })
+        assertEquals(listOf(14, 4, 3), rows.map { it.transactions })
+        assertTrue(rows.sumOf { it.shareBp } in 9_998..10_002)                // shares rounded per row
+        assertEquals(rial(3_666_666 / 14), rows.first().perTransaction)
+        val table = ReportTables.channels(core.reports.productMix(branch, day, day))
+        assertEquals(listOf("حضوری (سالن)", "بیرون‌بر", "نامشخص"), table.rows.map { it.first().text })
+        // The same channel twice is refused.
+        assertTrue(assertFailsWith<DomainException> {
+            sell(1, 0, listOf(ir.sabou.sales.ChannelShare(dineIn, rial(1)), ir.sabou.sales.ChannelShare(dineIn, rial(1))))
+        }.error.code.startsWith("INVALID_INPUT"))
+    }
+
     @Test fun aCashierSeesSalesFiguresButNoCostsPurchasesOrWaste() {
         businessDay()
         core.identity.createUser("cashier1", "صندوقدار", Role.CASHIER, setOf(branch.branchId), "654321".toCharArray())

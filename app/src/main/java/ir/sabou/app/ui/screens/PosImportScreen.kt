@@ -126,6 +126,7 @@ fun PosImportScreen(nav: Nav) {
                         KeyValue("قابل تسویه (ریال)", Fa.rial(p.payable), strong = true)
                         if (p.hasInvoices) {
                             KeyValue("فاکتور", "${Fa.number(p.bills.toLong())}" + (if (p.returns > 0) " · برگشت ${Fa.number(p.returns.toLong())}" else "") + (if (p.voided > 0) " · ابطال ${Fa.number(p.voided.toLong())} (حساب نمی‌شود)" else ""))
+                            if (p.channels.isNotEmpty()) KeyValue("کانال فروش", p.channels.joinToString("، ") { "${ir.sabou.core.ReportTables.channelName(it.channel)} ${Fa.rialShort(it.amount.rial)}" })
                             if (p.cash != 0L) KeyValue("نقد", Fa.rial(p.cash))
                             if (p.card != 0L) KeyValue("کارت", Fa.rial(p.card))
                             p.credits.forEach { KeyValue("نسیه · ${it.name}", Fa.rial(it.amount)) }
