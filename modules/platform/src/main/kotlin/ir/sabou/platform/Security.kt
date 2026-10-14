@@ -12,6 +12,8 @@ enum class Permission {
     USER_MANAGE, BACKUP_CREATE, BACKUP_RESTORE, FACTORY_RESET, AUDIT_VIEW,
     // Ledger
     LEDGER_VIEW, JOURNAL_MANUAL_POST, JOURNAL_MANUAL_REVERSE, PERIOD_CLOSE, PERIOD_REOPEN, BUDGET_MANAGE,
+    /** Define the restaurant's own accounts (an expense, a loan) beside the standard chart. */
+    ACCOUNT_MANAGE,
     // Fixed assets
     ASSET_VIEW, ASSET_MANAGE,
     // Treasury
@@ -60,7 +62,7 @@ enum class Role(val permissions: Set<Permission>) {
     ),
     ACCOUNTANT(
         setOf(
-            Permission.LEDGER_VIEW, Permission.JOURNAL_MANUAL_POST, Permission.JOURNAL_MANUAL_REVERSE, Permission.PERIOD_CLOSE,
+            Permission.LEDGER_VIEW, Permission.JOURNAL_MANUAL_POST, Permission.JOURNAL_MANUAL_REVERSE, Permission.PERIOD_CLOSE, Permission.ACCOUNT_MANAGE,
             Permission.BUDGET_MANAGE, Permission.ASSET_VIEW, Permission.ASSET_MANAGE,
             Permission.TREASURY_VIEW, Permission.TREASURY_RECEIPT, Permission.TREASURY_PAYMENT, Permission.TREASURY_TRANSFER,
             Permission.TREASURY_RECONCILE, Permission.TREASURY_REVERSE, Permission.CHEQUE_MANAGE, Permission.SALES_VIEW, Permission.RECEIVABLE_COLLECT,

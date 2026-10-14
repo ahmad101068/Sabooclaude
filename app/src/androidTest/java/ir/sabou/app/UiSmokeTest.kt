@@ -28,7 +28,7 @@ class UiSmokeTest {
         Route.Home, Route.Sales, Route.Operations, Route.Finance, Route.Me,
         Route.Receipt, Route.Payment, Route.Transfer, Route.Reconcile, Route.Receivables, Route.TrialBalance,
         Route.InventoryHub, Route.PurchaseHub, Route.StaffHub,
-        Route.PayrollSettings, Route.PayElements, Route.StockDocuments, Route.StockTransits, Route.StockRequests, Route.SalesTax,
+        Route.PayrollSettings, Route.PayElements, Route.StockDocuments, Route.StockTransits, Route.StockRequests, Route.SalesTax, Route.Chart, Route.OpeningBalances, Route.BalanceSheet, Route.JournalBook, Route.Statements, Route.Aging,
         *ir.sabou.app.ui.screens.MeScreens.Group.entries.map { Route.MeGroup(it) }.toTypedArray(),
         Route.Stock, Route.Waste, Route.Count, Route.StockTransfer, Route.Recipes, Route.Purchases, Route.NewPurchase,
         Route.Suppliers, Route.Personnel, Route.Attendance, Route.Payroll,

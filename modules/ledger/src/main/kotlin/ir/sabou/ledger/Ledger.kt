@@ -103,6 +103,9 @@ class Ledger(
         return reversal
     }
 
+    /** The journals a module's document posted. */
+    fun entriesOf(sourceType: String, sourceId: GlobalId): List<JournalEntry> = journals.bySource(sourceType, sourceId)
+
     fun balance(account: AccountCode, scope: Scope? = null, upTo: BusinessDate? = null): SignedAmount =
         SignedAmount(journals.netDebit(account, scope, upTo))
 

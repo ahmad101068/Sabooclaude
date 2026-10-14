@@ -53,6 +53,12 @@ object StandardAccounts {
     /** Supplier invoice lines whose item is not known yet; cleared when someone assigns them. */
     val PURCHASES_PENDING_REVIEW = AccountCode.of("1302")
     val EMPLOYEE_ADVANCE = AccountCode.of("1401")
+    /** Expenses paid ahead (a year's insurance, rent paid in advance). */
+    val PREPAID_EXPENSES = AccountCode.of("1402")
+    /** Money paid to a supplier before the invoice. */
+    val SUPPLIER_ADVANCES = AccountCode.of("1403")
+    /** Rent deposit (رهن) and other guarantees we have paid. */
+    val DEPOSITS_PAID = AccountCode.of("1601")
     val FIXED_ASSETS = AccountCode.of("1501")
     /** Contra-asset: depreciation taken so far (credit balance). */
     val ACCUMULATED_DEPRECIATION = AccountCode.of("1509")
@@ -63,6 +69,11 @@ object StandardAccounts {
     val INSURANCE_PAYABLE = AccountCode.of("2104")
     val GOODS_RECEIVED_NOT_INVOICED = AccountCode.of("2105")
     val PAYROLL_TAX_PAYABLE = AccountCode.of("2106")
+    /** Money received from a customer before the sale (a booked event, catering). */
+    val CUSTOMER_ADVANCES = AccountCode.of("2109")
+    /** What is still owed for an asset bought on credit. */
+    val ASSET_PURCHASE_PAYABLE = AccountCode.of("2110")
+    val LOANS_PAYABLE = AccountCode.of("2201")
     /** Our cheques not yet cleared by the bank (cheque books). */
     val CHEQUES_PAYABLE = AccountCode.of("2107")
     /** Our cheques that bounced: what we still owe the payees. */
@@ -85,6 +96,11 @@ object StandardAccounts {
     val BANK_CHARGES = AccountCode.of("6111")
     /** Customers' debts given up as uncollectible. */
     val BAD_DEBTS = AccountCode.of("6112")
+    val REPAIRS = AccountCode.of("6113")
+    val PACKAGING = AccountCode.of("6114")
+    val MARKETING = AccountCode.of("6115")
+    val DELIVERY = AccountCode.of("6116")
+    val FINANCE_COSTS = AccountCode.of("6117")
     /** Food given away: complimentary dishes, staff meals, donations (part of food cost, not waste). */
     val COMPS = AccountCode.of("6109")
 
@@ -105,6 +121,9 @@ object StandardAccounts {
             a(INVENTORY, "موجودی مواد و کالا", AccountType.ASSET, i),
             a(PURCHASES_PENDING_REVIEW, "خرید در انتظار بررسی", AccountType.ASSET, p),
             a(EMPLOYEE_ADVANCE, "مساعده پرسنل", AccountType.ASSET, y),
+            a(PREPAID_EXPENSES, "پیش‌پرداخت هزینه‌ها", AccountType.ASSET),
+            a(SUPPLIER_ADVANCES, "پیش‌پرداخت به تأمین‌کنندگان", AccountType.ASSET, p),
+            a(DEPOSITS_PAID, "ودیعه‌ها (رهن و ضمانت)", AccountType.ASSET),
             a(FIXED_ASSETS, "دارایی‌های ثابت (بهای تمام‌شده)", AccountType.ASSET, f),
             a(ACCUMULATED_DEPRECIATION, "استهلاک انباشته", AccountType.ASSET, f),
             a(INTER_BRANCH, "حساب جاری بین شعب", AccountType.ASSET, t, i, p, s, y, f),
@@ -114,6 +133,9 @@ object StandardAccounts {
             a(INSURANCE_PAYABLE, "بیمه پرداختنی", AccountType.LIABILITY, y),
             a(GOODS_RECEIVED_NOT_INVOICED, "کالای دریافتی فاکتورنشده", AccountType.LIABILITY, p, i),
             a(PAYROLL_TAX_PAYABLE, "مالیات حقوق پرداختنی", AccountType.LIABILITY, y),
+            a(CUSTOMER_ADVANCES, "پیش‌دریافت از مشتریان", AccountType.LIABILITY, s),
+            a(ASSET_PURCHASE_PAYABLE, "بستانکاران خرید دارایی", AccountType.LIABILITY),
+            a(LOANS_PAYABLE, "وام و تسهیلات دریافتی", AccountType.LIABILITY),
             a(CHEQUES_PAYABLE, "اسناد پرداختنی (چک‌های صادره)", AccountType.LIABILITY, t),
             a(BOUNCED_CHEQUES_PAYABLE, "چک‌های پرداختی برگشتی", AccountType.LIABILITY, t),
             a(CAPITAL, "سرمایه", AccountType.EQUITY),
@@ -134,6 +156,11 @@ object StandardAccounts {
             a(DEPRECIATION, "هزینه استهلاک", AccountType.EXPENSE, f),
             a(BANK_CHARGES, "کارمزد بانکی", AccountType.EXPENSE),
             a(BAD_DEBTS, "مطالبات سوخت‌شده", AccountType.EXPENSE),
+            a(REPAIRS, "تعمیر و نگهداری", AccountType.EXPENSE),
+            a(PACKAGING, "بسته‌بندی و ملزومات مصرفی", AccountType.EXPENSE),
+            a(MARKETING, "تبلیغات و بازاریابی", AccountType.EXPENSE),
+            a(DELIVERY, "حمل و پیک", AccountType.EXPENSE),
+            a(FINANCE_COSTS, "هزینه‌های مالی (سود و کارمزد وام)", AccountType.EXPENSE),
         )
     }
 }

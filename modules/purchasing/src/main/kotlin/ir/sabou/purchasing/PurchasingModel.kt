@@ -174,6 +174,8 @@ data class PurchaseInvoice(
     /** Differences from its order and signs of a duplicate, found when it was recorded (ADR-0029). */
     val discrepancies: List<Discrepancy> = emptyList(),
     val matchReview: MatchReview? = null,
+    /** What was owed to the supplier when the books started (no goods, against capital). */
+    val opening: Boolean = false,
 ) {
     /** Not payable until someone reviews the differences. */
     val needsMatchReview: Boolean get() = discrepancies.isNotEmpty() && matchReview == null

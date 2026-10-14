@@ -56,6 +56,7 @@ import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Scope
 import ir.sabou.ledger.AccountType
+import ir.sabou.ledger.StandardAccounts
 import ir.sabou.platform.ModuleId
 import ir.sabou.platform.Permission
 import ir.sabou.sales.CollectReceivable
@@ -187,7 +188,13 @@ object FinanceScreens {
                 if (session.can(Permission.SALES_VIEW)) item { NavRow(R.drawable.ic_person, "طلب از مشتریان", "دریافت نسیه‌ها", onClick = { nav.go(Route.Receivables) }) }
                 if (session.can(Permission.TREASURY_PAYMENT)) item { NavRow(R.drawable.ic_payment, "مالیات و عوارض فروش", "مانده‌ی بدهی و پرداخت به اداره‌ی مالیات", onClick = { nav.go(Route.SalesTax) }) }
                 if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "بدهی به تأمین‌کنندگان", "فاکتورهای پرداخت‌نشده", onClick = { nav.go(Route.Purchases) }) }
-                if (session.can(Permission.LEDGER_VIEW)) item { NavRow(R.drawable.ic_finance, "تراز آزمایشی", "مانده همه حساب‌های دفتر کل", onClick = { nav.go(Route.TrialBalance) }) }
+                if (session.can(Permission.LEDGER_VIEW)) item { NavRow(R.drawable.ic_finance, "تراز آزمایشی", "مانده‌ی اول، گردش و مانده‌ی هر حساب در یک بازه", onClick = { nav.go(Route.TrialBalance) }) }
+                if (session.can(Permission.LEDGER_VIEW)) item { NavRow(R.drawable.ic_finance, "ترازنامه", "دارایی، بدهی و حقوق مالکانه در یک تاریخ", onClick = { nav.go(Route.BalanceSheet) }) }
+                if (session.can(Permission.LEDGER_VIEW)) item { NavRow(R.drawable.ic_finance, "دفتر روزنامه", "همه‌ی اسناد حسابداری به ترتیب", onClick = { nav.go(Route.JournalBook) }) }
+                if (session.can(Permission.PURCHASE_VIEW) || session.can(Permission.SALES_VIEW)) item { NavRow(R.drawable.ic_person, "صورت‌حساب طرف‌حساب", "گردش و مانده‌ی هر تأمین‌کننده یا مشتری", onClick = { nav.go(Route.Statements) }) }
+                if (session.can(Permission.PURCHASE_VIEW) || session.can(Permission.SALES_VIEW)) item { NavRow(R.drawable.ic_calendar, "سنی بدهی و طلب", "مانده‌ها بر حسب روزهای گذشته از سررسید", onClick = { nav.go(Route.Aging) }) }
+                if (session.can(Permission.LEDGER_VIEW) || session.can(Permission.ACCOUNT_MANAGE)) item { NavRow(R.drawable.ic_settings, "سرفصل حساب‌ها", "حساب‌های استاندارد و حساب‌های خودتان", onClick = { nav.go(Route.Chart) }) }
+                if (session.can(Permission.JOURNAL_MANUAL_POST)) item { NavRow(R.drawable.ic_settings, "مانده‌های اول دوره", "بدهی به تأمین‌کنندگان و طلب از مشتریان پیش از برنامه", onClick = { nav.go(Route.OpeningBalances) }) }
                 if (session.can(Permission.PERIOD_CLOSE)) item { NavRow(R.drawable.ic_check, "بستن ماه", "چک‌لیست پایان دوره و قفل دوره", onClick = { nav.go(Route.MonthClose) }) }
                 if (session.can(Permission.TREASURY_VIEW) || session.can(Permission.CHEQUE_MANAGE)) item {
                     NavRow(R.drawable.ic_payment, "چک‌ها", "دریافتی و پرداختی، سررسیدها، وصول و برگشت", tint = Sabou.colors.bank, tile = Sabou.colors.bankSoft, onClick = { nav.go(Route.Cheques) })
@@ -268,14 +275,33 @@ object FinanceScreens {
         Choice(PaymentPurpose.BANK_FEES.name, "کارمزد بانکی"),
     )
 
+    /**
+     * The fixed purposes plus every open account of the chart (the restaurant's own expenses, loans, deposits): an
+     * account is chosen as «ACCOUNT:code» and goes as the counter account (ADR-0045).
+     */
     @Composable
-    fun ReceiptForm(nav: Nav) = MoneyForm(nav, "دریافت وجه", "ثبت دریافت", receiptPurposes, payment = false) { account, purpose, amount, date, note, id, cheque, _ ->
-        treasury.receipt(RecordReceipt(id, account.scope, account.id, ReceiptPurpose.valueOf(purpose!!), amount, date, note, cheque))
+    private fun purposesWithAccounts(base: List<Choice<String>>, payment: Boolean): List<Choice<String>> {
+        val session = LocalSession.current
+        val chart by load(session) { ledgerReads.chart() }
+        val fixed = setOf(StandardAccounts.RENT, StandardAccounts.UTILITIES, StandardAccounts.OTHER_EXPENSE, StandardAccounts.BANK_CHARGES, StandardAccounts.OTHER_INCOME)
+        val kinds = if (payment) setOf(AccountType.EXPENSE, AccountType.LIABILITY, AccountType.ASSET) else setOf(AccountType.REVENUE, AccountType.LIABILITY, AccountType.ASSET, AccountType.EQUITY)
+        val extra = chart.orNull()?.filter { it.isActive && !it.isControl && it.type in kinds && it.code !in fixed && it.code != StandardAccounts.CAPITAL }
+            ?.map { Choice("ACCOUNT:${it.code.value}", it.name, Fa.digits(it.code.value)) } ?: return base
+        return base + extra
+    }
+
+    private fun counter(purpose: String?) = purpose?.takeIf { it.startsWith("ACCOUNT:") }?.let { ir.sabou.ledger.AccountCode.of(it.removePrefix("ACCOUNT:")) }
+
+    @Composable
+    fun ReceiptForm(nav: Nav) = MoneyForm(nav, "دریافت وجه", "ثبت دریافت", purposesWithAccounts(receiptPurposes, false), payment = false) { account, purpose, amount, date, note, id, cheque, _ ->
+        val code = counter(purpose)
+        treasury.receipt(RecordReceipt(id, account.scope, account.id, if (code != null) ReceiptPurpose.OTHER_INCOME else ReceiptPurpose.valueOf(purpose!!), amount, date, note, cheque, code))
     }
 
     @Composable
-    fun PaymentForm(nav: Nav) = MoneyForm(nav, "پرداخت هزینه", "ثبت پرداخت", paymentPurposes, payment = true) { account, purpose, amount, date, note, id, cheque, chequeId ->
-        treasury.payment(RecordPayment(id, account.scope, account.id, PaymentPurpose.valueOf(purpose!!), amount, date, note, cheque, chequeId))
+    fun PaymentForm(nav: Nav) = MoneyForm(nav, "پرداخت", "ثبت پرداخت", purposesWithAccounts(paymentPurposes, true), payment = true) { account, purpose, amount, date, note, id, cheque, chequeId ->
+        val code = counter(purpose)
+        treasury.payment(RecordPayment(id, account.scope, account.id, if (code != null) PaymentPurpose.OTHER_EXPENSE else PaymentPurpose.valueOf(purpose!!), amount, date, note, cheque, chequeId, code))
     }
 
     @Composable

@@ -120,7 +120,7 @@ class SabouCore private constructor(
     internal val ledger = Ledger(registry, accounts, journals, periods)
     private val treasuryCapability = registry.issue(ModuleId.TREASURY)
 
-    val accounting = ManualAccounting(bus, ledger, registry.issue(ModuleId.LEDGER_MANUAL), periods)
+    val accounting = ManualAccounting(bus, ledger, registry.issue(ModuleId.LEDGER_MANUAL), periods, accounts)
     internal val treasuryGateway = TreasuryGateway(ledger, treasuryCapability, treasuryAccounts, treasuryMovements, cheques) { scope, date ->
         scope is ir.sabou.kernel.Scope.Branch && sales.day(scope, date)?.closed == true
     }

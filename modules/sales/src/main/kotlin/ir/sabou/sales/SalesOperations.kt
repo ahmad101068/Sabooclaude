@@ -244,6 +244,27 @@ data class WriteOffReceivable(
     override fun fingerprint() = "$scope|$receivableId|${amount.rial}|${date.epochDay}|$reason"
 }
 
+/** What a customer owed when the books started: a receivable against capital, collected like any other. */
+@NoDocument
+data class RecordCustomerOpeningBalance(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val customerId: GlobalId,
+    val amount: Money,
+    val date: BusinessDate,
+    val dueDate: BusinessDate,
+) : Command {
+    override val requiredPermission = Permission.JOURNAL_MANUAL_POST
+    override fun fingerprint() = "$scope|$customerId|${amount.rial}|${date.epochDay}|${dueDate.epochDay}"
+}
+
+/** Takes back an opening balance entered by mistake (nothing collected or written off yet). */
+@NoDocument
+data class ReverseCustomerOpeningBalance(override val commandId: GlobalId, override val scope: Scope.Branch, val receivableId: GlobalId, val date: BusinessDate, val reason: String) : Command {
+    override val requiredPermission = Permission.JOURNAL_MANUAL_REVERSE
+    override fun fingerprint() = "$scope|$receivableId|${date.epochDay}|$reason"
+}
+
 @NoDocument
 data class ReopenSalesDay(override val commandId: GlobalId, override val scope: Scope.Branch, val date: BusinessDate, val reason: String) : Command {
     override val requiredPermission = Permission.SALES_DAY_REOPEN
@@ -555,9 +576,36 @@ class SalesOperations(
             LineDraft(StandardAccounts.BAD_DEBTS, debit = cmd.amount, by = capability),
             LineDraft(StandardAccounts.RECEIVABLE, credit = cmd.amount, memo = customers.byId(r.customerId)?.name.orEmpty(), by = capability),
         )))
-        sales.saveReceivable(r.copy(writtenOff = r.writtenOff + cmd.amount, writeOffReason = cmd.reason.trim()))
+        sales.saveReceivable(r.copy(writeOffs = r.writeOffs + WriteOff(cmd.date, cmd.amount, cmd.reason.trim())))
         ctx.audit(AuditDraft("RECEIVABLE_WRITE_OFF", "RECEIVABLE", r.id.value, "amount=${cmd.amount.rial};reason=${cmd.reason.trim()}"))
         docId
+    }
+
+    fun customerOpeningBalance(c: RecordCustomerOpeningBalance): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        val customer = customers.byId(cmd.customerId) ?: throw DomainException(DomainError.NotFound("CUSTOMER"))
+        ensure(!cmd.amount.isZero) { DomainError.InvalidInput("amount", "مبلغ باید بیشتر از صفر باشد.") }
+        ensure(cmd.dueDate >= cmd.date) { DomainError.InvalidInput("dueDate", "سررسید نمی‌تواند قبل از تاریخ باشد.") }
+        val docId = GlobalId.new()
+        ledger.post(ctx, capability, JournalDraft(cmd.date, cmd.scope, OPENING, docId, "مانده‌ی اول دوره‌ی ${customer.name}", listOf(
+            LineDraft(StandardAccounts.RECEIVABLE, debit = cmd.amount, memo = customer.name, by = capability),
+            LineDraft(StandardAccounts.CAPITAL, credit = cmd.amount, memo = "مانده‌ی اول دوره", by = capability),
+        )))
+        val r = Receivable(GlobalId.new(), customer.id, cmd.scope, docId, cmd.amount, cmd.dueDate, voided = false)
+        sales.saveReceivable(r)
+        ctx.audit(AuditDraft("CUSTOMER_OPENING_BALANCE", "RECEIVABLE", r.id.value, "customer=${customer.id};amount=${cmd.amount.rial}"))
+        r.id
+    }
+
+    fun reverseCustomerOpening(c: ReverseCustomerOpeningBalance): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        val r = sales.receivable(cmd.receivableId) ?: throw DomainException(DomainError.NotFound("RECEIVABLE"))
+        ensure(r.scope == cmd.scope) { DomainError.InvalidInput("scope", "این مطالبه متعلق به این شعبه نیست.") }
+        val journal = ledger.entriesOf(OPENING, r.saleId).firstOrNull { it.reversalOf == null } ?: throw DomainException(DomainError.InvalidState("RECEIVABLE", "NOT_OPENING"))
+        ensure(!r.voided) { DomainError.InvalidState("RECEIVABLE", "VOIDED") }
+        ensure(sales.collections(r.id).none { !it.reversed } && r.writtenOff.isZero) { DomainError.InvalidState("RECEIVABLE", "HAS_COLLECTIONS") }
+        ledger.reverse(ctx, capability, emptySet(), journal.id, cmd.date, cmd.reason)
+        sales.saveReceivable(r.copy(voided = true))
+        ctx.audit(AuditDraft("CUSTOMER_OPENING_REVERSE", "RECEIVABLE", r.id.value, cmd.reason.trim()))
+        r.id
     }
 
     fun closeDay(c: CloseSalesDay): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
@@ -603,5 +651,6 @@ class SalesOperations(
         const val DAY_COUNT = "SALES_DAY_CASH_COUNT"
         const val TAX_PAYMENT = "SALES_TAX_PAYMENT"
         const val WRITE_OFF = "RECEIVABLE_WRITE_OFF"
+        const val OPENING = "RECEIVABLE_OPENING_BALANCE"
     }
 }

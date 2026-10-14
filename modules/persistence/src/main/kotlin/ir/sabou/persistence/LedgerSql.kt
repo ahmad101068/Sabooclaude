@@ -104,6 +104,17 @@ class SqlJournalStore(db: SqlDatabase) : SqlTable(db), JournalStore {
         )
     }
 
+    override fun entriesBetween(from: BusinessDate, to: BusinessDate, scope: Scope?): List<JournalEntry> {
+        val s = scope?.let(Codec::scope)
+        return entries("WHERE date BETWEEN ? AND ? AND (? IS NULL OR scope = ?) ORDER BY date, number", from.epochDay, to.epochDay, s, s)
+    }
+
+    override fun balancesUpTo(upTo: BusinessDate?): List<Triple<AccountCode, Scope, Long>> {
+        val d = upTo?.epochDay
+        return db.query("SELECT account, scope, SUM(debit - credit) AS n FROM journal_lines WHERE (? IS NULL OR date <= ?) GROUP BY account, scope", d, d)
+            .map { Triple(AccountCode.of(it.str("account")), Codec.scopeOf(it.str("scope")), it.long("n")) }
+    }
+
     /** Computed in SQL; SQLite raises on integer overflow instead of wrapping. */
     override fun netDebit(account: AccountCode, scope: Scope?, upTo: BusinessDate?): Long {
         val s = scope?.let(Codec::scope)

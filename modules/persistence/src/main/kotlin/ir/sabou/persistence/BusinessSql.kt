@@ -104,6 +104,7 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
             Discrepancy(Discrepancy.Kind.valueOf(it.str("kind")), Codec.idOrNull(it.strOrNull("item")), it.longOrNull("ordered"), it.longOrNull("invoiced"))
         },
         matchReview = d.docOrNull("matchReview")?.let { MatchReview(Codec.id(it.str("user")), it.str("name"), it.long("at"), it.str("note")) },
+        opening = d.boolOr("opening", false),
     )
 
     override fun invoice(id: GlobalId) = doc("SELECT doc FROM purchase_invoices WHERE id = ?", id.value)?.let(::invoiceOf)
@@ -131,7 +132,7 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
                         })
                     },
                     "note" to invoice.note, "order" to invoice.orderId?.value, "journals" to invoice.journalIds.map { it.value },
-                    "recordedBy" to invoice.recordedBy?.value, "requiredApprovals" to invoice.requiredApprovals.toLong(),
+                    "recordedBy" to invoice.recordedBy?.value, "requiredApprovals" to invoice.requiredApprovals.toLong(), "opening" to invoice.opening,
                     "approvals" to invoice.approvals.map { mapOf("user" to it.userId.value, "name" to it.name, "at" to it.atEpochMillis, "self" to it.self, "reason" to it.reason) },
                     "discrepancies" to invoice.discrepancies.map { mapOf("kind" to it.kind.name, "item" to it.itemId?.value, "ordered" to it.ordered, "invoiced" to it.invoiced) },
                     "matchReview" to invoice.matchReview?.let { mapOf("user" to it.userId.value, "name" to it.name, "at" to it.atEpochMillis, "note" to it.note) },
@@ -366,7 +367,8 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
 
     private fun receivableOf(d: Doc) = Receivable(
         Codec.id(d.str("id")), Codec.id(d.str("customer")), Codec.branchOf(d.str("scope")), Codec.id(d.str("sale")),
-        Codec.money(d.long("amount")), Codec.date(d.long("due")), d.bool("voided"), Codec.money(d.longOr("writtenOff", 0)), d.strOr("writeOffReason", ""),
+        Codec.money(d.long("amount")), Codec.date(d.long("due")), d.bool("voided"),
+        d.docsOr("writeOffs").map { ir.sabou.sales.WriteOff(Codec.date(it.long("date")), Codec.money(it.long("amount")), it.strOr("reason", "")) },
     )
     override fun receivable(id: GlobalId) = doc("SELECT doc FROM receivables WHERE id = ?", id.value)?.let(::receivableOf)
     override fun receivablesOfSale(saleId: GlobalId) = docs("SELECT doc FROM receivables WHERE sale_id = ? ORDER BY rowid", saleId.value).map(::receivableOf)
@@ -380,7 +382,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
                 mapOf(
                     "id" to receivable.id.value, "customer" to receivable.customerId.value, "scope" to Codec.scope(receivable.scope),
                     "sale" to receivable.saleId.value, "amount" to receivable.amount.rial, "due" to receivable.dueDate.epochDay, "voided" to receivable.voided,
-                    "writtenOff" to receivable.writtenOff.rial, "writeOffReason" to receivable.writeOffReason,
+                    "writeOffs" to receivable.writeOffs.map { mapOf("date" to it.date.epochDay, "amount" to it.amount.rial, "reason" to it.reason) },
                 ),
             ),
         ),

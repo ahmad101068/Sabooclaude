@@ -39,6 +39,13 @@ class TreasuryGateway(
 
     fun balance(accountId: GlobalId): Long = movements.balance(accountId)
 
+    /** [code] when it is an active open account (no module's control account): a receipt's or payment's other side. */
+    fun openAccount(code: ir.sabou.ledger.AccountCode): ir.sabou.ledger.AccountCode {
+        val account = ledger.account(code) ?: throw DomainException(DomainError.NotFound("ACCOUNT:$code"))
+        ensure(account.isActive && !account.isControl) { DomainError.ControlAccount(code.value) }
+        return code
+    }
+
     /** Whether a cheque box or book still holds an open cheque (or one deposited from it is not yet collected). */
     fun holdsCheques(accountId: GlobalId): Boolean = cheques.all().any { it.pending && (it.accountId == accountId || it.bankAccountId == accountId) }
 
