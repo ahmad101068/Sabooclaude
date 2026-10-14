@@ -342,6 +342,14 @@ object Schema {
                 "CREATE INDEX shift_counts_day ON shift_counts(scope, date)",
             ),
         ),
+        Migration(
+            26,
+            listOf(
+                // Electronic invoices for the tax system, with what it answered (ADR-0047).
+                "CREATE TABLE tax_invoices (id TEXT PRIMARY KEY, sale_id TEXT NOT NULL, serial INTEGER NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX tax_invoices_sale ON tax_invoices(sale_id)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

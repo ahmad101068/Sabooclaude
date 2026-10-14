@@ -36,6 +36,7 @@ sealed interface Route : java.io.Serializable {
     data object MonthClose : Route
     data object TaxSettings : Route
     data class ChequePrintSetup(val bank: String) : Route
+    data object TaxInvoices : Route
     data class AccountHistory(val accountId: GlobalId) : Route
 
     // Reports

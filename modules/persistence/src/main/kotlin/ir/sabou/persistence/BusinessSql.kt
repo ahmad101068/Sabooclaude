@@ -747,6 +747,39 @@ class SqlTaxStore(db: SqlDatabase) : SqlTable(db), ir.sabou.sales.TaxStore {
     )
 }
 
+/** Electronic invoices for the tax system (ADR-0047). */
+class SqlTaxInvoiceStore(db: SqlDatabase) : SqlTable(db), ir.sabou.sales.TaxInvoiceStore {
+    private fun read(d: Doc) = ir.sabou.sales.TaxInvoice(
+        Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.id(d.str("sale")), Codec.id(d.str("customer")),
+        ir.sabou.sales.TaxInvoiceKind.valueOf(d.str("kind")), d.long("serial"), d.str("taxId"), d.strOrNull("ref"),
+        Codec.date(d.long("date")), d.long("issuedAt"), d.str("seller"), d.str("memory"), d.long("buyerType").toInt(),
+        d.str("buyer"), d.strOr("postal", ""),
+        d.docsOr("lines").map { l ->
+            ir.sabou.sales.TaxInvoiceLine(l.str("product"), l.str("unit"), l.str("desc"), Codec.qty(l.long("qty")), Codec.money(l.long("price")),
+                Codec.money(l.long("gross")), Codec.money(l.long("discount")), l.long("vatBp"), Codec.money(l.long("vat")))
+        },
+        Codec.money(d.long("cash")), Codec.money(d.long("credit")), ir.sabou.sales.TaxInvoiceStatus.valueOf(d.str("status")),
+        d.strOrNull("refNo"), d.strOrNull("uid"), d.strsOr("messages"), d.longOrNull("updatedAt"),
+    )
+    override fun byId(id: GlobalId) = doc("SELECT doc FROM tax_invoices WHERE id = ?", id.value)?.let(::read)
+    override fun all() = docs("SELECT doc FROM tax_invoices ORDER BY serial").map(::read)
+    override fun save(invoice: ir.sabou.sales.TaxInvoice) = upsert(
+        "tax_invoices", "id",
+        mapOf("id" to invoice.id.value, "sale_id" to invoice.saleId.value, "serial" to invoice.serial, "doc" to Json.encode(mapOf(
+            "id" to invoice.id.value, "scope" to Codec.scope(invoice.scope), "sale" to invoice.saleId.value, "customer" to invoice.customerId.value,
+            "kind" to invoice.kind.name, "serial" to invoice.serial, "taxId" to invoice.taxId, "ref" to invoice.refTaxId,
+            "date" to invoice.date.epochDay, "issuedAt" to invoice.issuedAt, "seller" to invoice.sellerTaxId, "memory" to invoice.memoryId,
+            "buyerType" to invoice.buyerType.toLong(), "buyer" to invoice.buyerTaxId, "postal" to invoice.buyerPostalCode,
+            "lines" to invoice.lines.map { l ->
+                mapOf("product" to l.productId, "unit" to l.unitCode, "desc" to l.description, "qty" to l.quantity.micros, "price" to l.unitPrice.rial,
+                    "gross" to l.gross.rial, "discount" to l.discount.rial, "vatBp" to l.vatBp, "vat" to l.vat.rial)
+            },
+            "cash" to invoice.cash.rial, "credit" to invoice.credit.rial, "status" to invoice.status.name,
+            "refNo" to invoice.referenceNumber, "uid" to invoice.uid, "messages" to invoice.messages, "updatedAt" to invoice.updatedAt,
+        ))),
+    )
+}
+
 /** Shifts, punches and clock PINs (ADR-0038). Punches are never changed or deleted. */
 class SqlShiftStore(db: SqlDatabase) : SqlTable(db), ir.sabou.payroll.ShiftStore {
     private fun shiftOf(d: Doc) = ir.sabou.payroll.Shift(Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.id(d.str("employee")), Codec.date(d.long("date")),

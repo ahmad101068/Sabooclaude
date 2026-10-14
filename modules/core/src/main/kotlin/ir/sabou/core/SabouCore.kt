@@ -101,6 +101,7 @@ class SabouCore private constructor(
     internal val supplierAdvances = ir.sabou.persistence.SqlSupplierAdvanceStore(db)
     internal val menuPrices = ir.sabou.persistence.SqlMenuPriceStore(db)
     internal val taxStore = ir.sabou.persistence.SqlTaxStore(db)
+    internal val taxInvoiceStore = ir.sabou.persistence.SqlTaxInvoiceStore(db)
     internal val posImportStore = ir.sabou.persistence.SqlPosImportStore(db)
     internal val personnel = SqlPersonnelStore(db)
     internal val payrollStore = SqlPayrollStore(db)
@@ -186,6 +187,7 @@ class SabouCore private constructor(
     val bankRec = BankRec(this)
     val closing = Closing(this)
     val taxOps = ir.sabou.sales.TaxOperations(bus, taxStore, customers) { recipes.menuItem(it) != null }
+    val taxInvoices = ir.sabou.sales.TaxInvoiceOperations(bus, taxStore, taxInvoiceStore, sales, customers) { recipes.menuItem(it)?.name }
     val moadian = Moadian(this)
     val labor = Labor(this)
     val search = Search(this)

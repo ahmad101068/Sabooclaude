@@ -401,7 +401,7 @@ class AppContainer(private val context: Context) {
         // 4. From here on the app always re-opens, and whichever file is in place opens normally.
         try {
             faultPoint("announced")
-            clearDrafts(); biometric.disable(); SmsOutbox.forget(context); PhoneAlerts.forget(context); AutoBackup.forget(context)   // drafts belong to the replaced database
+            clearDrafts(); biometric.disable(); SmsOutbox.forget(context); MoadianLink.forget(context); PhoneAlerts.forget(context); AutoBackup.forget(context)   // drafts belong to the replaced database
             close()
             if (quarantine) keepInQuarantine("RESTORE", move = false, withKey = !keyReplaced)
             faultPoint("quarantined")
@@ -486,7 +486,7 @@ class AppContainer(private val context: Context) {
         if (core != null && core.sync.isReplica) core.acceptSyncReplacement(epoch) else announceReplacement(epoch, "FACTORY_RESET")
         twoPhones.forgetRole()
         try {
-            clearDrafts(); biometric.disable(); SmsOutbox.forget(context); PhoneAlerts.forget(context); AutoBackup.forget(context)
+            clearDrafts(); biometric.disable(); SmsOutbox.forget(context); MoadianLink.forget(context); PhoneAlerts.forget(context); AutoBackup.forget(context)
             close()
             keepInQuarantine("LEAVE_SYNC", move = true)
             keys.forgetDatabaseKey()
@@ -506,7 +506,7 @@ class AppContainer(private val context: Context) {
         announceReplacement(epoch, "FACTORY_RESET")
         try {
             faultPoint("announced")
-            clearDrafts(); biometric.disable(); SmsOutbox.forget(context); PhoneAlerts.forget(context); AutoBackup.forget(context)
+            clearDrafts(); biometric.disable(); SmsOutbox.forget(context); MoadianLink.forget(context); PhoneAlerts.forget(context); AutoBackup.forget(context)
             close()
             keepInQuarantine("FACTORY_RESET", move = true)
             faultPoint("quarantined")
