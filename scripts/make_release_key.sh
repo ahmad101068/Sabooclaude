@@ -5,7 +5,7 @@ set -euo pipefail
 out="${1:-sabou-release.jks}"
 if [ -e "$out" ]; then echo "$out already exists; refusing to overwrite a signing key." >&2; exit 1; fi
 command -v keytool >/dev/null || { echo "keytool (Java) is needed." >&2; exit 1; }
-password="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)"
+password="$(set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)"
 keytool -genkeypair -v -keystore "$out" -storetype PKCS12 -alias sabou -keyalg RSA -keysize 4096 -validity 36500 \
   -storepass "$password" -keypass "$password" -dname "CN=Sabou, O=Sabou, C=IR" >/dev/null
 base64 -w0 "$out" > "$out.b64" 2>/dev/null || base64 "$out" | tr -d '\n' > "$out.b64"

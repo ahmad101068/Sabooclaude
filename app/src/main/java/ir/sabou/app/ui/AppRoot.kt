@@ -550,6 +550,7 @@ private fun Pages(route: Route, nav: Nav) {
         Route.BankStatements -> BankRecScreens.Statements(nav)
         Route.MonthClose -> ClosingScreens.MonthClose(nav)
         Route.TaxSettings -> TaxScreens.Settings(nav)
+        is Route.ChequePrintSetup -> ir.sabou.app.ui.screens.ChequePrintScreens.Setup(nav, route.bank)
         Route.TaxInvoices -> ir.sabou.app.ui.screens.TaxInvoiceScreens.Invoices(nav)
         Route.Schedule -> ShiftScreens.Schedule(nav)
         Route.TimeClock -> ShiftScreens.TimeClock(nav)
