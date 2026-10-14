@@ -70,6 +70,7 @@ object ReportsScreens {
                     NavRow(R.drawable.ic_calendar, "پیش‌بینی فروش", "دو هفته‌ی آینده، با روزهای تعطیل و مناسبت", onClick = { nav.go(Route.SalesForecast) })
                     NavRow(R.drawable.ic_finance, "سود و زیان امروز در برابر بودجه", "با برآورد حقوق و اجاره‌ی روزانه؛ و ماه تا امروز", onClick = { nav.go(Route.DailyPnl) })
                     NavRow(R.drawable.ic_finance, "سود و زیان", "روزانه، به تفکیک شعبه، درصد بهای غذا و نیروی کار", onClick = { nav.go(Route.ProfitLoss) })
+                    NavRow(R.drawable.ic_finance, "چرا سود تغییر کرد", "تعداد، ترکیب، قیمت، بهای مواد، تخفیف و هزینه‌ها؛ در برابر دوره‌ی قبل", onClick = { nav.go(Route.ProfitBridge) })
                     NavRow(R.drawable.ic_finance, "تراز آزمایشی", "مانده‌ی همه‌ی حساب‌ها", onClick = { nav.go(Route.TrialBalance) })
                     NavRow(R.drawable.ic_finance, "بودجه در برابر عملکرد", "ماهانه یا سالانه، به تفکیک حساب", onClick = { nav.go(Route.BudgetReport) })
                 }
@@ -388,6 +389,53 @@ object ReportsScreens {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /** Why profit changed (ADR-0053): the period against the one of the same length before it, cause by cause. */
+    @Composable
+    fun ProfitBridge(nav: Nav) {
+        val session = LocalSession.current
+        var from by rememberSaveable { mutableStateOf(monthStart(session.today)) }
+        var to by rememberSaveable { mutableStateOf(session.today) }
+        var expanded by rememberSaveable { mutableStateOf<Int?>(null) }
+        Column(Modifier.fillMaxSize()) {
+            Header("چرا سود تغییر کرد", onBack = nav.back) { BranchSwitcher() }
+            WithBranch { branch ->
+                val data by load(session, branch, from, to) {
+                    val (f0, t0) = profitBridges.previous(from, to)
+                    profitBridges.of(branch, from, to, f0, t0)
+                }
+                Page {
+                    PeriodPicker(from, to) { f, t -> from = f; to = t }
+                    Loaded(data) { b ->
+                        Text("در برابر ${Fa.date(b.base.from)} تا ${Fa.date(b.base.to)} (همان تعداد روز، پیش از این بازه)", style = SabouType.caption, color = Sabou.colors.muted)
+                        if (b.provisional) Banner("کسری انبارِ تعیین‌تکلیف‌نشده هست؛ ارقام قطعی نیست.")
+                        SCard { b.summary.forEach { Text(it, style = SabouType.body, color = Sabou.colors.ink) } }
+                        SCard {
+                            KeyValue("سود دوره‌ی مبنا (ریال)", Fa.rial(b.base.profit), strong = true)
+                            Divider()
+                            val biggest = b.steps.maxOfOrNull { kotlin.math.abs(it.amount) }?.takeIf { it > 0 } ?: 1L
+                            b.steps.filter { it.amount != 0L }.forEachIndexed { i, st ->
+                                Column(Modifier.fillMaxWidth().clickable { expanded = if (expanded == i) null else i }.padding(vertical = 4.dp)) {
+                                    KeyValue(ir.sabou.core.ProfitBridges.stepName(st.kind), (if (st.amount > 0) "+" else "") + Fa.rial(st.amount),
+                                        if (st.amount < 0) Sabou.colors.danger else Sabou.colors.primary)
+                                    Box(Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(SabouShapes.chip).background(Sabou.colors.track)) {
+                                        Box(Modifier.fillMaxWidth(kotlin.math.abs(st.amount).toFloat() / biggest).padding(vertical = 3.dp).clip(SabouShapes.chip)
+                                            .background(if (st.amount < 0) Sabou.colors.danger else Sabou.colors.primary))
+                                    }
+                                    if (expanded == i) st.details.forEach { d -> Text("${d.name}: ${Fa.rial(d.amount)}", style = SabouType.caption, color = Sabou.colors.muted) }
+                                }
+                            }
+                            Divider()
+                            KeyValue("سود این دوره (ریال)", Fa.rial(b.current.profit), strong = true)
+                        }
+                        Text("عامل‌ها دقیقاً با تغییر سود در دفاتر برابرند؛ تعداد، ترکیب، قیمت و بهای مواد از ردیف‌های فروش و بهای واقعی هنگام فروش است.",
+                            style = SabouType.caption, color = Sabou.colors.muted)
+                    }
+                    ExportButtons("چرا-سود-تغییر-کرد") { val (f0, t0) = profitBridges.previous(from, to); listOf(ReportTables.profitBridge(profitBridges.of(branch, from, to, f0, t0))) }
                 }
             }
         }

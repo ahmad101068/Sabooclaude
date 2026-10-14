@@ -135,6 +135,8 @@ sealed interface Route : java.io.Serializable {
     data object MenuEngineering : Route
     data object DailyPnl : Route
     data object SalesForecast : Route
+    /** Why profit changed between two periods (ADR-0053). */
+    data object ProfitBridge : Route
 }
 
 /** One line of a prefilled order: item, quantity in micro-units, expected price per unit in rial. */
