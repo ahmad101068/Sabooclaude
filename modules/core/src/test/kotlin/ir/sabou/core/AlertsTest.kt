@@ -47,7 +47,8 @@ class AlertsTest {
         core.identity.logout()                                         // nobody signed in
 
         val owner = core.alerts.forUser(ownerId, day)
-        assertEquals(setOf(Alert.Kind.LOW_STOCK, Alert.Kind.PRICE_CHANGE), owner.map { it.kind }.toSet())
+        // Both invoices are due today and unpaid.
+        assertEquals(setOf(Alert.Kind.LOW_STOCK, Alert.Kind.PRICE_CHANGE, Alert.Kind.BILL_DUE), owner.map { it.kind }.toSet())
         assertTrue(owner.single { it.kind == Alert.Kind.PRICE_CHANGE }.title.contains("+۲۰٪"))
         assertTrue(owner.single { it.kind == Alert.Kind.LOW_STOCK }.text.contains("۲"))       // 2 kg left, minimum 5
         assertTrue(core.alerts.forUser(cashierId, day).isEmpty())       // a cashier sees neither stock nor purchases

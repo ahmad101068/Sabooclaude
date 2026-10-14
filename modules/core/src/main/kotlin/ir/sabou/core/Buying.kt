@@ -275,7 +275,12 @@ class Buying internal constructor(private val core: SabouCore) {
         val need = expansion.need
         val onOrder = HashMap<GlobalId, Long>()
         core.purchases.orders().filter { it.status == OrderStatus.OPEN && it.locationId == locationId }
-            .forEach { o -> o.lines.forEach { onOrder[it.itemId] = (onOrder[it.itemId] ?: 0) + it.quantity.micros } }
+            .forEach { o ->
+                // What a partial delivery already brought is in stock, not on order.
+                val got = o.invoiceIds.mapNotNull { core.purchases.invoice(it) }.filter { it.status == InvoiceStatus.POSTED }.flatMap { it.lines }
+                    .groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } }
+                o.lines.groupBy { it.itemId }.forEach { (item, l) -> onOrder[item] = (onOrder[item] ?: 0) + maxOf(0L, l.sumOf { it.quantity.micros } - (got[item] ?: 0L)) }
+            }
 
         val branchInvoices = core.purchases.invoices().filter { it.status == InvoiceStatus.POSTED && it.scope == location.scope }
             .withIndex().sortedWith(compareBy({ it.value.date }, { it.index })).map { it.value }

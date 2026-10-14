@@ -12,7 +12,7 @@ import ir.sabou.platform.Permission
  * only if it comes back.
  */
 data class Alert(val key: String, val kind: Kind, val title: String, val text: String) {
-    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH, EXPIRY, COUNT_DUE, STAFF_DOCUMENT, TRANSFER_IN, STOCK_REQUEST }
+    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH, EXPIRY, COUNT_DUE, STAFF_DOCUMENT, TRANSFER_IN, STOCK_REQUEST, BILL_DUE, RECEIVABLE_LATE }
 }
 
 /**
@@ -78,6 +78,22 @@ class Alerts internal constructor(private val core: SabouCore) {
                         }
                     }
                 }
+                if (actor.role.allows(Permission.PURCHASE_PAY)) {
+                    // Supplier invoices due by the day after tomorrow (or past due), approved and still unpaid.
+                    safe { core.overview.invoices() }.filter { it.invoice.status == ir.sabou.purchasing.InvoiceStatus.POSTED && !it.outstanding.isZero && it.invoice.dueDate <= today.plusDays(BILL_DAYS) }
+                        .forEach { r ->
+                            val late = r.invoice.dueDate < today
+                            add(Alert("BILL:${r.invoice.id.value}:${if (late) "late" else "due"}", Alert.Kind.BILL_DUE,
+                                "${if (late) "سررسید گذشته" else "سررسید نزدیک"}: فاکتور ${r.supplier}",
+                                "${Fa.rial(r.outstanding)} ریال · سررسید ${Fa.date(r.invoice.dueDate)}" + if (!r.invoice.approved) " · هنوز تأیید نشده" else ""))
+                        }
+                }
+                if (actor.role.allows(Permission.RECEIVABLE_COLLECT)) {
+                    safe { core.overview.openReceivables() }.filter { it.receivable.dueDate < today }.forEach { r ->
+                        add(Alert("LATE:${r.receivable.id.value}", Alert.Kind.RECEIVABLE_LATE, "طلب سررسیدگذشته: ${r.customer}",
+                            "${Fa.rial(r.outstanding)} ریال · سررسید ${Fa.date(r.receivable.dueDate)}"))
+                    }
+                }
                 if (actor.role.allows(Permission.PURCHASE_VIEW)) {
                     safe { core.buying.priceChanges(today.plusDays(-PRICE_DAYS), today, PRICE_THRESHOLD_BP) }.forEach { c ->
                         val bp = c.changeBp
@@ -129,6 +145,7 @@ class Alerts internal constructor(private val core: SabouCore) {
         const val PRICE_DAYS = 2L
         const val PRICE_THRESHOLD_BP = 1_000L
         const val CHEQUE_DAYS = 2L
+        const val BILL_DAYS = 2L
         /** Goods expiring by tomorrow (and those past their date) are alerted. */
         const val EXPIRY_DAYS = 1L
         /** Staff documents are alerted two weeks ahead (renewing a health card takes days). */

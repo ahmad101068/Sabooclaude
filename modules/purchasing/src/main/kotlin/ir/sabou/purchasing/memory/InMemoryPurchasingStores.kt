@@ -83,3 +83,10 @@ class InMemoryApprovalRuleStore : ir.sabou.platform.memory.Table<GlobalId, ir.sa
         super.restore(rows!!); policy = saved as ir.sabou.purchasing.SelfApprovalPolicy
     }
 }
+
+class InMemorySupplierAdvanceStore : ir.sabou.purchasing.SupplierAdvanceStore {
+    private val rows = LinkedHashMap<GlobalId, ir.sabou.purchasing.SupplierAdvance>()
+    override fun byId(id: GlobalId) = rows[id]
+    override fun of(supplierId: GlobalId) = rows.values.filter { it.supplierId == supplierId }
+    override fun save(advance: ir.sabou.purchasing.SupplierAdvance) { rows[advance.id] = advance }
+}

@@ -21,6 +21,10 @@ data class Supplier(
     val cutoffMinutes: Int? = null,
     val leadDays: Int = 1,
     val note: String = "",
+    /** For invoices with the buyer's details and for paying by transfer. */
+    val taxId: String = "",
+    val address: String = "",
+    val sheba: String = "",
 ) {
     /** The first delivery whose order deadline has not passed (null when no delivery days are set). */
     fun nextDelivery(today: BusinessDate, minutesNow: Int): Delivery? {
@@ -130,14 +134,18 @@ object InvoiceMatching {
         return latin.filter { it.isLetterOrDigit() }.trimStart('0').lowercase()
     }
 
-    fun compare(order: PurchaseOrder, lines: List<InvoiceLine>): List<Discrepancy> {
+    /**
+     * [lines] against what is still to come of [order] ([received]: quantities already invoiced). A [partial] delivery
+     * may bring less (or nothing) of an item without it being a difference; more than ordered still is.
+     */
+    fun compare(order: PurchaseOrder, lines: List<InvoiceLine>, received: Map<GlobalId, Long> = emptyMap(), partial: Boolean = false): List<Discrepancy> {
         val invoiced = lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } to l.sumOf { it.value.rial } }
-        val ordered = order.lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } to l.first().unitPrice.rial }
+        val ordered = order.lines.groupBy { it.itemId }.mapValues { (item, l) -> maxOf(0L, l.sumOf { it.quantity.micros } - (received[item] ?: 0L)) to l.first().unitPrice.rial }
         val out = ArrayList<Discrepancy>()
         ordered.forEach { (item, o) ->
             val got = invoiced[item]
-            if (got == null) { out += Discrepancy(Discrepancy.Kind.NOT_DELIVERED, item, o.first, 0); return@forEach }
-            if (got.first != o.first) out += Discrepancy(Discrepancy.Kind.QUANTITY, item, o.first, got.first)
+            if (got == null) { if (!partial && o.first > 0) out += Discrepancy(Discrepancy.Kind.NOT_DELIVERED, item, o.first, 0); return@forEach }
+            if (if (partial) got.first > o.first else got.first != o.first) out += Discrepancy(Discrepancy.Kind.QUANTITY, item, o.first, got.first)
             if (got.first > 0) {
                 val price = Ratio.mulDiv(got.second, Quantity.SCALE, got.first)
                 val change = Ratio.changeBp(o.second, price)
@@ -176,6 +184,10 @@ data class PurchaseInvoice(
     val matchReview: MatchReview? = null,
     /** What was owed to the supplier when the books started (no goods, against capital). */
     val opening: Boolean = false,
+    /** VAT on the invoice (to 1108); the invoice's discount and freight, already spread into the goods lines' cost. */
+    val vat: Money = Money.ZERO,
+    val discount: Money = Money.ZERO,
+    val freight: Money = Money.ZERO,
 ) {
     /** Not payable until someone reviews the differences. */
     val needsMatchReview: Boolean get() = discrepancies.isNotEmpty() && matchReview == null
@@ -222,6 +234,9 @@ data class CreditAllocation(
     val date: BusinessDate,
     val returnId: GlobalId?,
     val released: Boolean = false,
+    /** Set from an advance (with the journal that moved it from 1403 to payables), not from return credit. */
+    val advanceId: GlobalId? = null,
+    val journalId: GlobalId? = null,
 )
 
 /**
@@ -259,6 +274,8 @@ data class PurchaseOrder(
     val status: OrderStatus,
     val invoiceId: GlobalId? = null,
     val cancelReason: String? = null,
+    /** Every invoice that delivered part of it (a partial delivery keeps the order open). */
+    val invoiceIds: List<GlobalId> = listOfNotNull(invoiceId),
 ) {
     val total: Money get() = Money.sum(lines.map { it.value })
 }

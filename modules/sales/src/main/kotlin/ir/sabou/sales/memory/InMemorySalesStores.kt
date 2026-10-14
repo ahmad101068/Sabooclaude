@@ -83,3 +83,13 @@ class InMemoryPosImportStore : ir.sabou.sales.PosImportStore, Transactional {
     }
 }
 
+
+class InMemoryDepositStore : ir.sabou.sales.DepositStore {
+    private val deposits = LinkedHashMap<GlobalId, ir.sabou.sales.CustomerDeposit>()
+    private val counts = ArrayList<ir.sabou.sales.ShiftCount>()
+    override fun deposit(id: GlobalId) = deposits[id]
+    override fun depositsOf(customerId: GlobalId) = deposits.values.filter { it.customerId == customerId }
+    override fun saveDeposit(deposit: ir.sabou.sales.CustomerDeposit) { deposits[deposit.id] = deposit }
+    override fun shiftCounts(scope: ir.sabou.kernel.Scope.Branch, date: ir.sabou.kernel.BusinessDate) = counts.filter { it.scope == scope && it.date == date }
+    override fun saveShiftCount(count: ir.sabou.sales.ShiftCount) { counts += count }
+}

@@ -132,6 +132,8 @@ object PhoneAlerts {
         Alert.Kind.STAFF_DOCUMENT -> "مدارک کارکنان"
         Alert.Kind.TRANSFER_IN -> "کالای در راه"
         Alert.Kind.STOCK_REQUEST -> "درخواست کالا"
+        Alert.Kind.BILL_DUE -> "سررسید فاکتور خرید"
+        Alert.Kind.RECEIVABLE_LATE -> "طلب سررسیدگذشته"
     }
 }
 

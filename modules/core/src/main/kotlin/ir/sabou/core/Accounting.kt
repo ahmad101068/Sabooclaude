@@ -128,6 +128,8 @@ class AccountingReads internal constructor(private val core: SabouCore) {
             invoices.map { it.scope }.distinct().forEach { s ->
                 core.purchases.refundsOf(supplierId, s).filter { !it.reversed }.forEach { add(E(it.date, "استرداد وجه از تأمین‌کننده", it.id, 0, it.amount.rial)) }
             }
+            // An advance is paid before the invoice: the supplier owes it to us until set against invoices.
+            core.purchasing.advancesOf(supplierId).filter { !it.reversed && ok(it.scope) }.forEach { add(E(it.date, "پیش‌پرداخت", it.id, it.amount.rial, 0)) }
         }.sortedBy { it.date }
         val opening = events.filter { it.date < from }.sumOf { it.credit - it.debit }
         var balance = opening
@@ -148,9 +150,11 @@ class AccountingReads internal constructor(private val core: SabouCore) {
             core.sales.receivablesOfCustomer(customerId).filter { !it.voided && ok(it.scope) }.forEach { r ->
                 val sale = core.sales.sale(r.saleId)
                 add(E(sale?.date ?: r.dueDate, if (sale != null) "فروش نسیه" else "مانده‌ی اول دوره", if (sale != null) r.saleId else null, r.amount.rial, 0))
-                core.sales.collections(r.id).filter { !it.reversed }.forEach { add(E(it.date, "دریافت", it.id, 0, it.amount.rial)) }
+                // A collection set from a deposit is already counted when the deposit came in.
+                core.sales.collections(r.id).filter { !it.reversed && it.depositId == null }.forEach { add(E(it.date, "دریافت", it.id, 0, it.amount.rial)) }
                 r.writeOffs.forEach { add(E(it.date, "سوخت: ${it.reason}", null, 0, it.amount.rial)) }
             }
+            core.salesOps.depositsOf(customerId).filter { !it.reversed && ok(it.scope) }.forEach { add(E(it.date, "پیش‌دریافت", it.id, 0, it.amount.rial)) }
         }.sortedBy { it.date }
         val opening = events.filter { it.date < from }.sumOf { it.debit - it.credit }
         var balance = opening
@@ -196,6 +200,21 @@ class AccountingReads internal constructor(private val core: SabouCore) {
         daysLate <= 60 -> 2
         daysLate <= 90 -> 3
         else -> 4
+    }
+
+    /** A supplier's advances with what is left of each. */
+    fun supplierAdvances(supplierId: ir.sabou.kernel.GlobalId): List<Pair<ir.sabou.purchasing.SupplierAdvance, Money>> {
+        val a = actor(Permission.PURCHASE_VIEW, Permission.PURCHASE_PAY)
+        return core.purchasing.advancesOf(supplierId).filter { a.canAccess(it.scope) }.map { it to core.purchasing.advanceLeft(it.id) }
+    }
+
+    /** A customer's deposits with what is left of each, and their open debts to set them against. */
+    fun customerDeposits(customerId: ir.sabou.kernel.GlobalId): Pair<List<Pair<ir.sabou.sales.CustomerDeposit, Money>>, List<OpenReceivable>> {
+        val a = actor(Permission.SALES_VIEW, Permission.RECEIVABLE_COLLECT)
+        val name = core.customers.byId(customerId)?.name.orEmpty()
+        return core.salesOps.depositsOf(customerId).filter { a.canAccess(it.scope) }.map { it to core.salesOps.depositLeft(it.id) } to
+            core.sales.receivablesOfCustomer(customerId).filter { !it.voided && a.canAccess(it.scope) }
+                .map { OpenReceivable(it, name, core.salesOps.outstanding(it.id)) }.filter { !it.outstanding.isZero }
     }
 
     /** Every customer (any branch), for statements and opening balances. */

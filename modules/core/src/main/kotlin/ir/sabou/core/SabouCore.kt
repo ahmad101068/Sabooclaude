@@ -97,6 +97,8 @@ class SabouCore private constructor(
     internal val attachments = SqlAttachmentStore(db)
     internal val customers = SqlCustomerStore(db)
     internal val sales = SqlSalesStore(db)
+    internal val depositStore = ir.sabou.persistence.SqlDepositStore(db)
+    internal val supplierAdvances = ir.sabou.persistence.SqlSupplierAdvanceStore(db)
     internal val menuPrices = ir.sabou.persistence.SqlMenuPriceStore(db)
     internal val taxStore = ir.sabou.persistence.SqlTaxStore(db)
     internal val posImportStore = ir.sabou.persistence.SqlPosImportStore(db)
@@ -150,10 +152,10 @@ class SabouCore private constructor(
     val ledgerReads by lazy { AccountingReads(this) }
     val countPlanOps = ir.sabou.inventory.CountPlanOperations(bus, inventoryGateway, countPlans, stockCounts)
     internal val recipeBook = RecipeBook(recipes)
-    val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases, attachments, approvalRules)
+    val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases, attachments, approvalRules, supplierAdvances)
     val approvals = ir.sabou.purchasing.ApprovalOperations(bus, approvalRules, purchases)
     val orders = OrderOperations(bus, inventoryGateway, suppliers, purchases)
-    val salesOps = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventoryGateway, recipeBook, treasuryGateway, customers, sales, menuPrices, posImportStore)
+    val salesOps = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventoryGateway, recipeBook, treasuryGateway, customers, sales, menuPrices, posImportStore, depositStore)
     /** Stored policies (entered by the owner) plus any supplied by the caller (tests). */
     val payrollPolicies = PolicyAdministration(bus, SqlPolicyStore(db))
     internal val policyRegistry = StatutoryPolicyRegistry { payrollPolicies.policies() + policies }
