@@ -949,6 +949,21 @@ object MeScreens {
                     }
                 }
                 FormCard("نسخه جدید") {
+                    ir.sabou.core.PayrollPresets.forYear(Fa.jalali(fromDate).year)?.let { preset ->
+                        SecondaryButton("پر کردن با مقادیر منتشرشده‌ی ${Fa.number(preset.year.toLong())} (پیشنهادی)", {
+                            val q = preset.policy
+                            version = Fa.digits(q.version); fromDate = q.from; toDate = q.to
+                            hours = Fa.number(q.standardMonthlyMinutes / 60L); overtime = Fa.number(q.overtimeMultiplierPercent.toLong())
+                            empIns = Fa.number(q.employeeInsuranceBp / 100L); erIns = Fa.number(q.employerInsuranceBp / 100L); unemp = Fa.number(q.unemploymentInsuranceBp / 100L)
+                            exemptNum = Fa.number(q.insuranceTaxExemptNumerator.toLong()); exemptDen = Fa.number(q.insuranceTaxExemptDenominator.toLong())
+                            maxInsurable = q.maxInsurableMonthly; prorationDays = Fa.number(q.prorationDays.toLong())
+                            brackets.clear()
+                            q.taxBrackets.dropLast(1).forEach { brackets.add(BracketRow(it.upToMonthly, Fa.number(it.rateBasisPoints / 100L))) }
+                            topRate = Fa.number(q.taxBrackets.last().rateBasisPoints / 100L)
+                        })
+                        Text("منابع: " + preset.sources.joinToString("؛ ") + ". این مقادیر از منابع ثانویه خوانده شده‌اند؛ پیش از ثبت با مشاور مالیاتی/بیمه تطبیق دهید.",
+                            style = SabouType.caption, color = Sabou.colors.muted)
+                    }
                     TextInput("نام نسخه", version, { version = it })
                     DateInput("از", fromDate, { fromDate = it }, session.today)
                     DateInput("تا", toDate, { toDate = it }, session.today)

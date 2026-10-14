@@ -151,7 +151,7 @@ object BooksScreens {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
                         val cheque = session.core.books.cheque(chequeId).cheque
-                        (context.contentResolver.openOutputStream(uri, "w") ?: error("EXPORT_TARGET_UNAVAILABLE")).use { ChequePrint.write(context, cheque, it) }
+                        (context.contentResolver.openOutputStream(uri, "w") ?: error("EXPORT_TARGET_UNAVAILABLE")).use { ChequePrint.write(context, cheque, it, ir.sabou.app.export.ChequeTemplates.forBank(context, cheque.details.bank)) }
                     }
                 }
                 printError = result.exceptionOrNull()?.let(Messages::of)
@@ -186,7 +186,10 @@ object BooksScreens {
                     val can = session.can(Permission.CHEQUE_MANAGE)
                     if (c.direction == ChequeDirection.ISSUED && c.status == ChequeStatus.ISSUED) {
                         SecondaryButton("چاپ روی برگ چک (PDF)", { print.launch("cheque-${Fa.latinDigits(c.details.number)}.pdf") })
-                        Text("جای هر خط روی برگ چک بانک‌ها کمی فرق دارد؛ اول روی کاغذ معمولی آزمایش کنید.", style = SabouType.caption, color = Sabou.colors.muted)
+                        Text("جای هر خط روی برگ چک بانک‌ها کمی فرق دارد؛ اول روی کاغذ معمولی آزمایش کنید." +
+                            if (ir.sabou.app.export.ChequeTemplates.hasOwn(context, c.details.bank)) " (محل چاپ «${c.details.bank}» تنظیم شده است.)" else "",
+                            style = SabouType.caption, color = Sabou.colors.muted)
+                        NavRow(R.drawable.ic_finance, "تنظیم محل چاپ چک «${c.details.bank}»", "چاپ آزمایشی روی کاغذ و جابه‌جا کردن خط‌ها", onClick = { nav.go(Route.ChequePrintSetup(c.details.bank)) })
                     }
                     if (can && c.status in setOf(ChequeStatus.IN_HAND, ChequeStatus.DEPOSITED, ChequeStatus.ISSUED, ChequeStatus.BOUNCED)) FormCard("ثبت وضعیت") {
                         DateInput("تاریخ", date, { date = it }, session.today)
