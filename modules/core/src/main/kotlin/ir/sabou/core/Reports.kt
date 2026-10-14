@@ -145,7 +145,7 @@ data class MixRow(
     val actualUnitCost: Money? get() = actualCost?.takeIf { costedPortions > Quantity.ZERO }?.let { Money.of(Ratio.mulDiv(it.rial, Quantity.SCALE, costedPortions.micros)) }
     /** Actual margin of one portion: the costed portions' average price less their actual cost. */
     val actualUnitMargin: Long? get() = actualCost?.takeIf { costedPortions > Quantity.ZERO }?.let { c ->
-        Ratio.mulDiv(costedGross.rial - c.rial, Quantity.SCALE, costedPortions.micros)
+        Ratio.mulDivSigned(costedGross.rial - c.rial, Quantity.SCALE, costedPortions.micros)
     }
     /** Actual food cost as basis points of what those portions sold for. */
     val actualCostBp: Long? get() = actualCost?.takeIf { !costedGross.isZero && costedGross.rial > 0 }?.let { Ratio.mulDiv(it.rial, 10_000, costedGross.rial) }

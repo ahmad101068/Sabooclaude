@@ -250,6 +250,13 @@ class ReportsTest {
         assertNull(t.actualCost); assertNull(t.actualUnitCost); assertTrue(!t.fullyCosted)
         assertTrue(mix.rows.none { it.actualCostShort })
 
+        // A dish sold below its cost has a negative actual margin (no failure).
+        val cheap = sell(day2, Triple(lasagna, 1, 100_000))
+        assertTrue(core.sales.sale(cheap)!!.lines.single().cost!!.rial > 100_000)
+        val below = core.reports.productMix(branch, day2, day2).rows.single { it.menuItemId == lasagna }
+        assertTrue(below.actualUnitMargin!! < 0, "${below.actualUnitMargin}")
+        assertEquals(-(below.actualUnitCost!!.rial - 100_000), below.actualUnitMargin)
+
         // Selling beyond book stock: the line is costed for what was there and flagged.
         val day3 = day2.plusDays(1)
         sell(day3, Triple(pizza, 100, 5_000_000))                        // asks 20 kg, 13.6 kg in book stock
