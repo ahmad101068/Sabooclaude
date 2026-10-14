@@ -244,6 +244,10 @@ object PurchaseScreens {
         // Picked files are not kept with the draft (they can be large); they are picked again if the app was closed.
         val files = remember { mutableStateListOf<AttachmentInput>() }
         var payNow by rememberSaveable { mutableStateOf(false) }
+        var vat by rememberSaveable { mutableStateOf<Money?>(null) }
+        var discount by rememberSaveable { mutableStateOf<Money?>(null) }
+        var freight by rememberSaveable { mutableStateOf<Money?>(null) }
+        var partial by rememberSaveable { mutableStateOf(false) }
         var payAccount by rememberSaveable { mutableStateOf<GlobalId?>(null) }
         var payAmount by rememberSaveable { mutableStateOf<Money?>(null) }
         val id = rememberCommandId()
@@ -260,6 +264,10 @@ object PurchaseScreens {
         if (form.order != null) SCard {
             Text("سفارش ${form.order.number?.let(Fa::digits) ?: Fa.number(form.order.order.number)} · ${form.order.supplier}", style = SabouType.bodyStrong, color = Sabou.colors.ink)
             Text("مقدار و مبلغ هر ردیف را مطابق فاکتور تأمین‌کننده اصلاح کنید.", style = SabouType.caption, color = Sabou.colors.muted)
+            Row(Modifier.clickable { partial = !partial }, verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = partial, onCheckedChange = { partial = it })
+                Text("فقط بخشی از سفارش رسید؛ سفارش برای باقی باز بماند", style = SabouType.body, color = Sabou.colors.ink)
+            }
         }
         FormCard {
             PickerOrHint("تأمین‌کننده", form.suppliers.map { Choice(it.id, it.name, it.phone) }, supplier, { supplier = it },
@@ -341,7 +349,15 @@ object PurchaseScreens {
             }
             SecondaryButton("افزودن کالای ناشناخته", { held.add(HeldRow("", "", null)) })
         }
-        val total = goods.sumOf { it.value?.rial ?: 0 } + expenseRows.sumOf { it.amount?.rial ?: 0 } + held.sumOf { it.amount?.rial ?: 0 }
+        if (goods.isNotEmpty()) FormCard("تخفیف، کرایه و مالیات") {
+            Text("تخفیف و کرایه‌ی کل فاکتور به نسبت مبلغ روی بهای کالاها سرشکن می‌شود. مالیات بر ارزش افزوده اعتبار مالیاتی است و از مالیات فروش کم می‌شود.",
+                style = SabouType.caption, color = Sabou.colors.muted)
+            MoneyInput("تخفیف کل فاکتور", discount, { discount = it })
+            MoneyInput("کرایه حمل", freight, { freight = it })
+            MoneyInput("مالیات بر ارزش افزوده", vat, { vat = it })
+        }
+        val total = goods.sumOf { it.value?.rial ?: 0 } + expenseRows.sumOf { it.amount?.rial ?: 0 } + held.sumOf { it.amount?.rial ?: 0 } -
+            (discount?.rial ?: 0) + (freight?.rial ?: 0) + (vat?.rial ?: 0)
         FormCard("توضیح و پیوست") {
             TextInput("توضیح", note, { note = it }, singleLine = false)
             files.forEach { f ->
@@ -379,6 +395,8 @@ object PurchaseScreens {
                 },
                 held.map { ReviewLine(it.name, it.qtyNote, it.amount!!) },
                 note, form.order?.order?.id, files.toList(),
+                vat = if (goods.isEmpty()) Money.ZERO else vat ?: Money.ZERO, discount = if (goods.isEmpty()) Money.ZERO else discount ?: Money.ZERO,
+                freight = if (goods.isEmpty()) Money.ZERO else freight ?: Money.ZERO, orderPartial = partial && form.order != null,
             )
             action.run({ purchasing.postInvoice(cmd) }) { invoiceId -> nav.back(); nav.go(Route.PurchaseDetail(invoiceId.resultId)) }
         }, enabled = ready, busy = action.busy)
@@ -952,7 +970,9 @@ object PurchaseScreens {
                         acc.credits.forEach { (b, credit) -> KeyValue("اعتبار مرجوعی · ${branches[b.branchId] ?: "شعبه"}", Fa.rial(credit), Sabou.colors.moneyIn) }
                         s.nextDelivery(session.today, minutesNow())?.let { Text(deliveryText(it, session.today), style = SabouType.caption, color = Sabou.colors.muted) }
                     }
-                    if (session.can(Permission.SUPPLIER_MANAGE)) NavRow(R.drawable.ic_settings, "ویرایش مشخصات", "تلفن، روزهای تحویل و مهلت سفارش", onClick = { nav.go(Route.SupplierEdit(s.id)) })
+                    if (session.can(Permission.SUPPLIER_MANAGE)) NavRow(R.drawable.ic_settings, "ویرایش مشخصات", "تلفن، روزهای تحویل، مهلت سفارش، شبا", onClick = { nav.go(Route.SupplierEdit(s.id)) })
+                    if (s.sheba.isNotBlank()) SCard { KeyValue("شبا", s.sheba) }
+                    if (session.can(Permission.PURCHASE_PAY)) SupplierPayments(s.id, s.name)
                     if (acc.refunds.isNotEmpty()) SCard {
                         Text("استرداد اعتبار", style = SabouType.section, color = Sabou.colors.ink)
                         acc.refunds.forEach { r ->
@@ -996,6 +1016,57 @@ object PurchaseScreens {
         }
     }
 
+    /** Paying several invoices at once, advances before the invoice and setting them against invoices (ADR-0045). */
+    @Composable
+    private fun SupplierPayments(supplierId: GlobalId, name: String) {
+        val session = LocalSession.current
+        WithBranch { branch ->
+            val data by load(session, supplierId, branch) {
+                Triple(overview.paymentAccounts(), ledgerReads.supplierAdvances(supplierId).filter { it.first.scope == branch },
+                    overview.invoices().filter { it.invoice.supplierId == supplierId && it.invoice.scope == branch && !it.outstanding.isZero })
+            }
+            var mode by rememberSaveable { mutableStateOf(0) }
+            var accountId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+            var amount by rememberSaveable { mutableStateOf<Money?>(null) }
+            var note by rememberSaveable { mutableStateOf("") }
+            var date by rememberSaveable { mutableStateOf(session.today) }
+            var applyTo by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+            val action = rememberAction()
+            Loaded(data) { (accounts, advances, open) ->
+                advances.filter { !it.first.reversed }.forEach { (a, left) ->
+                    SCard {
+                        KeyValue("پیش‌پرداخت ${Fa.date(a.date)}", "${Fa.rial(left)} از ${Fa.rial(a.amount)}")
+                        if (a.note.isNotBlank()) Text(a.note, style = SabouType.caption, color = Sabou.colors.muted)
+                        if (!left.isZero && open.isNotEmpty()) {
+                            Picker("تسویه با فاکتور", open.map { Choice(it.invoice.id, "${it.invoice.supplierInvoiceNo} · ${Fa.rial(it.outstanding)}") }, applyTo, { applyTo = it })
+                            SecondaryButton("تسویه از این پیش‌پرداخت", {
+                                val inv = open.first { it.invoice.id == applyTo }
+                                action.run({ purchasing.applyAdvance(ir.sabou.purchasing.ApplySupplierAdvance(GlobalId.new(), branch, a.id, inv.invoice.id, minOf(left, inv.outstanding), session.today)) })
+                            }, enabled = applyTo != null && !action.busy)
+                        }
+                        if (left == a.amount && session.can(Permission.PURCHASE_REVERSE)) Text("برگشت پیش‌پرداخت", style = SabouType.label, color = Sabou.colors.danger,
+                            modifier = Modifier.clickable { action.run({ purchasing.reverseAdvance(ir.sabou.purchasing.ReverseSupplierAdvance(GlobalId.new(), branch, a.id, session.today, "برگشت پیش‌پرداخت")) }) }.padding(vertical = 6.dp))
+                    }
+                }
+                FormCard("پرداخت به $name") {
+                    Picker("نوع", listOf(Choice(0, "پرداخت فاکتورها (قدیمی‌ترین سررسید اول)"), Choice(1, "پیش‌پرداخت (پیش از فاکتور)")), mode, { mode = it })
+                    if (mode == 0) KeyValue("جمع قابل پرداخت", Fa.rial(Money.sum(open.filter { it.invoice.approved && !it.invoice.needsMatchReview }.map { it.outstanding })))
+                    Picker("از حساب", accountChoices(accounts), accountId, { accountId = it })
+                    MoneyInput("مبلغ", amount, { amount = it })
+                    if (mode == 1) TextInput("توضیح", note, { note = it })
+                    DateInput("تاریخ", date, { date = it }, session.today)
+                    action.error?.let { Banner(it) }
+                    PrimaryButton("ثبت پرداخت", {
+                        action.run({
+                            if (mode == 0) purchasing.paySupplier(ir.sabou.purchasing.PaySupplier(GlobalId.new(), branch, supplierId, accountId!!, amount!!, date))
+                            else purchasing.payAdvance(ir.sabou.purchasing.PaySupplierAdvance(GlobalId.new(), branch, supplierId, accountId!!, amount!!, date, note))
+                        }) { amount = null; note = "" }
+                    }, enabled = accountId != null && amount != null && !action.busy, busy = action.busy)
+                }
+            }
+        }
+    }
+
     @Composable
     fun SupplierEdit(nav: Nav, supplierId: GlobalId) {
         val session = LocalSession.current
@@ -1015,6 +1086,9 @@ object PurchaseScreens {
                     var cutoffMinutes by rememberSaveable { mutableStateOf(s.cutoffMinutes) }
                     var lead by rememberSaveable { mutableStateOf(Fa.number(s.leadDays.toLong())) }
                     var note by rememberSaveable { mutableStateOf(s.note) }
+                    var taxId by rememberSaveable { mutableStateOf(s.taxId) }
+                    var address by rememberSaveable { mutableStateOf(s.address) }
+                    var sheba by rememberSaveable { mutableStateOf(s.sheba) }
                     val id = rememberCommandId(supplierId)
                     val action = rememberAction()
                     val leadDays = Fa.latinDigits(lead).trim().toIntOrNull()
@@ -1034,13 +1108,17 @@ object PurchaseScreens {
                         TextInput("چند روز قبل از تحویل سفارش بدهیم", lead, { lead = it }, keyboard = KeyboardType.Number,
                             error = if (leadDays == null || leadDays !in 0..14) "عددی بین ۰ تا ۱۴" else null)
                         TextInput("توضیح", note, { note = it }, singleLine = false)
+                        TextInput("کد ملی / شناسه‌ی ملی / کد اقتصادی", taxId, { taxId = it }, keyboard = KeyboardType.Number)
+                        TextInput("نشانی", address, { address = it }, singleLine = false)
+                        TextInput("شماره شبا (برای واریز)", sheba, { sheba = it }, placeholder = "IR…",
+                            error = if (sheba.isNotBlank() && !ir.sabou.kernel.Sheba.isValid(sheba)) "شبا معتبر نیست" else null)
                         Row(Modifier.clickable { active = !active }, verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = active, onCheckedChange = { active = it })
                             Text("فعال", style = SabouType.body, color = Sabou.colors.ink)
                         }
                         action.error?.let { Banner(it) }
                         PrimaryButton("ذخیره", {
-                            action.run({ purchasing.updateSupplier(UpdateSupplier(id.value, s.id, name, phone, active, days.toSet(), cutoffMinutes, leadDays!!, note)) }) { nav.back() }
+                            action.run({ purchasing.updateSupplier(UpdateSupplier(id.value, s.id, name, phone, active, days.toSet(), cutoffMinutes, leadDays!!, note, taxId, address, sheba)) }) { nav.back() }
                         }, enabled = name.trim().length >= 2 && leadDays != null && leadDays in 0..14, busy = action.busy)
                     }
                     if (aliases.isNotEmpty()) SCard {

@@ -330,6 +330,18 @@ object Schema {
                 "CREATE INDEX stock_requests_from ON stock_requests(from_scope, status)",
             ),
         ),
+        Migration(
+            25,
+            listOf(
+                // Supplier advances, customer deposits and shift cash counts (ADR-0045).
+                "CREATE TABLE supplier_advances (id TEXT PRIMARY KEY, supplier_id TEXT NOT NULL, scope TEXT NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX supplier_advances_supplier ON supplier_advances(supplier_id)",
+                "CREATE TABLE customer_deposits (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, scope TEXT NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX customer_deposits_customer ON customer_deposits(customer_id)",
+                "CREATE TABLE shift_counts (id TEXT PRIMARY KEY, scope TEXT NOT NULL, date INTEGER NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX shift_counts_day ON shift_counts(scope, date)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

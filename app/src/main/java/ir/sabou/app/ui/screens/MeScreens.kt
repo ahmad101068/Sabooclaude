@@ -832,6 +832,41 @@ object MeScreens {
         }
     }
 
+    /** Money a customer paid ahead (a booked event): received, set against their debts, or given back. */
+    @Composable
+    private fun CustomerDeposits(branch: Scope.Branch, c: ir.sabou.sales.Customer) {
+        val session = LocalSession.current
+        val data by load(session, c.id, branch) { ledgerReads.customerDeposits(c.id) to overview.paymentAccounts(branch) }
+        var accountId by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var amount by rememberSaveable { mutableStateOf<Money?>(null) }
+        var note by rememberSaveable { mutableStateOf("") }
+        var applyTo by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        val action = rememberAction()
+        Text("پیش‌دریافت", style = SabouType.bodyStrong, color = Sabou.colors.ink)
+        Loaded(data) { (pair, accounts) ->
+            val (deposits, open) = pair
+            deposits.filter { !it.first.reversed && it.first.scope == branch }.forEach { (d, left) ->
+                KeyValue("${Fa.date(d.date)} · ${d.note.ifBlank { "پیش‌دریافت" }}", "${Fa.rial(left)} از ${Fa.rial(d.amount)}")
+                if (!left.isZero && open.isNotEmpty()) {
+                    Picker("تسویه با طلب", open.map { Choice(it.receivable.id, "سررسید ${Fa.date(it.receivable.dueDate)} · ${Fa.rial(it.outstanding)}") }, applyTo, { applyTo = it })
+                    SecondaryButton("تسویه از این پیش‌دریافت", {
+                        val r = open.first { it.receivable.id == applyTo }
+                        action.run({ salesOps.applyDeposit(ir.sabou.sales.ApplyCustomerDeposit(GlobalId.new(), branch, d.id, r.receivable.id, minOf(left, r.outstanding), session.today)) })
+                    }, enabled = applyTo != null && !action.busy)
+                }
+                if (left == d.amount && session.can(Permission.RECEIVABLE_REVERSE)) Text("برگشت یا پس دادن", style = SabouType.label, color = Sabou.colors.danger,
+                    modifier = Modifier.clickable { action.run({ salesOps.reverseDeposit(ir.sabou.sales.ReverseCustomerDeposit(GlobalId.new(), branch, d.id, session.today, "پس دادن پیش‌دریافت")) }) }.padding(vertical = 6.dp))
+            }
+            Picker("واریز به", accountChoices(accounts), accountId, { accountId = it })
+            MoneyInput("مبلغ پیش‌دریافت", amount, { amount = it })
+            TextInput("بابت", note, { note = it }, placeholder = "مثلاً مراسم ۱۵ آبان")
+            action.error?.let { Banner(it) }
+            SecondaryButton("ثبت پیش‌دریافت", {
+                action.run({ salesOps.receiveDeposit(ir.sabou.sales.ReceiveCustomerDeposit(GlobalId.new(), branch, c.id, accountId!!, amount!!, session.today, note)) }) { amount = null; note = "" }
+            }, enabled = accountId != null && amount != null && !action.busy)
+        }
+    }
+
     @Composable
     fun Customers(nav: Nav) {
         val session = LocalSession.current
@@ -851,7 +886,10 @@ object MeScreens {
                         list.forEach { (c, owed) ->
                             SCard(onClick = if (session.can(Permission.CUSTOMER_MANAGE)) ({ editing = c.id }) else null) {
                                 KeyValue(c.name + if (!c.isActive) " · غیرفعال" else "", "بدهی ${Fa.rial(owed)} از سقف ${Fa.rialShort(c.creditLimit.rial)}")
-                                if (editing == c.id) CustomerEdit(branch, c) { editing = null }
+                                if (editing == c.id) {
+                                    CustomerEdit(branch, c) { editing = null }
+                                    if (session.can(Permission.RECEIVABLE_COLLECT)) CustomerDeposits(branch, c)
+                                }
                             }
                         }
                     }

@@ -182,9 +182,12 @@ data class CloseSalesDay(
     val date: BusinessDate,
     val cashAccountId: GlobalId,
     val countedCash: Money,
+    /** What each card terminal's settlement report shows for the day, to compare with the card sales recorded. */
+    val terminalTotals: Map<GlobalId, Money> = emptyMap(),
 ) : Command {
     override val requiredPermission = Permission.SALES_DAY_CLOSE
-    override fun fingerprint() = "$scope|${date.epochDay}|$cashAccountId|${countedCash.rial}"
+    override fun fingerprint() = "$scope|${date.epochDay}|$cashAccountId|${countedCash.rial}|" +
+        terminalTotals.entries.sortedBy { it.key.value.toString() }.joinToString(",") { "${it.key}=${it.value.rial}" }
 }
 
 /** Edits a customer: name, phone, kind, credit limit; an inactive customer buys no more on credit. */
@@ -282,6 +285,7 @@ class SalesOperations(
     private val sales: SalesStore,
     private val prices: MenuPriceStore,
     private val imports: PosImportStore = ir.sabou.sales.memory.InMemoryPosImportStore(),
+    private val deposits: DepositStore = ir.sabou.sales.memory.InMemoryDepositStore(),
 ) {
     val priceList = PriceList(prices)
 
@@ -513,8 +517,14 @@ class SalesOperations(
         val r = sales.receivable(collection.receivableId)!!
         ensure(r.scope == cmd.scope) { DomainError.InvalidInput("scope", "این وصول متعلق به این شعبه نیست.") }
         ensure(!collection.reversed) { DomainError.InvalidState("COLLECTION", "ALREADY_REVERSED") }
-        treasury.reverseDocument(ctx, capability, COLLECTION, collection.id, cmd.date, cmd.reason)
-        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.RECEIPT to collection.id)
+        if (collection.journalId != null) {
+            // Set from a deposit: the amount goes back to the deposit.
+            ledger.reverse(ctx, capability, emptySet(), collection.journalId, cmd.date, cmd.reason)
+            ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.CREDIT_SETTLEMENT to collection.id)
+        } else {
+            treasury.reverseDocument(ctx, capability, COLLECTION, collection.id, cmd.date, cmd.reason)
+            ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.RECEIPT to collection.id)
+        }
         sales.saveCollection(collection.copy(reversed = true))
         ctx.audit(AuditDraft("COLLECTION_REVERSE", "RECEIVABLE", r.id.value, cmd.reason.trim()))
         collection.id
@@ -608,6 +618,84 @@ class SalesOperations(
         r.id
     }
 
+    /** Card sales recorded into terminal [account] on [date] (posted sales). */
+    fun cardSalesOn(scope: Scope.Branch, date: BusinessDate, account: GlobalId): Long =
+        sales.salesOn(scope, date).filter { it.status == SaleStatus.POSTED }.flatMap { it.settlements }
+            .filterIsInstance<Settlement.Liquid>().filter { it.treasuryAccountId == account }.sumOf { it.amount.rial }
+
+    fun shiftCounts(scope: Scope.Branch, date: BusinessDate): List<ShiftCount> = deposits.shiftCounts(scope, date)
+
+    fun countShift(c: CountCashShift): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        requireDayOpen(cmd.scope, cmd.date)
+        val box = treasury.account(cmd.cashAccountId)
+        ensure(box.scope == cmd.scope && (box.kind == ir.sabou.treasury.TreasuryKind.CASH || box.kind == ir.sabou.treasury.TreasuryKind.PETTY_CASH)) {
+            DomainError.InvalidInput("account", "صندوق نقد این شعبه را انتخاب کنید.")
+        }
+        ensure(cmd.note.length <= 200) { DomainError.InvalidInput("note", "توضیح طولانی است.") }
+        val id = GlobalId.new()
+        val difference = treasury.count(ctx, capability, box.id, cmd.counted, cmd.date, SHIFT_COUNT, id, "شمارش صندوق پایان شیفت: ${ctx.actor.displayName}")
+        deposits.saveShiftCount(ShiftCount(id, cmd.scope, cmd.date, box.id, cmd.counted, difference, ctx.actor.displayName, cmd.note.trim(), ctx.nowEpochMillis))
+        ctx.audit(AuditDraft("SHIFT_CASH_COUNT", "TREASURY_ACCOUNT", box.id.value, "counted=${cmd.counted.rial};difference=$difference"))
+        id
+    }
+
+    /** What is left of a deposit to set against the customer's debts. */
+    fun depositLeft(depositId: GlobalId): Money {
+        val d = deposits.deposit(depositId) ?: throw DomainException(DomainError.NotFound("CUSTOMER_DEPOSIT"))
+        if (d.reversed) return Money.ZERO
+        val used = sales.receivablesOfCustomer(d.customerId).flatMap { sales.collections(it.id) }.filter { it.depositId == d.id && !it.reversed }
+        return d.amount - Money.sum(used.map { it.amount })
+    }
+
+    fun depositsOf(customerId: GlobalId): List<CustomerDeposit> = deposits.depositsOf(customerId)
+
+    fun receiveDeposit(c: ReceiveCustomerDeposit): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        val customer = customers.byId(cmd.customerId) ?: throw DomainException(DomainError.NotFound("CUSTOMER"))
+        ensure(customer.isActive) { DomainError.InvalidState("CUSTOMER", "INACTIVE") }
+        ensure(!cmd.amount.isZero) { DomainError.InvalidInput("amount", "مبلغ باید بیشتر از صفر باشد.") }
+        ensure(cmd.note.length <= 200) { DomainError.InvalidInput("note", "توضیح طولانی است.") }
+        ensure(treasury.account(cmd.treasuryAccountId).scope == cmd.scope) { DomainError.InvalidInput("account", "حساب دریافت متعلق به این شعبه نیست.") }
+        val id = GlobalId.new()
+        ctx.number(DocumentSeries.RECEIPT, cmd.date, id)
+        treasury.settle(ctx, capability, cmd.treasuryAccountId, Direction.RECEIPT, cmd.amount, cmd.date, DEPOSIT, id,
+            "پیش‌دریافت از ${customer.name}" + if (cmd.note.isBlank()) "" else ": ${cmd.note.trim()}",
+            listOf(LineDraft(StandardAccounts.CUSTOMER_ADVANCES, credit = cmd.amount, memo = customer.name, by = capability)), cmd.cheque?.let { ir.sabou.treasury.ChequeInstruction.New(it) })
+        deposits.saveDeposit(CustomerDeposit(id, customer.id, cmd.scope, cmd.treasuryAccountId, cmd.amount, cmd.date, cmd.note.trim()))
+        ctx.audit(AuditDraft("CUSTOMER_DEPOSIT", "CUSTOMER", customer.id.value, "deposit=$id;amount=${cmd.amount.rial}"))
+        id
+    }
+
+    fun applyDeposit(c: ApplyCustomerDeposit): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        val d = deposits.deposit(cmd.depositId) ?: throw DomainException(DomainError.NotFound("CUSTOMER_DEPOSIT"))
+        val r = sales.receivable(cmd.receivableId) ?: throw DomainException(DomainError.NotFound("RECEIVABLE"))
+        ensure(d.scope == cmd.scope && r.scope == cmd.scope && d.customerId == r.customerId) { DomainError.InvalidInput("deposit", "پیش‌دریافت و طلب از یک مشتری و یک شعبه نیستند.") }
+        ensure(!cmd.amount.isZero && cmd.amount <= depositLeft(d.id)) { DomainError.InvalidState("CUSTOMER_DEPOSIT", "EXCEEDS_AVAILABLE") }
+        ensure(cmd.amount <= outstanding(r.id)) { DomainError.InvalidState("RECEIVABLE", "AMOUNT_EXCEEDS_OUTSTANDING") }
+        ensure(cmd.date >= d.date) { DomainError.InvalidInput("date", "تاریخ قبل از پیش‌دریافت است.") }
+        val id = GlobalId.new()
+        ctx.number(DocumentSeries.CREDIT_SETTLEMENT, cmd.date, id)
+        val name = customers.byId(r.customerId)?.name.orEmpty()
+        val journal = ledger.post(ctx, capability, JournalDraft(cmd.date, cmd.scope, DEPOSIT_APPLY, id, "تسویه‌ی طلب از پیش‌دریافت $name", listOf(
+            LineDraft(StandardAccounts.CUSTOMER_ADVANCES, debit = cmd.amount, memo = name, by = capability),
+            LineDraft(StandardAccounts.RECEIVABLE, credit = cmd.amount, memo = name, by = capability),
+        )))
+        sales.saveCollection(Collection(id, r.id, d.treasuryAccountId, cmd.amount, cmd.date, reversed = false, depositId = d.id, journalId = journal.id))
+        ctx.audit(AuditDraft("CUSTOMER_DEPOSIT_APPLY", "RECEIVABLE", r.id.value, "deposit=${d.id};amount=${cmd.amount.rial}"))
+        id
+    }
+
+    fun reverseDeposit(c: ReverseCustomerDeposit): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        val d = deposits.deposit(cmd.depositId) ?: throw DomainException(DomainError.NotFound("CUSTOMER_DEPOSIT"))
+        ensure(d.scope == cmd.scope) { DomainError.InvalidInput("scope", "متعلق به این شعبه نیست.") }
+        ensure(!d.reversed) { DomainError.InvalidState("CUSTOMER_DEPOSIT", "ALREADY_REVERSED") }
+        ensure(depositLeft(d.id) == d.amount) { DomainError.InvalidState("CUSTOMER_DEPOSIT", "IN_USE") }
+        treasury.reverseDocument(ctx, capability, DEPOSIT, d.id, cmd.date, cmd.reason)
+        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.RECEIPT to d.id)
+        deposits.saveDeposit(d.copy(reversed = true))
+        ctx.audit(AuditDraft("CUSTOMER_DEPOSIT_REVERSE", "CUSTOMER", d.customerId.value, "deposit=${d.id};reason=${cmd.reason.trim()}"))
+        d.id
+    }
+
     fun closeDay(c: CloseSalesDay): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
         requireDayOpen(cmd.scope, cmd.date)
         // Every sale of the day is posted (or reversed, or discarded): no draft is left behind a closed day.
@@ -619,7 +707,15 @@ class SalesOperations(
         }
         val countId = GlobalId.new()
         val difference = treasury.count(ctx, capability, box.id, cmd.countedCash, cmd.date, DAY_COUNT, countId, "شمارش صندوق پایان روز")
-        sales.saveDay(SalesDay(cmd.scope, cmd.date, closed = true, countedCash = cmd.countedCash, cashAccountId = box.id, difference = difference, countId = countId))
+        // Card terminals: the bank's settlement report against the card sales recorded (shown, not booked).
+        val terminals = cmd.terminalTotals.mapValues { (account, reported) ->
+            ensure(treasury.account(account).let { it.scope == cmd.scope && it.kind == ir.sabou.treasury.TreasuryKind.CARD_TERMINAL }) {
+                DomainError.InvalidInput("terminal", "کارت‌خوان متعلق به این شعبه نیست.")
+            }
+            reported.rial - cardSalesOn(cmd.scope, cmd.date, account)
+        }
+        sales.saveDay(SalesDay(cmd.scope, cmd.date, closed = true, countedCash = cmd.countedCash, cashAccountId = box.id, difference = difference, countId = countId,
+            terminalDifferences = terminals))
         ctx.audit(AuditDraft("SALES_DAY_CLOSE", "SALES_DAY", "${cmd.scope.branchId.value}:${cmd.date.epochDay}", "counted=${cmd.countedCash.rial};difference=$difference"))
         countId
     }
@@ -652,5 +748,8 @@ class SalesOperations(
         const val TAX_PAYMENT = "SALES_TAX_PAYMENT"
         const val WRITE_OFF = "RECEIVABLE_WRITE_OFF"
         const val OPENING = "RECEIVABLE_OPENING_BALANCE"
+        const val DEPOSIT = "CUSTOMER_DEPOSIT"
+        const val DEPOSIT_APPLY = "CUSTOMER_DEPOSIT_APPLY"
+        const val SHIFT_COUNT = "SHIFT_CASH_COUNT"
     }
 }

@@ -69,6 +69,8 @@ data class SalesDayView(
     val vatBp: Long? = null,
     /** Menu items with no recipe on the day: sold without taking stock. */
     val noRecipe: Set<ir.sabou.kernel.GlobalId> = emptySet(),
+    /** Cash counts at the end of each shift. */
+    val shiftCounts: List<ir.sabou.sales.ShiftCount> = emptyList(),
 )
 data class CustomerBalance(val customer: Customer, val owed: Money)
 data class OpenReceivable(val receivable: Receivable, val customer: String, val outstanding: Money)
@@ -363,6 +365,7 @@ class Overview internal constructor(private val core: SabouCore) {
             countNumber = core.sales.day(branch, date)?.countId?.let { core.numbers.of(ir.sabou.platform.DocumentSeries.CASH_COUNT, it)?.text },
             serviceBp = core.salesOps.serviceCharge(),
             vatBp = core.taxStore.profile()?.vatOn(date),
+            shiftCounts = core.salesOps.shiftCounts(branch, date),
             noRecipe = core.recipes.menuItems().filter { it.isActive && !core.recipeBook.hasRecipeOn(it.id, date) }.map { it.id }.toSet(),
         )
     }
@@ -375,7 +378,8 @@ class Overview internal constructor(private val core: SabouCore) {
 
     fun openReceivables(): List<OpenReceivable> {
         val a = actor(Permission.SALES_VIEW)
-        return core.customers.all().filter { a.canAccess(it.registeredIn) }.flatMap { c ->
+        // A customer may owe in a branch other than the one that registered them: the receivable's branch decides.
+        return core.customers.all().flatMap { c ->
             core.sales.receivablesOfCustomer(c.id).filter { !it.voided && a.canAccess(it.scope) }
                 .map { OpenReceivable(it, c.name, core.salesOps.outstanding(it.id)) }
         }.filter { !it.outstanding.isZero }.sortedBy { it.receivable.dueDate }

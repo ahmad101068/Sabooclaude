@@ -41,3 +41,20 @@ could never be reversed. (A reversed invoice already freed its number: the uniqu
   exportable. Write-offs are kept with their dates for the statements.
 - **Year end** — no closing entries: the balance sheet shows earlier years' and this year's result computed from the
   books (Farvardin 1 of the date's year), and the year is locked by closing its months. P&L of any period stays true.
+
+## Decision — stage 3 (purchasing and sales)
+- **Invoice** — `vat` (to 1108, offset against sales VAT), `discount` and `freight` spread over the goods lines by value
+  (the stock carries them; the rounding rest goes to the largest line).
+- **Paying a supplier** — `PaySupplier` pays approved open invoices oldest due first, one payment document each.
+  `PaySupplierAdvance` / `ApplySupplierAdvance` / `ReverseSupplierAdvance`: an advance sits in 1403 and is moved to
+  payables when set against an invoice (an allocation with its journal; releasing it reverses the journal).
+- **Partial deliveries** — `orderPartial`: the invoice is compared with what is still to come; the order stays open
+  until everything arrived (or it is cancelled). Suggestions count only what is still on order.
+- **Suppliers** — tax ID, address and Sheba (validated).
+- **Customer deposits** — `ReceiveCustomerDeposit` (to 2109), `ApplyCustomerDeposit` (2109 → receivable, a collection
+  with its journal), `ReverseCustomerDeposit` (unused). Statements count the deposit when it came in.
+- **Cash** — `CountCashShift` (SALES_RECORD): a blind count at the end of a shift, booked at once; the day's close
+  continues from it. `CloseSalesDay.terminalTotals`: each card terminal's settlement report against the card sales
+  recorded, kept with the day (not booked).
+- **Alerts** — supplier invoices due within two days or late; customers' debts past due.
+- Schema 25: `supplier_advances`, `customer_deposits`, `shift_counts`.

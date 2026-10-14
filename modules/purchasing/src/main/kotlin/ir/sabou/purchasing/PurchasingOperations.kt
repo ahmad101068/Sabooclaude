@@ -63,11 +63,15 @@ data class UpdateSupplier(
     val cutoffMinutes: Int?,
     val leadDays: Int,
     val note: String,
+    /** National ID or economic code; null keeps them as they are (also [address] and [sheba]). */
+    val taxId: String? = null,
+    val address: String? = null,
+    val sheba: String? = null,
 ) : Command {
     override val requiredPermission = Permission.SUPPLIER_MANAGE
     override val scope: Scope = Scope.Organization
     override val sharedCatalog = true
-    override fun fingerprint() = "$supplierId|$name|$phone|$isActive|${deliveryDays.sorted()}|$cutoffMinutes|$leadDays|$note"
+    override fun fingerprint() = "$supplierId|$name|$phone|$isActive|${deliveryDays.sorted()}|$cutoffMinutes|$leadDays|$note|$taxId|$address|$sheba"
 }
 
 /** [cheque]: our new cheque from a cheque book; [chequeId]: a customer's cheque passed on from a cheque box. */
@@ -96,6 +100,12 @@ data class PostPurchaseInvoice(
     val note: String = "",
     val orderId: GlobalId? = null,
     val attachments: List<AttachmentInput> = emptyList(),
+    /** VAT on the invoice (claimed against sales VAT), its discount and its freight (the last two spread into the goods' cost). */
+    val vat: Money = Money.ZERO,
+    val discount: Money = Money.ZERO,
+    val freight: Money = Money.ZERO,
+    /** Part of [orderId] arrived: the order stays open for the rest. */
+    val orderPartial: Boolean = false,
 ) : Command {
     override val requiredPermission = Permission.PURCHASE_RECORD
     override val additionalPermissions = if (payNow != null) setOf(Permission.PURCHASE_PAY) else emptySet()
@@ -103,7 +113,7 @@ data class PostPurchaseInvoice(
         lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}:${it.value.rial}:${it.supplierItemName}" } + "|${payNow?.fingerprint()}|" +
         accountLines.joinToString(";") { "${it.account}:${it.amount.rial}:${it.branch}:${it.memo}" } + "|" +
         reviewLines.joinToString(";") { "${it.supplierItemName}:${it.quantityNote}:${it.amount.rial}" } + "|$note|$orderId|" +
-        attachments.joinToString(";") { it.fingerprint() }
+        attachments.joinToString(";") { it.fingerprint() } + "|${vat.rial}|${discount.rial}|${freight.rial}|$orderPartial"
 }
 
 /** Accepts an invoice's differences from its order (or a possible duplicate) after looking at them (ADR-0029). */
@@ -223,9 +233,11 @@ data class ReleaseCreditAllocation(
     override val scope: Scope.Branch,
     val allocationId: GlobalId,
     val reason: String,
+    /** When an advance's allocation is taken back, the date of that correction (default: the allocation's). */
+    val date: BusinessDate? = null,
 ) : Command {
     override val requiredPermission = Permission.PURCHASE_PAY
-    override fun fingerprint() = "$scope|$allocationId|$reason"
+    override fun fingerprint() = "$scope|$allocationId|$reason|${date?.epochDay}"
 }
 
 /** The supplier pays back unapplied return credit into [treasuryAccountId] (a cheque box needs [cheque]). */
@@ -284,6 +296,7 @@ class PurchasingOperations(
     private val purchases: PurchaseStore,
     private val attachments: AttachmentStore,
     private val approvalRules: ApprovalRuleStore = ir.sabou.purchasing.memory.InMemoryApprovalRuleStore(),
+    private val advances: SupplierAdvanceStore = ir.sabou.purchasing.memory.InMemorySupplierAdvanceStore(),
 ) {
     init {
         require(capability.module == ModuleId.PURCHASING)
@@ -302,7 +315,7 @@ class PurchasingOperations(
     fun unappliedCredit(supplierId: GlobalId, scope: Scope.Branch): Money {
         val returned = purchases.invoices().filter { it.supplierId == supplierId && it.scope == scope }
             .sumOf { inv -> purchases.returns(inv.id).sumOf { it.credit.rial } }
-        val allocated = purchases.allocationsOf(supplierId, scope).filter { !it.released }.sumOf { it.amount.rial }
+        val allocated = purchases.allocationsOf(supplierId, scope).filter { !it.released && it.advanceId == null }.sumOf { it.amount.rial }
         val refunded = purchases.refundsOf(supplierId, scope).filter { !it.reversed }.sumOf { it.amount.rial }
         return Money.of(returned - allocated - refunded)
     }
@@ -311,7 +324,95 @@ class PurchasingOperations(
     fun supplierBalance(supplierId: GlobalId, scope: Scope.Branch? = null): SignedAmount {
         val scopes = purchases.invoices().filter { it.supplierId == supplierId && (scope == null || it.scope == scope) }.map { it.scope }.distinct()
         val owed = purchases.invoices().filter { it.supplierId == supplierId && (scope == null || it.scope == scope) }.sumOf { outstanding(it.id).rial }
-        return SignedAmount(owed - scopes.sumOf { unappliedCredit(supplierId, it).rial })
+        val ahead = advances.of(supplierId).filter { !it.reversed && (scope == null || it.scope == scope) }.sumOf { advanceLeft(it.id).rial }
+        return SignedAmount(owed - scopes.sumOf { unappliedCredit(supplierId, it).rial } - ahead)
+    }
+
+    /** What is left of an advance to set against invoices. */
+    fun advanceLeft(advanceId: GlobalId): Money {
+        val a = advances.byId(advanceId) ?: throw DomainException(DomainError.NotFound("SUPPLIER_ADVANCE"))
+        if (a.reversed) return Money.ZERO
+        return a.amount - Money.sum(purchases.allocationsOf(a.supplierId, a.scope).filter { it.advanceId == a.id && !it.released }.map { it.amount })
+    }
+
+    fun advancesOf(supplierId: GlobalId): List<SupplierAdvance> = advances.of(supplierId)
+
+    fun payAdvance(c: PaySupplierAdvance): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
+        val supplier = suppliers.byId(cmd.supplierId) ?: throw DomainException(DomainError.NotFound("SUPPLIER"))
+        ensure(supplier.isActive) { DomainError.InvalidState("SUPPLIER", "INACTIVE") }
+        ensure(!cmd.amount.isZero) { DomainError.InvalidInput("amount", "مبلغ باید بیشتر از صفر باشد.") }
+        ensure(cmd.note.length <= 200) { DomainError.InvalidInput("note", "توضیح طولانی است.") }
+        val account = treasury.account(cmd.treasuryAccountId)
+        val id = GlobalId.new()
+        ctx.number(DocumentSeries.PAYMENT, cmd.date, id, scope = cmd.scope)
+        val title = "پیش‌پرداخت به ${supplier.name}" + if (cmd.note.isBlank()) "" else ": ${cmd.note.trim()}"
+        val cheque = paymentCheque(cmd.cheque, null)
+        var bridge: GlobalId? = null
+        if (account.scope == cmd.scope) {
+            treasury.settle(ctx, capability, account.id, Direction.PAYMENT, cmd.amount, cmd.date, ADVANCE, id, title,
+                listOf(LineDraft(StandardAccounts.SUPPLIER_ADVANCES, debit = cmd.amount, memo = supplier.name, by = capability)), cheque)
+        } else {
+            treasury.settle(ctx, capability, account.id, Direction.PAYMENT, cmd.amount, cmd.date, ADVANCE, id, title,
+                listOf(LineDraft(StandardAccounts.INTER_BRANCH, debit = cmd.amount, memo = "پرداخت برای شعبه", by = capability)), cheque)
+            bridge = ledger.post(ctx, capability, JournalDraft(cmd.date, cmd.scope, ADVANCE, id, "$title (از حساب مرکزی)", listOf(
+                LineDraft(StandardAccounts.SUPPLIER_ADVANCES, debit = cmd.amount, memo = supplier.name, by = capability),
+                LineDraft(StandardAccounts.INTER_BRANCH, credit = cmd.amount, memo = account.name, by = capability),
+            ))).id
+        }
+        advances.save(SupplierAdvance(id, supplier.id, cmd.scope, account.id, cmd.amount, cmd.date, cmd.note.trim(), bridge))
+        ctx.audit(AuditDraft("SUPPLIER_ADVANCE", "SUPPLIER", supplier.id.value, "advance=$id;amount=${cmd.amount.rial}"))
+        id
+    }
+
+    fun applyAdvance(c: ApplySupplierAdvance): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
+        val advance = advances.byId(cmd.advanceId) ?: throw DomainException(DomainError.NotFound("SUPPLIER_ADVANCE"))
+        val invoice = requireInvoice(cmd.invoiceId, cmd.scope)
+        ensure(advance.scope == cmd.scope && advance.supplierId == invoice.supplierId) { DomainError.InvalidInput("advance", "پیش‌پرداخت متعلق به این تأمین‌کننده و شعبه نیست.") }
+        ensure(!cmd.amount.isZero && cmd.amount <= advanceLeft(advance.id)) { DomainError.InvalidState("SUPPLIER_ADVANCE", "EXCEEDS_AVAILABLE") }
+        ensure(cmd.amount <= outstanding(invoice.id)) { DomainError.InvalidState("PURCHASE_INVOICE", "PAYMENT_EXCEEDS_OUTSTANDING") }
+        ensure(cmd.date >= advance.date) { DomainError.InvalidInput("date", "تاریخ قبل از پیش‌پرداخت است.") }
+        val id = GlobalId.new()
+        ctx.number(DocumentSeries.CREDIT_SETTLEMENT, cmd.date, id)
+        val supplier = suppliers.byId(invoice.supplierId)!!
+        val journal = ledger.post(ctx, capability, JournalDraft(cmd.date, cmd.scope, ADVANCE_APPLY, id, "تسویه‌ی فاکتور ${invoice.supplierInvoiceNo} از پیش‌پرداخت", listOf(
+            LineDraft(StandardAccounts.PAYABLE, debit = cmd.amount, memo = supplier.name, by = capability),
+            LineDraft(StandardAccounts.SUPPLIER_ADVANCES, credit = cmd.amount, memo = supplier.name, by = capability),
+        )))
+        purchases.saveAllocation(CreditAllocation(id, invoice.supplierId, invoice.scope, invoice.id, cmd.amount, cmd.date, null, advanceId = advance.id, journalId = journal.id))
+        ctx.audit(AuditDraft("SUPPLIER_ADVANCE_APPLY", "PURCHASE_INVOICE", invoice.id.value, "advance=${advance.id};amount=${cmd.amount.rial}"))
+        id
+    }
+
+    fun reverseAdvance(c: ReverseSupplierAdvance): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
+        val advance = advances.byId(cmd.advanceId) ?: throw DomainException(DomainError.NotFound("SUPPLIER_ADVANCE"))
+        ensure(advance.scope == cmd.scope) { DomainError.InvalidInput("scope", "متعلق به این شعبه نیست.") }
+        ensure(!advance.reversed) { DomainError.InvalidState("SUPPLIER_ADVANCE", "ALREADY_REVERSED") }
+        ensure(advanceLeft(advance.id) == advance.amount) { DomainError.InvalidState("SUPPLIER_ADVANCE", "IN_USE") }
+        treasury.reverseDocument(ctx, capability, ADVANCE, advance.id, cmd.date, cmd.reason)
+        advance.bridgeJournalId?.let { ledger.reverse(ctx, capability, emptySet(), it, cmd.date, cmd.reason) }
+        ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.PAYMENT to advance.id)
+        advances.save(advance.copy(reversed = true))
+        ctx.audit(AuditDraft("SUPPLIER_ADVANCE_REVERSE", "SUPPLIER", advance.supplierId.value, "advance=${advance.id};reason=${cmd.reason.trim()}"))
+        advance.id
+    }
+
+    /** One payment document per invoice, oldest due first, until [PaySupplier.amount] is used. */
+    fun paySupplier(c: PaySupplier): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
+        ensure(!cmd.amount.isZero) { DomainError.InvalidInput("amount", "مبلغ باید بیشتر از صفر باشد.") }
+        val payable = purchases.invoices().filter {
+            it.supplierId == cmd.supplierId && it.scope == cmd.scope && it.status == InvoiceStatus.POSTED && it.approved && !it.needsMatchReview && it.date <= cmd.date
+        }.sortedWith(compareBy({ it.dueDate }, { it.date })).map { it to outstanding(it.id) }.filter { !it.second.isZero }
+        ensure(cmd.amount.rial <= payable.sumOf { it.second.rial }) { DomainError.InvalidState("SUPPLIER", "PAYMENT_EXCEEDS_PAYABLE") }
+        var left = cmd.amount
+        var first: GlobalId? = null
+        for ((invoice, open) in payable) {
+            if (left.isZero) break
+            val take = minOf(left, open)
+            val p = pay(ctx, invoice, cmd.treasuryAccountId, take, cmd.date, null)
+            if (first == null) first = p.id
+            left -= take
+        }
+        first!!
     }
 
     fun registerSupplier(c: RegisterSupplier): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
@@ -333,9 +434,15 @@ class PurchasingOperations(
         ensure(cmd.cutoffMinutes == null || cmd.cutoffMinutes in 0 until 24 * 60) { DomainError.InvalidInput("cutoff", "ساعت مهلت سفارش نامعتبر است.") }
         ensure(cmd.leadDays in 0..14) { DomainError.InvalidInput("leadDays", "فاصله‌ی سفارش تا تحویل باید بین ۰ تا ۱۴ روز باشد.") }
         ensure(cmd.note.length <= 500) { DomainError.InvalidInput("note", "توضیح طولانی است.") }
+        val taxId = cmd.taxId?.let { ir.sabou.kernel.NationalId.normalize(it).filter(Char::isDigit) } ?: current.taxId
+        ensure(taxId.isEmpty() || taxId.length in 10..14) { DomainError.InvalidInput("taxId", "کد ملی، شناسه‌ی ملی یا کد اقتصادی معتبر نیست.") }
+        val sheba = cmd.sheba?.let { if (it.isBlank()) "" else ir.sabou.kernel.Sheba.normalize(it) } ?: current.sheba
+        ensure(sheba.isEmpty() || ir.sabou.kernel.Sheba.isValid(sheba)) { DomainError.InvalidInput("sheba", "شماره شبا معتبر نیست.") }
+        val address = cmd.address?.trim() ?: current.address
+        ensure(address.length <= 300) { DomainError.InvalidInput("address", "نشانی طولانی است.") }
         val updated = current.copy(
             name = name, phone = cmd.phone.trim(), isActive = cmd.isActive, deliveryDays = cmd.deliveryDays,
-            cutoffMinutes = cmd.cutoffMinutes, leadDays = cmd.leadDays, note = cmd.note.trim(),
+            cutoffMinutes = cmd.cutoffMinutes, leadDays = cmd.leadDays, note = cmd.note.trim(), taxId = taxId, address = address, sheba = sheba,
         )
         suppliers.save(updated)
         ctx.audit(AuditDraft("SUPPLIER_UPDATE", "SUPPLIER", current.id.value, "active=${updated.isActive};days=${updated.deliveryDays.sorted()};cutoff=${updated.cutoffMinutes};lead=${updated.leadDays}"))
@@ -371,33 +478,46 @@ class PurchasingOperations(
             ensure(o.status == OrderStatus.OPEN) { DomainError.InvalidState("PURCHASE_ORDER", o.status.name) }
             o
         }
-        val goods = Money.sum(cmd.lines.map { it.value })
+        ensure(cmd.lines.isNotEmpty() || (cmd.discount.isZero && cmd.freight.isZero)) { DomainError.InvalidInput("discount", "تخفیف و کرایه روی کالا سرشکن می‌شود؛ فاکتور بدون کالا را با ردیف هزینه ثبت کنید.") }
+        ensure(cmd.discount <= Money.sum(cmd.lines.map { it.value })) { DomainError.InvalidInput("discount", "تخفیف از جمع کالاها بیشتر است.") }
+        // The invoice's discount and freight are part of what the goods cost: spread over the lines by value.
+        val lines = spread(cmd.lines, cmd.freight.rial - cmd.discount.rial)
+        val goods = Money.sum(lines.map { it.value })
         val accountsTotal = Money.sum(cmd.accountLines.map { it.amount })
         val reviewTotal = Money.sum(cmd.reviewLines.map { it.amount })
-        val total = goods + accountsTotal + reviewTotal
+        val total = goods + accountsTotal + reviewTotal + cmd.vat
         ensure(!total.isZero) { DomainError.InvalidInput("value", "جمع فاکتور باید بیشتر از صفر باشد.") }
         val invoiceId = GlobalId.new()
         ctx.number(DocumentSeries.PURCHASE_INVOICE, cmd.date, invoiceId)
         val title = "خرید از ${supplier.name} · فاکتور $number"
-        if (cmd.lines.isNotEmpty()) {
+        if (lines.isNotEmpty()) {
             inventory.receive(
-                ctx, capability, cmd.locationId!!, cmd.lines.map { ReceiptLine(it.itemId, it.quantity, it.value, it.expiresOn) }, cmd.date, INVOICE, invoiceId, title,
+                ctx, capability, cmd.locationId!!, lines.map { ReceiptLine(it.itemId, it.quantity, it.value, it.expiresOn) }, cmd.date, INVOICE, invoiceId, title,
                 listOf(LineDraft(StandardAccounts.PAYABLE, credit = goods, memo = supplier.name, by = capability)),
             )
         }
-        val journals = postOtherLines(ctx, cmd.scope, cmd.date, invoiceId, title, supplier.name, cmd.accountLines, reviewTotal)
+        val journals = postOtherLines(ctx, cmd.scope, cmd.date, invoiceId, title, supplier.name, cmd.accountLines, reviewTotal) +
+            listOfNotNull(cmd.vat.takeIf { !it.isZero }?.let { vat ->
+                ledger.post(ctx, capability, JournalDraft(cmd.date, cmd.scope, INVOICE, invoiceId, "$title (مالیات بر ارزش افزوده)", listOf(
+                    LineDraft(StandardAccounts.VAT_RECEIVABLE, debit = vat, memo = supplier.name, by = capability),
+                    LineDraft(StandardAccounts.PAYABLE, credit = vat, memo = supplier.name, by = capability),
+                ))).id
+            })
         val invoice = PurchaseInvoice(
-            invoiceId, supplier.id, number, cmd.scope, cmd.locationId, cmd.date, cmd.dueDate, cmd.lines.map { it.copy(supplierItemName = it.supplierItemName.trim()) },
+            invoiceId, supplier.id, number, cmd.scope, cmd.locationId, cmd.date, cmd.dueDate, lines.map { it.copy(supplierItemName = it.supplierItemName.trim()) },
             total, InvoiceStatus.POSTED, cmd.accountLines.map { it.copy(memo = it.memo.trim()) },
             cmd.reviewLines.map { it.copy(supplierItemName = it.supplierItemName.trim(), quantityNote = it.quantityNote.trim()) },
             cmd.note.trim(), order?.id, journals, recordedBy = ctx.actor.userId,
-            discrepancies = order?.let { InvoiceMatching.compare(it, cmd.lines) }.orEmpty() + possibleDuplicates(supplier.id, cmd.supplierInvoiceNo, total, cmd.date),
+            discrepancies = order?.let { InvoiceMatching.compare(it, lines, receivedOf(it), cmd.orderPartial) }.orEmpty() + possibleDuplicates(supplier.id, cmd.supplierInvoiceNo, total, cmd.date),
+            vat = cmd.vat, discount = cmd.discount, freight = cmd.freight,
         ).let { inv -> inv.copy(requiredApprovals = approvalRules.all().filter { it.matches(inv.scope, inv.supplierId, inv.category, inv.total) }.maxOfOrNull { it.steps } ?: 0) }
         purchases.saveInvoice(invoice)
         cmd.lines.filter { it.supplierItemName.isNotBlank() }.forEach { suppliers.saveAlias(supplier.id, SupplierNames.normalize(it.supplierItemName), it.itemId) }
         order?.let {
-            purchases.saveOrder(it.copy(status = OrderStatus.RECEIVED, invoiceId = invoice.id))
-            ctx.audit(AuditDraft("PURCHASE_ORDER_RECEIVE", "PURCHASE_ORDER", it.id.value, "invoice=${invoice.id}"))
+            val received = receivedOf(it).toMutableMap().apply { lines.forEach { l -> merge(l.itemId, l.quantity.micros, Long::plus) } }
+            val complete = !cmd.orderPartial || it.lines.groupBy { l -> l.itemId }.all { (item, l) -> (received[item] ?: 0L) >= l.sumOf { x -> x.quantity.micros } }
+            purchases.saveOrder(it.copy(status = if (complete) OrderStatus.RECEIVED else OrderStatus.OPEN, invoiceId = invoice.id, invoiceIds = it.invoiceIds + invoice.id))
+            ctx.audit(AuditDraft("PURCHASE_ORDER_RECEIVE", "PURCHASE_ORDER", it.id.value, "invoice=${invoice.id};complete=$complete"))
         }
         Attachments.attach(ctx, attachments, INVOICE, invoice.id, cmd.attachments)
         ctx.audit(AuditDraft("PURCHASE_INVOICE_POST", "PURCHASE_INVOICE", invoice.id.value, "supplier=${supplier.id};no=$number;total=${total.rial};review=${reviewTotal.rial}"))
@@ -499,7 +619,10 @@ class PurchasingOperations(
         ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.PURCHASE_INVOICE to invoice.id)
         purchases.saveInvoice(invoice.copy(status = InvoiceStatus.REVERSED))
         // The order it closed is open again for the corrected invoice.
-        invoice.orderId?.let { id -> purchases.order(id)?.takeIf { it.invoiceId == invoice.id }?.let { purchases.saveOrder(it.copy(status = OrderStatus.OPEN, invoiceId = null)) } }
+        invoice.orderId?.let { id -> purchases.order(id)?.takeIf { invoice.id in it.invoiceIds }?.let { o ->
+            val rest = o.invoiceIds - invoice.id
+            purchases.saveOrder(o.copy(status = if (o.status == OrderStatus.CANCELLED) o.status else OrderStatus.OPEN, invoiceId = rest.lastOrNull(), invoiceIds = rest))
+        } }
         ctx.audit(AuditDraft("PURCHASE_INVOICE_REVERSE", "PURCHASE_INVOICE", invoice.id.value, cmd.reason.trim()))
         invoice.id
     }
@@ -570,6 +693,8 @@ class PurchasingOperations(
         ensure(allocation.scope == cmd.scope) { DomainError.InvalidInput("scope", "متعلق به این شعبه نیست.") }
         ensure(!allocation.released) { DomainError.InvalidState("CREDIT_ALLOCATION", "ALREADY_RELEASED") }
         ensure(cmd.reason.trim().length in 3..300) { DomainError.InvalidInput("reason", "دلیل الزامی است.") }
+        // An advance set against the invoice goes back to 1403.
+        allocation.journalId?.let { ledger.reverse(ctx, capability, emptySet(), it, cmd.date ?: allocation.date, cmd.reason) }
         purchases.saveAllocation(allocation.copy(released = true))
         ctx.audit(AuditDraft("SUPPLIER_CREDIT_RELEASE", "PURCHASE_INVOICE", allocation.invoiceId.value, "allocation=${allocation.id};reason=${cmd.reason.trim()}"))
         allocation.id
@@ -676,6 +801,21 @@ class PurchasingOperations(
      * branches' shares through the inter-branch account, held lines into 1302, against AP) and
      * one per other branch for its share of the expenses.
      */
+    /** Quantities of [order] already invoiced (by posted invoices). */
+    private fun receivedOf(order: PurchaseOrder): Map<GlobalId, Long> = order.invoiceIds.mapNotNull { purchases.invoice(it) }
+        .filter { it.status == InvoiceStatus.POSTED }.flatMap { it.lines }.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } }
+
+    /** Adds [delta] Rial (freight − discount) to [lines] in proportion to their value; the rounding rest goes to the largest. */
+    private fun spread(lines: List<InvoiceLine>, delta: Long): List<InvoiceLine> {
+        if (delta == 0L || lines.isEmpty()) return lines
+        val total = lines.sumOf { it.value.rial }
+        val sign = if (delta < 0) -1L else 1L
+        val shares = lines.map { sign * (if (total == 0L) kotlin.math.abs(delta) / lines.size else Ratio.mulDiv(kotlin.math.abs(delta), it.value.rial, total, ir.sabou.kernel.Rounding.DOWN)) }.toMutableList()
+        val largest = lines.indices.maxByOrNull { lines[it].value.rial }!!
+        shares[largest] += delta - shares.sum()
+        return lines.mapIndexed { i, l -> l.copy(value = Money.of(l.value.rial + shares[i])) }
+    }
+
     private fun postOtherLines(
         ctx: CommandContext, scope: Scope.Branch, date: BusinessDate, invoiceId: GlobalId, title: String, supplier: String,
         accountLines: List<AccountLine>, reviewTotal: Money,
@@ -729,6 +869,8 @@ class PurchasingOperations(
         const val RETURN = "PURCHASE_RETURN"
         const val REVIEW = "PURCHASE_REVIEW"
         const val OPENING = "PURCHASE_OPENING_BALANCE"
+        const val ADVANCE = "SUPPLIER_ADVANCE"
+        const val ADVANCE_APPLY = "SUPPLIER_ADVANCE_APPLY"
         const val REFUND = "SUPPLIER_REFUND"
     }
 }

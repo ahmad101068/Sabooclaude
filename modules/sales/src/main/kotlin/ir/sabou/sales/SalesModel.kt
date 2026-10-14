@@ -124,6 +124,9 @@ data class Collection(
     val amount: Money,
     val date: BusinessDate,
     val reversed: Boolean,
+    /** Set from a customer's deposit (with the journal 2109 → receivable), not received into [treasuryAccountId]. */
+    val depositId: GlobalId? = null,
+    val journalId: GlobalId? = null,
 )
 
 /**
@@ -138,6 +141,8 @@ data class SalesDay(
     val cashAccountId: GlobalId? = null,
     val difference: Long = 0,
     val countId: GlobalId? = null,
+    /** Card terminal settlement report minus the card sales recorded, per terminal account (+ = terminal shows more). */
+    val terminalDifferences: Map<GlobalId, Long> = emptyMap(),
 )
 
 interface CustomerStore {

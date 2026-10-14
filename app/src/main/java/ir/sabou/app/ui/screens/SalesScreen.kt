@@ -100,6 +100,7 @@ private class SalesData(
     val serviceBp: Long? = null,
     val vatBp: Long? = null,
     val noRecipe: Set<GlobalId> = emptySet(),
+    val shiftCounts: List<ir.sabou.sales.ShiftCount> = emptyList(),
 )
 
 private const val NEW_SALE = "new"
@@ -126,6 +127,7 @@ fun SalesScreen(nav: Nav) {
                     serviceBp = view.serviceBp,
                     vatBp = view.vatBp,
                     noRecipe = view.noRecipe,
+                    shiftCounts = view.shiftCounts,
                 )
             }
             // The open sale: null = the day's list, NEW_SALE = a new draft, otherwise a sale id.
@@ -214,6 +216,7 @@ private fun DayClose(branch: Scope.Branch, date: BusinessDate, data: SalesData) 
     var counted by rememberSaveable { mutableStateOf<Money?>(null) }
     var cashBox by rememberSaveable { mutableStateOf<GlobalId?>(null) }
     var reason by rememberSaveable { mutableStateOf("") }
+    val terminalTotals = ir.sabou.app.ui.rememberValueMap<GlobalId, Money?>()
     val commandId = rememberSaveable(branch, date) { mutableStateOf(GlobalId.new()) }
     val closed = data.day?.closed == true
     val drafts = data.sales.count { it.status == SaleStatus.DRAFT }
@@ -225,8 +228,21 @@ private fun DayClose(branch: Scope.Branch, date: BusinessDate, data: SalesData) 
             if (day.difference != 0L) KeyValue(if (day.difference < 0) "کسری صندوق" else "اضافه صندوق", Fa.rial(kotlin.math.abs(day.difference)) + " ریال",
                 if (day.difference < 0) Sabou.colors.danger else Sabou.colors.moneyIn)
             else if (day.countId != null) Text("صندوق با دفاتر برابر بود.", style = SabouType.caption, color = Sabou.colors.muted)
+            day.terminalDifferences.forEach { (account, diff) ->
+                val name = data.accounts.firstOrNull { it.id == account }?.name ?: "کارت‌خوان"
+                KeyValue("گزارش $name با فروش کارتی", if (diff == 0L) "برابر" else (if (diff < 0) "کمتر " else "بیشتر ") + Fa.rial(kotlin.math.abs(diff)),
+                    if (diff == 0L) Sabou.colors.ink else Sabou.colors.danger)
+            }
         }
     }
+    if (data.shiftCounts.isNotEmpty()) SCard {
+        Text("شمارش‌های پایان شیفت", style = SabouType.section, color = Sabou.colors.ink)
+        data.shiftCounts.forEach { c ->
+            KeyValue("${c.countedBy} · ${Fa.rial(c.counted)}", if (c.difference == 0L) "برابر" else (if (c.difference < 0) "کسری " else "اضافه ") + Fa.rial(kotlin.math.abs(c.difference)),
+                if (c.difference == 0L) Sabou.colors.ink else Sabou.colors.danger)
+        }
+    }
+    if (!closed && session.can(Permission.SALES_RECORD)) ShiftCountForm(branch, date, data)
     action.error?.let { Banner(it) }
     if (!closed && session.can(Permission.SALES_DAY_CLOSE)) {
         FormCard("شمارش صندوق و بستن روز") {
@@ -241,9 +257,20 @@ private fun DayClose(branch: Scope.Branch, date: BusinessDate, data: SalesData) 
                     val diff = c.rial - box.balance
                     if (diff != 0L) Banner((if (diff < 0) "کسری صندوق: " else "اضافه صندوق: ") + Fa.rial(kotlin.math.abs(diff)) + " ریال — با بستن روز در حساب «کسر و اضافه صندوق» ثبت می‌شود.", ChipKind.ACCENT)
                 }
+                val terminals = data.accounts.filter { it.kind == ir.sabou.treasury.TreasuryKind.CARD_TERMINAL }
+                if (terminals.isNotEmpty()) {
+                    Text("گزارش تسویه‌ی کارت‌خوان (اختیاری): جمع روز را از رسید پایان روز کارت‌خوان وارد کنید تا با فروش کارتی ثبت‌شده مقایسه شود.",
+                        style = SabouType.caption, color = Sabou.colors.muted)
+                    terminals.forEach { t ->
+                        val recorded = data.sales.filter { it.status == SaleStatus.POSTED }.flatMap { it.settlements }.filterIsInstance<Settlement.Liquid>()
+                            .filter { it.treasuryAccountId == t.id }.sumOf { it.amount.rial }
+                        MoneyInput("${t.name} (ثبت‌شده ${Fa.rial(recorded)})", terminalTotals[t.id], { terminalTotals[t.id] = it })
+                    }
+                }
                 PrimaryButton("شمارش و بستن روز", {
                     val c = counted ?: return@PrimaryButton
-                    action.run({ salesOps.closeDay(CloseSalesDay(commandId.value, branch, date, box.account.id, c)) }) { commandId.value = GlobalId.new(); counted = null }
+                    val reported = terminalTotals.entries.mapNotNull { (k, v) -> v?.let { k to it } }.toMap()
+                    action.run({ salesOps.closeDay(CloseSalesDay(commandId.value, branch, date, box.account.id, c, reported)) }) { commandId.value = GlobalId.new(); counted = null }
                 }, enabled = counted != null && drafts == 0, busy = action.busy)
             }
         }
@@ -255,6 +282,29 @@ private fun DayClose(branch: Scope.Branch, date: BusinessDate, data: SalesData) 
                 action.run({ salesOps.reopenDay(ReopenSalesDay(commandId.value, branch, date, reason)) }) { commandId.value = GlobalId.new(); reason = "" }
             }, enabled = reason.trim().length >= 3)
         }
+    }
+}
+
+/** The cashier counts the box at the end of a shift (blind: the book figure is not shown); the difference is booked. */
+@Composable
+private fun ShiftCountForm(branch: Scope.Branch, date: BusinessDate, data: SalesData) {
+    val boxes = data.accounts.filter { it.kind == ir.sabou.treasury.TreasuryKind.CASH || it.kind == ir.sabou.treasury.TreasuryKind.PETTY_CASH }
+    if (boxes.isEmpty()) return
+    var box by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+    var counted by rememberSaveable { mutableStateOf<Money?>(null) }
+    var note by rememberSaveable { mutableStateOf("") }
+    val id = rememberSaveable(branch, date) { mutableStateOf(GlobalId.new()) }
+    val action = rememberAction()
+    FormCard("شمارش پایان شیفت") {
+        Text("نقد صندوق را بشمارید و وارد کنید؛ کسری یا اضافه همین حالا ثبت می‌شود و شمارش پایان روز از آن ادامه می‌دهد.", style = SabouType.caption, color = Sabou.colors.muted)
+        val chosen = box ?: boxes.first().id
+        if (boxes.size > 1) Picker("صندوق", boxes.map { Choice(it.id, it.name) }, chosen, { box = it })
+        MoneyInput("نقد شمارش‌شده", counted, { counted = it })
+        TextInput("توضیح", note, { note = it }, placeholder = "مثلاً شیفت صبح")
+        action.error?.let { Banner(it) }
+        SecondaryButton("ثبت شمارش شیفت", {
+            action.run({ salesOps.countShift(ir.sabou.sales.CountCashShift(id.value, branch, chosen, counted!!, date, note)) }) { id.value = GlobalId.new(); counted = null; note = "" }
+        }, enabled = counted != null && !action.busy)
     }
 }
 

@@ -59,6 +59,7 @@ class SqlSupplierStore(db: SqlDatabase) : SqlTable(db), SupplierStore {
         Codec.id(d.str("id")), d.str("name"), d.str("phone"), d.bool("active"),
         deliveryDays = d.strsOr("deliveryDays").map { it.toInt() }.toSet(), cutoffMinutes = d.longOrNull("cutoff")?.toInt(),
         leadDays = d.intOr("leadDays", 1), note = d.strOr("note", ""),
+        taxId = d.strOr("taxId", ""), address = d.strOr("address", ""), sheba = d.strOr("sheba", ""),
     )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM suppliers WHERE id = ?", id.value)?.let(::read)
     override fun all() = docs("SELECT doc FROM suppliers ORDER BY rowid").map(::read)
@@ -68,6 +69,7 @@ class SqlSupplierStore(db: SqlDatabase) : SqlTable(db), SupplierStore {
             "id" to supplier.id.value, "name" to supplier.name, "phone" to supplier.phone, "active" to supplier.isActive,
             "deliveryDays" to supplier.deliveryDays.sorted().map { it.toString() }, "cutoff" to supplier.cutoffMinutes?.toLong(),
             "leadDays" to supplier.leadDays.toLong(), "note" to supplier.note,
+            "taxId" to supplier.taxId, "address" to supplier.address, "sheba" to supplier.sheba,
         ))),
     )
     override fun aliases(supplierId: GlobalId): Map<String, GlobalId> =
@@ -105,6 +107,7 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
         },
         matchReview = d.docOrNull("matchReview")?.let { MatchReview(Codec.id(it.str("user")), it.str("name"), it.long("at"), it.str("note")) },
         opening = d.boolOr("opening", false),
+        vat = Codec.money(d.longOr("vat", 0)), discount = Codec.money(d.longOr("discount", 0)), freight = Codec.money(d.longOr("freight", 0)),
     )
 
     override fun invoice(id: GlobalId) = doc("SELECT doc FROM purchase_invoices WHERE id = ?", id.value)?.let(::invoiceOf)
@@ -133,6 +136,7 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
                     },
                     "note" to invoice.note, "order" to invoice.orderId?.value, "journals" to invoice.journalIds.map { it.value },
                     "recordedBy" to invoice.recordedBy?.value, "requiredApprovals" to invoice.requiredApprovals.toLong(), "opening" to invoice.opening,
+                    "vat" to invoice.vat.rial, "discount" to invoice.discount.rial, "freight" to invoice.freight.rial,
                     "approvals" to invoice.approvals.map { mapOf("user" to it.userId.value, "name" to it.name, "at" to it.atEpochMillis, "self" to it.self, "reason" to it.reason) },
                     "discrepancies" to invoice.discrepancies.map { mapOf("kind" to it.kind.name, "item" to it.itemId?.value, "ordered" to it.ordered, "invoiced" to it.invoiced) },
                     "matchReview" to invoice.matchReview?.let { mapOf("user" to it.userId.value, "name" to it.name, "at" to it.atEpochMillis, "note" to it.note) },
@@ -177,6 +181,7 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
     private fun allocationOf(d: Doc) = CreditAllocation(
         Codec.id(d.str("id")), Codec.id(d.str("supplier")), Codec.branchOf(d.str("scope")), Codec.id(d.str("invoice")), Codec.money(d.long("amount")),
         Codec.date(d.long("date")), Codec.idOrNull(d.strOrNull("return")), d.bool("released"),
+        Codec.idOrNull(d.strOrNull("advance")), Codec.idOrNull(d.strOrNull("journal")),
     )
     override fun allocation(id: GlobalId) = doc("SELECT doc FROM credit_allocations WHERE id = ?", id.value)?.let(::allocationOf)
     override fun allocationsTo(invoiceId: GlobalId) = docs("SELECT doc FROM credit_allocations WHERE invoice_id = ? ORDER BY rowid", invoiceId.value).map(::allocationOf)
@@ -189,6 +194,7 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
             "doc" to Json.encode(mapOf(
                 "id" to allocation.id.value, "supplier" to allocation.supplierId.value, "scope" to Codec.scope(allocation.scope), "invoice" to allocation.invoiceId.value,
                 "amount" to allocation.amount.rial, "date" to allocation.date.epochDay, "return" to allocation.returnId?.value, "released" to allocation.released,
+                "advance" to allocation.advanceId?.value, "journal" to allocation.journalId?.value,
             )),
         ),
     )
@@ -216,6 +222,7 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
         Codec.date(d.long("date")), Codec.date(d.long("expected")),
         d.docs("lines").map { OrderLine(Codec.id(it.str("item")), Codec.qty(it.long("qty")), Codec.money(it.long("price"))) },
         d.strOr("note", ""), OrderStatus.valueOf(d.str("status")), Codec.idOrNull(d.strOrNull("invoice")), d.strOrNull("cancelReason"),
+        if (d.has("invoices")) d.strs("invoices").map(Codec::id) else listOfNotNull(Codec.idOrNull(d.strOrNull("invoice"))),
     )
     override fun order(id: GlobalId) = doc("SELECT doc FROM purchase_orders WHERE id = ?", id.value)?.let(::orderOf)
     override fun orders() = docs("SELECT doc FROM purchase_orders ORDER BY number DESC").map(::orderOf)
@@ -228,6 +235,7 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
                 "location" to order.locationId.value, "date" to order.date.epochDay, "expected" to order.expectedDate.epochDay,
                 "lines" to order.lines.map { mapOf("item" to it.itemId.value, "qty" to it.quantity.micros, "price" to it.unitPrice.rial) },
                 "note" to order.note, "status" to order.status.name, "invoice" to order.invoiceId?.value, "cancelReason" to order.cancelReason,
+                "invoices" to order.invoiceIds.map { it.value },
             )),
         ),
     )
@@ -390,7 +398,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
 
     private fun collectionOf(d: Doc) = Collection(
         Codec.id(d.str("id")), Codec.id(d.str("receivable")), Codec.id(d.str("treasury")), Codec.money(d.long("amount")),
-        Codec.date(d.long("date")), d.bool("reversed"),
+        Codec.date(d.long("date")), d.bool("reversed"), Codec.idOrNull(d.strOrNull("deposit")), Codec.idOrNull(d.strOrNull("journal")),
     )
     override fun collection(id: GlobalId) = doc("SELECT doc FROM collections WHERE id = ?", id.value)?.let(::collectionOf)
     override fun collections(receivableId: GlobalId) =
@@ -403,6 +411,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
                 mapOf(
                     "id" to collection.id.value, "receivable" to collection.receivableId.value, "treasury" to collection.treasuryAccountId.value,
                     "amount" to collection.amount.rial, "date" to collection.date.epochDay, "reversed" to collection.reversed,
+                    "deposit" to collection.depositId?.value, "journal" to collection.journalId?.value,
                 ),
             ),
         ),
@@ -411,14 +420,16 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
     override fun day(scope: Scope.Branch, date: BusinessDate) =
         doc("SELECT doc FROM sales_days WHERE scope = ? AND date = ?", Codec.scope(scope), date.epochDay)?.let {
             SalesDay(Codec.branchOf(it.str("scope")), Codec.date(it.long("date")), it.bool("closed"), it.longOrNull("countedCash")?.let(Codec::money),
-                Codec.idOrNull(it.strOrNull("cashAccount")), it.longOr("difference", 0), Codec.idOrNull(it.strOrNull("count")))
+                Codec.idOrNull(it.strOrNull("cashAccount")), it.longOr("difference", 0), Codec.idOrNull(it.strOrNull("count")),
+                it.docsOr("terminals").associate { t -> Codec.id(t.str("account")) to t.long("difference") })
         }
     override fun saveDay(day: SalesDay) = upsert(
         "sales_days", listOf("scope", "date"),
         mapOf(
             "scope" to Codec.scope(day.scope), "date" to day.date.epochDay,
             "doc" to Json.encode(mapOf("scope" to Codec.scope(day.scope), "date" to day.date.epochDay, "closed" to day.closed, "countedCash" to day.countedCash?.rial,
-                "cashAccount" to day.cashAccountId?.value, "difference" to day.difference, "count" to day.countId?.value)),
+                "cashAccount" to day.cashAccountId?.value, "difference" to day.difference, "count" to day.countId?.value,
+                "terminals" to day.terminalDifferences.map { (a, d) -> mapOf("account" to a.value, "difference" to d) })),
         ),
     )
 }
@@ -884,4 +895,50 @@ class SqlSpecialDayStore(db: SqlDatabase) : SqlTable(db), ir.sabou.sales.Special
             Json.encode(mapOf("scope" to Codec.scope(day.scope), "date" to day.date.epochDay, "kind" to day.kind.name, "percent" to day.percent.toLong(), "note" to day.note)))
     }
     override fun remove(scope: Scope.Branch, date: BusinessDate) { db.execute("DELETE FROM special_days WHERE scope = ? AND date = ?", Codec.scope(scope), date.epochDay) }
+}
+
+/** Customers' deposits and shift cash counts (ADR-0045). */
+class SqlDepositStore(db: SqlDatabase) : SqlTable(db), ir.sabou.sales.DepositStore {
+    private fun depositOf(d: Doc) = ir.sabou.sales.CustomerDeposit(
+        Codec.id(d.str("id")), Codec.id(d.str("customer")), Codec.branchOf(d.str("scope")), Codec.id(d.str("treasury")), Codec.money(d.long("amount")),
+        Codec.date(d.long("date")), d.strOr("note", ""), d.bool("reversed"),
+    )
+    override fun deposit(id: GlobalId) = doc("SELECT doc FROM customer_deposits WHERE id = ?", id.value)?.let(::depositOf)
+    override fun depositsOf(customerId: GlobalId) = docs("SELECT doc FROM customer_deposits WHERE customer_id = ? ORDER BY rowid", customerId.value).map(::depositOf)
+    override fun saveDeposit(deposit: ir.sabou.sales.CustomerDeposit) = upsert(
+        "customer_deposits", "id",
+        mapOf("id" to deposit.id.value, "customer_id" to deposit.customerId.value, "scope" to Codec.scope(deposit.scope), "doc" to Json.encode(mapOf(
+            "id" to deposit.id.value, "customer" to deposit.customerId.value, "scope" to Codec.scope(deposit.scope), "treasury" to deposit.treasuryAccountId.value,
+            "amount" to deposit.amount.rial, "date" to deposit.date.epochDay, "note" to deposit.note, "reversed" to deposit.reversed,
+        ))),
+    )
+    override fun shiftCounts(scope: Scope.Branch, date: BusinessDate) =
+        docs("SELECT doc FROM shift_counts WHERE scope = ? AND date = ? ORDER BY rowid", Codec.scope(scope), date.epochDay).map { d ->
+            ir.sabou.sales.ShiftCount(Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.date(d.long("date")), Codec.id(d.str("account")),
+                Codec.money(d.long("counted")), d.long("difference"), d.strOr("by", ""), d.strOr("note", ""), d.long("at"))
+        }
+    override fun saveShiftCount(count: ir.sabou.sales.ShiftCount) = upsert(
+        "shift_counts", "id",
+        mapOf("id" to count.id.value, "scope" to Codec.scope(count.scope), "date" to count.date.epochDay, "doc" to Json.encode(mapOf(
+            "id" to count.id.value, "scope" to Codec.scope(count.scope), "date" to count.date.epochDay, "account" to count.cashAccountId.value,
+            "counted" to count.counted.rial, "difference" to count.difference, "by" to count.countedBy, "note" to count.note, "at" to count.atEpochMillis,
+        ))),
+    )
+}
+
+/** Advances paid to suppliers (ADR-0045). */
+class SqlSupplierAdvanceStore(db: SqlDatabase) : SqlTable(db), ir.sabou.purchasing.SupplierAdvanceStore {
+    private fun read(d: Doc) = ir.sabou.purchasing.SupplierAdvance(
+        Codec.id(d.str("id")), Codec.id(d.str("supplier")), Codec.branchOf(d.str("scope")), Codec.id(d.str("treasury")), Codec.money(d.long("amount")),
+        Codec.date(d.long("date")), d.strOr("note", ""), Codec.idOrNull(d.strOrNull("bridge")), d.bool("reversed"),
+    )
+    override fun byId(id: GlobalId) = doc("SELECT doc FROM supplier_advances WHERE id = ?", id.value)?.let(::read)
+    override fun of(supplierId: GlobalId) = docs("SELECT doc FROM supplier_advances WHERE supplier_id = ? ORDER BY rowid", supplierId.value).map(::read)
+    override fun save(advance: ir.sabou.purchasing.SupplierAdvance) = upsert(
+        "supplier_advances", "id",
+        mapOf("id" to advance.id.value, "supplier_id" to advance.supplierId.value, "scope" to Codec.scope(advance.scope), "doc" to Json.encode(mapOf(
+            "id" to advance.id.value, "supplier" to advance.supplierId.value, "scope" to Codec.scope(advance.scope), "treasury" to advance.treasuryAccountId.value,
+            "amount" to advance.amount.rial, "date" to advance.date.epochDay, "note" to advance.note, "bridge" to advance.bridgeJournalId?.value, "reversed" to advance.reversed,
+        ))),
+    )
 }
