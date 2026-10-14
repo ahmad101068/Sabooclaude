@@ -109,10 +109,13 @@ data class Receivable(
     val amount: Money,
     val dueDate: BusinessDate,
     val voided: Boolean,
-    /** Written off as uncollectible (bad debt), with its reason. */
-    val writtenOff: Money = Money.ZERO,
-    val writeOffReason: String = "",
-)
+    /** Parts written off as uncollectible (bad debt), each with its date and reason. */
+    val writeOffs: List<WriteOff> = emptyList(),
+) {
+    val writtenOff: Money get() = Money.sum(writeOffs.map { it.amount })
+}
+
+data class WriteOff(val date: BusinessDate, val amount: Money, val reason: String)
 
 data class Collection(
     val id: GlobalId,

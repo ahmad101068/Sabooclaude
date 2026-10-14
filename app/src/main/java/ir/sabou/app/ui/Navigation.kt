@@ -27,6 +27,12 @@ sealed interface Route : java.io.Serializable {
     data object TrialBalance : Route
     /** VAT and levies of sales: owed, paid (ADR-0045). */
     data object SalesTax : Route
+    data object Chart : Route
+    data object OpeningBalances : Route
+    data object BalanceSheet : Route
+    data object JournalBook : Route
+    data object Statements : Route
+    data object Aging : Route
     data object MonthClose : Route
     data object TaxSettings : Route
     data class AccountHistory(val accountId: GlobalId) : Route

@@ -69,9 +69,11 @@ data class RecordReceipt(
     val date: BusinessDate,
     val description: String,
     val cheque: ChequeDetails? = null,
+    /** Any open (non-control) account instead of [purpose]'s: a loan received, a deposit returned. */
+    val counterAccount: AccountCode? = null,
 ) : Command {
     override val requiredPermission = Permission.TREASURY_RECEIPT
-    override fun fingerprint() = "$scope|$accountId|$purpose|${amount.rial}|${date.epochDay}|$description|${cheque?.fingerprint()}"
+    override fun fingerprint() = "$scope|$accountId|$purpose|${amount.rial}|${date.epochDay}|$description|${cheque?.fingerprint()}|$counterAccount"
 }
 
 /** [cheque]: our new cheque (from a cheque book); [chequeId]: a customer's cheque passed on (from a cheque box). */
@@ -86,9 +88,11 @@ data class RecordPayment(
     val description: String,
     val cheque: ChequeDetails? = null,
     val chequeId: GlobalId? = null,
+    /** Any open (non-control) account instead of [purpose]'s: repairs, a loan instalment, the rent deposit. */
+    val counterAccount: AccountCode? = null,
 ) : Command {
     override val requiredPermission = Permission.TREASURY_PAYMENT
-    override fun fingerprint() = "$scope|$accountId|$purpose|${amount.rial}|${date.epochDay}|$description|${cheque?.fingerprint()}|$chequeId"
+    override fun fingerprint() = "$scope|$accountId|$purpose|${amount.rial}|${date.epochDay}|$description|${cheque?.fingerprint()}|$chequeId|$counterAccount"
 }
 
 /** Builds the cheque step of a payment: a new cheque of ours, or a held cheque passed on. */
@@ -192,7 +196,7 @@ class TreasuryOperations(
         ctx.number(DocumentSeries.RECEIPT, cmd.date, docId)
         gateway.settle(
             ctx, capability, cmd.accountId, Direction.RECEIPT, cmd.amount, cmd.date, RECEIPT, docId, cmd.description,
-            listOf(LineDraft(cmd.purpose.counterAccount, credit = cmd.amount, memo = cmd.purpose.name, by = capability)),
+            listOf(LineDraft(cmd.counterAccount?.let(gateway::openAccount) ?: cmd.purpose.counterAccount, credit = cmd.amount, memo = if (cmd.counterAccount == null) cmd.purpose.name else cmd.description.trim(), by = capability)),
             cmd.cheque?.let { ChequeInstruction.New(it) },
         )
         docId
@@ -204,7 +208,7 @@ class TreasuryOperations(
         ctx.number(DocumentSeries.PAYMENT, cmd.date, docId)
         gateway.settle(
             ctx, capability, cmd.accountId, Direction.PAYMENT, cmd.amount, cmd.date, PAYMENT, docId, cmd.description,
-            listOf(LineDraft(cmd.purpose.counterAccount, debit = cmd.amount, memo = cmd.purpose.name, by = capability)),
+            listOf(LineDraft(cmd.counterAccount?.let(gateway::openAccount) ?: cmd.purpose.counterAccount, debit = cmd.amount, memo = if (cmd.counterAccount == null) cmd.purpose.name else cmd.description.trim(), by = capability)),
             paymentCheque(cmd.cheque, cmd.chequeId),
         )
         docId

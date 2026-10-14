@@ -26,3 +26,18 @@ could never be reversed. (A reversed invoice already freed its number: the uniqu
   (CREDIT_OVERRIDE) books bad debt (new 6112) against the receivable; a sale with a write-off is not reversed.
 - **Edits** — `UpdateTreasuryAccount` (rename, close when empty and no open cheque, reopen); `renameBranch`.
 - **Purchase reversal** reverses assigned review lines too (goods back out, or the expense journal reversed).
+
+## Decision — stage 2 (accounting)
+- **Own accounts** — `DefineAccount` / `UpdateAccount` (new ACCOUNT_MANAGE: owner, manager, accountant): four-digit
+  codes, the first digit giving the kind; never control accounts; retired only at zero balance. New standard accounts:
+  prepaid expenses 1402, supplier advances 1403 (purchasing), deposits 1601, customer advances 2109 (sales), asset
+  purchase payable 2110, loans 2201, and expenses 6113–6117 (repairs, packaging, marketing, delivery, finance costs).
+- **Treasury** receipts and payments take any open account (`counterAccount`) besides the fixed purposes; purchase
+  expense lines already took any open expense account, so the restaurant's own expenses work everywhere.
+- **Opening balances** — `RecordSupplierOpeningBalance` (a payable against capital, paid like an invoice, approval
+  rules apply) and `RecordCustomerOpeningBalance` / `ReverseCustomerOpeningBalance` (a receivable against capital).
+- **Reports** (`ledgerReads`) — six-column trial balance of a period; balance sheet on a date; journal book; supplier and
+  customer statements with running balance; receivables and payables aging (not due, 1–30, 31–60, 61–90, 90+); all
+  exportable. Write-offs are kept with their dates for the statements.
+- **Year end** — no closing entries: the balance sheet shows earlier years' and this year's result computed from the
+  books (Farvardin 1 of the date's year), and the year is locked by closing its months. P&L of any period stays true.

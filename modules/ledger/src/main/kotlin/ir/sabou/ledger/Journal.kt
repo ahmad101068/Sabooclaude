@@ -91,6 +91,13 @@ interface JournalStore {
     fun dailyTotals(from: BusinessDate, to: BusinessDate): List<DailyAccountTotal>
     /** Entries with at least one line on [account] in [from]..[to] (and [scope], when given), oldest first. */
     fun entriesTouching(account: AccountCode, scope: Scope?, from: BusinessDate, to: BusinessDate): List<JournalEntry>
+    /** Every entry dated [from]..[to] (in [scope], when given), by date and number: the journal book. */
+    fun entriesBetween(from: BusinessDate, to: BusinessDate, scope: Scope?): List<JournalEntry> =
+        all().filter { it.date >= from && it.date <= to && (scope == null || it.scope == scope) }.sortedWith(compareBy({ it.date }, { it.number }))
+    /** Debit-minus-credit of every account and scope up to [upTo] (all, when null), in one pass. */
+    fun balancesUpTo(upTo: BusinessDate?): List<Triple<AccountCode, Scope, Long>> =
+        all().filter { upTo == null || it.date <= upTo }.flatMap { e -> e.lines.map { Triple(it.account, e.scope, it.debit.rial - it.credit.rial) } }
+            .groupBy { it.first to it.second }.map { (k, v) -> Triple(k.first, k.second, v.sumOf { it.third }) }
 }
 
 interface PeriodStore {

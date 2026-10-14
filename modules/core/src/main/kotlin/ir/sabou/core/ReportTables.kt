@@ -107,6 +107,66 @@ object ReportTables {
         notes = listOf(RIAL),
     )
 
+    /** Six-column trial balance of a period (ADR-0045). */
+    fun trialBalance(rows: List<TrialRow>, from: BusinessDate, to: BusinessDate, place: String): ReportTable {
+        fun d(v: Long) = Cell.Amount(maxOf(v, 0L))
+        fun c(v: Long) = Cell.Amount(maxOf(-v, 0L))
+        return ReportTable(
+            "تراز آزمایشی", "$place · ${period(from, to)}",
+            listOf("کد", "حساب", "مانده‌ی اول بدهکار", "مانده‌ی اول بستانکار", "گردش بدهکار", "گردش بستانکار", "مانده بدهکار", "مانده بستانکار"),
+            rows.map { listOf(Cell.of(it.account.code.value), Cell.of(it.account.name), d(it.opening), c(it.opening), Cell.Amount(it.debit), Cell.Amount(it.credit), d(it.closing), c(it.closing)) },
+            footer = listOf(Cell.EMPTY, Cell.of("جمع"), Cell.Amount(rows.sumOf { maxOf(it.opening, 0) }), Cell.Amount(rows.sumOf { maxOf(-it.opening, 0) }),
+                Cell.Amount(rows.sumOf { it.debit }), Cell.Amount(rows.sumOf { it.credit }), Cell.Amount(rows.sumOf { maxOf(it.closing, 0) }), Cell.Amount(rows.sumOf { maxOf(-it.closing, 0) })),
+            notes = listOf(RIAL),
+        )
+    }
+
+    fun balanceSheet(b: BalanceSheet, place: String): ReportTable {
+        val rows = buildList {
+            add(listOf(Cell.of("دارایی‌ها"), Cell.EMPTY))
+            b.assets.forEach { add(listOf(Cell.of(it.account.name), Cell.Amount(it.amount))) }
+            add(listOf(Cell.of("جمع دارایی‌ها"), Cell.Amount(b.totalAssets)))
+            add(listOf(Cell.of("بدهی‌ها"), Cell.EMPTY))
+            b.liabilities.forEach { add(listOf(Cell.of(it.account.name), Cell.Amount(it.amount))) }
+            add(listOf(Cell.of("جمع بدهی‌ها"), Cell.Amount(b.totalLiabilities)))
+            add(listOf(Cell.of("حقوق مالکانه"), Cell.EMPTY))
+            b.equity.forEach { add(listOf(Cell.of(it.account.name), Cell.Amount(it.amount))) }
+            add(listOf(Cell.of("سود (زیان) سال‌های قبل"), Cell.Amount(b.earlierProfit)))
+            add(listOf(Cell.of("سود (زیان) سال جاری"), Cell.Amount(b.yearProfit)))
+            add(listOf(Cell.of("جمع حقوق مالکانه"), Cell.Amount(b.totalEquity)))
+        }
+        return ReportTable("ترازنامه", "$place · ${Fa.date(b.asOf)}", listOf("شرح", "مبلغ"), rows,
+            footer = listOf(Cell.of("جمع بدهی‌ها و حقوق مالکانه"), Cell.Amount(b.totalLiabilities + b.totalEquity)), notes = listOf(RIAL))
+    }
+
+    fun journalBook(entries: List<JournalView>, accounts: Map<ir.sabou.ledger.AccountCode, String>, from: BusinessDate, to: BusinessDate, place: String) = ReportTable(
+        "دفتر روزنامه", "$place · ${period(from, to)}", listOf("شماره", "تاریخ", "شرح سند", "حساب", "شرح ردیف", "بدهکار", "بستانکار"),
+        entries.flatMap { v -> v.entry.lines.map { l ->
+            listOf(Cell.of(v.number ?: v.entry.number.toString()), Cell.of(Fa.date(v.entry.date)), Cell.of(v.entry.description),
+                Cell.of("${l.account.value} ${accounts[l.account].orEmpty()}"), Cell.of(l.memo), Cell.Amount(l.debit.rial), Cell.Amount(l.credit.rial))
+        } },
+        footer = listOf(Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.of("جمع"),
+            Cell.Amount(entries.sumOf { e -> e.entry.lines.sumOf { it.debit.rial } }), Cell.Amount(entries.sumOf { e -> e.entry.lines.sumOf { it.credit.rial } })),
+        notes = listOf(RIAL),
+    )
+
+    fun statement(s: Statement, supplier: Boolean) = ReportTable(
+        if (supplier) "صورت‌حساب تأمین‌کننده" else "صورت‌حساب مشتری", "${s.party} · ${period(s.from, s.to)}",
+        listOf("تاریخ", "شرح", "شماره", "بدهکار", "بستانکار", "مانده"),
+        listOf(listOf(Cell.of(Fa.date(s.from)), Cell.of("مانده‌ی ابتدای دوره"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(s.opening))) +
+            s.rows.map { listOf(Cell.of(Fa.date(it.date)), Cell.of(it.title), Cell.of(it.number?.let(Fa::digits) ?: ""), Cell.Amount(it.debit), Cell.Amount(it.credit), Cell.Amount(it.balance)) },
+        footer = listOf(Cell.EMPTY, Cell.of("مانده‌ی پایان دوره"), Cell.EMPTY, Cell.Amount(s.rows.sumOf { it.debit }), Cell.Amount(s.rows.sumOf { it.credit }), Cell.Amount(s.closing)),
+        notes = listOf(RIAL, if (supplier) "مانده = بدهی ما به تأمین‌کننده." else "مانده = بدهی مشتری به ما."),
+    )
+
+    fun aging(rows: List<AgingRow>, asOf: BusinessDate, receivables: Boolean) = ReportTable(
+        if (receivables) "سنی مطالبات" else "سنی بدهی به تأمین‌کنندگان", Fa.date(asOf),
+        listOf(if (receivables) "مشتری" else "تأمین‌کننده", "سررسید نشده", "۱ تا ۳۰ روز", "۳۱ تا ۶۰ روز", "۶۱ تا ۹۰ روز", "بیش از ۹۰ روز", "جمع"),
+        rows.map { r -> listOf(Cell.of(r.party)) + r.buckets.map { Cell.Amount(it) } + Cell.Amount(r.total) },
+        footer = listOf(Cell.of("جمع")) + (0 until 5).map { i -> Cell.Amount(rows.sumOf { it.buckets[i] }) } + Cell.Amount(rows.sumOf { it.total }),
+        notes = listOf(RIAL, "روزهای گذشته از سررسید."),
+    )
+
     fun stock(location: String, rows: List<Pair<ir.sabou.inventory.Item, ir.sabou.inventory.StockBalance>>, asOf: BusinessDate) = ReportTable(
         "موجودی انبار", "$location · ${Fa.date(asOf)}", listOf("کالا", "محل", "واحد", "مقدار", "ارزش", "میانگین بها"),
         rows.sortedWith(compareBy({ it.first.shelf }, { it.first.name })).map { (item, b) ->

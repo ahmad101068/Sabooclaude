@@ -256,6 +256,24 @@ data class ReverseSupplierRefund(
     override fun fingerprint() = "$scope|$refundId|${date.epochDay}|$reason"
 }
 
+/**
+ * What the restaurant owed a supplier when it started with these books: a payable against capital, paid later like
+ * any invoice. [reference] stands for the invoice number (e.g. «مانده ۱۴۰۵/۰۱/۰۱»).
+ */
+@IssuesDocument(DocumentSeries.PURCHASE_INVOICE)
+data class RecordSupplierOpeningBalance(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val supplierId: GlobalId,
+    val reference: String,
+    val amount: Money,
+    val date: BusinessDate,
+    val dueDate: BusinessDate,
+) : Command {
+    override val requiredPermission = Permission.JOURNAL_MANUAL_POST
+    override fun fingerprint() = "$scope|$supplierId|$reference|${amount.rial}|${date.epochDay}|${dueDate.epochDay}"
+}
+
 class PurchasingOperations(
     private val bus: CommandBus,
     private val ledger: Ledger,
@@ -386,6 +404,27 @@ class PurchasingOperations(
         ctx.emit("PurchaseInvoicePosted", mapOf("invoiceId" to invoice.id.value, "total" to total.rial.toString()))
         cmd.payNow?.let { pay(ctx, invoice, it.treasuryAccountId, it.amount, cmd.date, paymentCheque(it.cheque, it.chequeId)) }
         invoice.id
+    }
+
+    fun openingBalance(c: RecordSupplierOpeningBalance): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
+        val supplier = suppliers.byId(cmd.supplierId) ?: throw DomainException(DomainError.NotFound("SUPPLIER"))
+        val number = normalize(cmd.reference)
+        ensure(number.isNotEmpty() && number.length <= 40) { DomainError.InvalidInput("reference", "شرح یا شماره‌ی مانده را بنویسید.") }
+        ensure(purchases.invoiceByNumber(supplier.id, number) == null) { DomainError.InvalidState("PURCHASE_INVOICE", "DUPLICATE_NUMBER") }
+        ensure(!cmd.amount.isZero) { DomainError.InvalidInput("amount", "مبلغ باید بیشتر از صفر باشد.") }
+        ensure(cmd.dueDate >= cmd.date) { DomainError.InvalidInput("dueDate", "سررسید نمی‌تواند قبل از تاریخ باشد.") }
+        val invoiceId = GlobalId.new()
+        ctx.number(DocumentSeries.PURCHASE_INVOICE, cmd.date, invoiceId)
+        val journal = ledger.post(ctx, capability, JournalDraft(cmd.date, cmd.scope, OPENING, invoiceId, "مانده‌ی اول دوره‌ی ${supplier.name}", listOf(
+            LineDraft(StandardAccounts.CAPITAL, debit = cmd.amount, memo = "مانده‌ی اول دوره", by = capability),
+            LineDraft(StandardAccounts.PAYABLE, credit = cmd.amount, memo = supplier.name, by = capability),
+        )))
+        val invoice = PurchaseInvoice(invoiceId, supplier.id, number, cmd.scope, null, cmd.date, cmd.dueDate, emptyList(), cmd.amount, InvoiceStatus.POSTED,
+            note = "مانده‌ی اول دوره", journalIds = listOf(journal.id), recordedBy = ctx.actor.userId, opening = true)
+            .let { inv -> inv.copy(requiredApprovals = approvalRules.all().filter { it.matches(inv.scope, inv.supplierId, inv.category, inv.total) }.maxOfOrNull { it.steps } ?: 0) }
+        purchases.saveInvoice(invoice)
+        ctx.audit(AuditDraft("SUPPLIER_OPENING_BALANCE", "PURCHASE_INVOICE", invoiceId.value, "supplier=${supplier.id};amount=${cmd.amount.rial}"))
+        invoiceId
     }
 
     fun attach(c: AttachToInvoice): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
@@ -689,6 +728,7 @@ class PurchasingOperations(
         const val PAYMENT = "SUPPLIER_PAYMENT"
         const val RETURN = "PURCHASE_RETURN"
         const val REVIEW = "PURCHASE_REVIEW"
+        const val OPENING = "PURCHASE_OPENING_BALANCE"
         const val REFUND = "SUPPLIER_REFUND"
     }
 }
