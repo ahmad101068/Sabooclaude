@@ -557,6 +557,8 @@ private fun Pages(route: Route, nav: Nav) {
         is Route.Employee -> EmployeeScreens.Detail(nav, route.employeeId)
         is Route.StockCard -> InventoryScreens.StockCard(nav, route.itemId, route.locationId)
         Route.StockDocuments -> InventoryScreens.Documents(nav)
+        Route.StockTransits -> InventoryScreens.Transits(nav)
+        Route.StockRequests -> InventoryScreens.Requests(nav)
         Route.PayrollSettings -> EmployeeScreens.Settings(nav)
         Route.PayElements -> EmployeeScreens.Elements(nav)
         is Route.MeGroup -> MeScreens.GroupPage(nav, route.group)

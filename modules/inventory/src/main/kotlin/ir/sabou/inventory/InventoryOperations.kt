@@ -201,9 +201,14 @@ data class TransferStock(
     val lines: List<IssueLine>,
     val date: BusinessDate,
     val note: String,
+    /**
+     * To another branch: the goods leave now and enter there only when its people confirm what arrived
+     * ([ReceiveTransfer]); otherwise both ends move at once. Ignored inside one branch.
+     */
+    val inTransit: Boolean = false,
 ) : Command {
     override val requiredPermission = Permission.INVENTORY_TRANSFER
-    override fun fingerprint() = "$scope|$fromLocationId|$toLocationId|${date.epochDay}|$note|" + lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}" }
+    override fun fingerprint() = "$scope|$fromLocationId|$toLocationId|${date.epochDay}|$note|$inTransit|" + lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}" }
 }
 
 @NoDocument
@@ -259,6 +264,8 @@ class InventoryOperations(
     /** Pending stock counts at a location (block retiring it). */
     private val pendingCountAt: (GlobalId) -> Boolean = { false },
     private val documents: InventoryDocumentStore = ir.sabou.inventory.memory.InMemoryInventoryDocumentStore(),
+    private val transits: TransitStore = ir.sabou.inventory.memory.InMemoryTransitStore(),
+    private val requests: StockRequestStore = ir.sabou.inventory.memory.InMemoryStockRequestStore(),
 ) {
     private val cap get() = gateway.ownCapability
 
@@ -360,7 +367,11 @@ class InventoryOperations(
         val first = stock?.movementsBySource(cmd.sourceType, cmd.documentId)?.firstOrNull { it.reversalOf == null } ?: throw DomainException(DomainError.NotFound("STOCK_MOVEMENT"))
         val from = locations.byId(first.locationId) ?: throw DomainException(DomainError.NotFound("LOCATION"))
         ensure(from.scope == cmd.scope) { DomainError.InvalidInput("scope", "این سند متعلق به این شعبه نیست.") }
+        // Goods the other branch already counted in are no longer the sender's to take back.
+        val transit = if (cmd.sourceType == TRANSFER) transits.byId(cmd.documentId) else null
+        ensure(transit == null || transit.status == StockTransit.Status.IN_TRANSIT) { DomainError.InvalidState("TRANSFER", "ALREADY_RECEIVED") }
         gateway.reverseDocument(ctx, cap, cmd.sourceType, cmd.documentId, cmd.date, reason)
+        transit?.let { transits.save(it.copy(status = StockTransit.Status.CANCELLED)) }
         documents.byId(cmd.documentId)?.let { documents.save(it.copy(reversedReason = reason)) }
         ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = series to cmd.documentId)
         ctx.audit(AuditDraft("INVENTORY_REVERSE", cmd.sourceType, cmd.documentId.value, reason))
@@ -475,36 +486,146 @@ class InventoryOperations(
      * branch's books are balanced through the inter-branch account (AUD-011).
      */
     fun transfer(c: TransferStock): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
-        ensure(cmd.fromLocationId != cmd.toLocationId) { DomainError.InvalidInput("location", "مبدأ و مقصد یکسان است.") }
         val from = requireLocationScope(cmd.fromLocationId, cmd.scope)
-        val to = gateway.location(cmd.toLocationId)
-        ctx.requireScope(to.scope)
-        val merged = cmd.lines.groupBy { it.itemId }.map { (id, rows) -> IssueLine(id, rows.fold(Quantity.ZERO) { a, r -> a + r.quantity }) }
+        moveStock(ctx, from, cmd.toLocationId, cmd.lines, cmd.date, cmd.note, cmd.inTransit)
+    }
+
+    private fun moveStock(ctx: ir.sabou.platform.CommandContext, from: Location, toLocationId: GlobalId, lines: List<IssueLine>, date: BusinessDate, note: String, inTransit: Boolean): GlobalId {
+        ensure(from.id != toLocationId) { DomainError.InvalidInput("location", "مبدأ و مقصد یکسان است.") }
+        ensure(note.length <= 200) { DomainError.InvalidInput("note", "توضیح طولانی است.") }
+        val to = gateway.location(toLocationId)
+        ensure(to.isActive) { DomainError.InvalidState("LOCATION", "INACTIVE") }
+        val transit = inTransit && from.scope != to.scope
+        // Sent in transit, the receiving branch's books are touched only by its own people on receipt.
+        if (!transit) ctx.requireScope(to.scope)
+        val merged = lines.groupBy { it.itemId }.map { (id, rows) -> IssueLine(id, rows.fold(Quantity.ZERO) { a, r -> a + r.quantity }) }
         ensure(merged.isNotEmpty() && merged.none { it.quantity.isZero }) { DomainError.InvalidInput("lines", "مقدار انتقال باید بیشتر از صفر باشد.") }
         val priced = merged.map { gateway.item(it.itemId); IssuedCost(it.itemId, it.quantity, gateway.valueOf(gateway.balance(it.itemId, from.id), it.quantity)) }
         val total = Money.sum(priced.map { it.cost })
         val docId = GlobalId.new()
-        ctx.number(DocumentSeries.STOCK_TRANSFER, cmd.date, docId)
+        ctx.number(DocumentSeries.STOCK_TRANSFER, date, docId)
         val source = SourceDocument(ModuleId.INVENTORY, TRANSFER, docId)
-        documents.save(InventoryDocument(docId, TRANSFER, cmd.scope, cmd.date, note = cmd.note.trim()))
+        documents.save(InventoryDocument(docId, TRANSFER, from.scope, date, note = note.trim()))
         var outJournal: GlobalId? = null
         var inJournal: GlobalId? = null
         if (from.scope != to.scope && !total.isZero) {
-            outJournal = gateway.postOwn(ctx, JournalDraft(cmd.date, from.scope, TRANSFER, docId, "انتقال کالا به ${to.name}", listOf(
+            outJournal = gateway.postOwn(ctx, JournalDraft(date, from.scope, TRANSFER, docId, "انتقال کالا به ${to.name}", listOf(
                 LineDraft(StandardAccounts.INTER_BRANCH, debit = total, memo = to.name, by = cap),
                 LineDraft(StandardAccounts.INVENTORY, credit = total, memo = from.name, by = cap),
             ))).id
-            inJournal = gateway.postOwn(ctx, JournalDraft(cmd.date, to.scope, TRANSFER, docId, "دریافت کالا از ${from.name}", listOf(
+            if (!transit) inJournal = gateway.postOwn(ctx, JournalDraft(date, to.scope, TRANSFER, docId, "دریافت کالا از ${from.name}", listOf(
                 LineDraft(StandardAccounts.INVENTORY, debit = total, memo = to.name, by = cap),
                 LineDraft(StandardAccounts.INTER_BRANCH, credit = total, memo = from.name, by = cap),
             ))).id
         }
-        priced.forEach {
-            val carried = gateway.stockOut(ctx, it.itemId, from, it.quantity, it.cost, MovementKind.TRANSFER_OUT, cmd.date, outJournal, source, null)
-            gateway.stockIn(ctx, it.itemId, to, it.quantity, it.cost, MovementKind.TRANSFER_IN, cmd.date, inJournal, source, null, carried)
+        val sent = priced.map {
+            val carried = gateway.stockOut(ctx, it.itemId, from, it.quantity, it.cost, MovementKind.TRANSFER_OUT, date, outJournal, source, null)
+            if (!transit) gateway.stockIn(ctx, it.itemId, to, it.quantity, it.cost, MovementKind.TRANSFER_IN, date, inJournal, source, null, carried)
+            TransitLine(it.itemId, it.quantity, it.cost, carried)
         }
-        priced.forEach { gateway.settleShortages(ctx, gateway.ownCapability, to, it.itemId, cmd.date) }
+        if (transit) {
+            transits.save(StockTransit(docId, from.scope, from.id, to.scope, to.id, date, sent))
+            ctx.audit(AuditDraft("TRANSFER_SENT", TRANSFER, docId.value, "to=${to.id};lines=${sent.size};value=${total.rial}"))
+        } else {
+            priced.forEach { gateway.settleShortages(ctx, gateway.ownCapability, to, it.itemId, date) }
+        }
+        return docId
+    }
+
+    /**
+     * The receiving branch counts in a transfer sent in transit: what arrived enters at the sender's cost (in proportion),
+     * and the value of what did not arrive is this branch's inventory variance (both against the inter-branch account,
+     * which the sender already debited with the whole value).
+     */
+    fun receiveTransfer(c: ReceiveTransfer): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val t = transits.byId(cmd.transferId) ?: throw DomainException(DomainError.NotFound("TRANSFER"))
+        ensure(t.toScope == cmd.scope) { DomainError.InvalidInput("scope", "این انتقال برای این شعبه نیست.") }
+        ensure(t.status == StockTransit.Status.IN_TRANSIT) { DomainError.InvalidState("TRANSFER", if (t.status == StockTransit.Status.RECEIVED) "ALREADY_RECEIVED" else "CANCELLED") }
+        ensure(cmd.date >= t.date) { DomainError.InvalidInput("date", "تاریخ دریافت نمی‌تواند پیش از ارسال باشد.") }
+        ensure(cmd.note.length <= 200) { DomainError.InvalidInput("note", "توضیح طولانی است.") }
+        val sentItems = t.lines.map { it.itemId }.toSet()
+        ensure(cmd.received.all { it.itemId in sentItems } && cmd.received.map { it.itemId }.distinct().size == cmd.received.size) { DomainError.InvalidInput("received", "کالای دریافتی در این انتقال نیست.") }
+        val counted = cmd.received.associate { it.itemId to it.quantity }
+        val to = gateway.location(t.toLocationId)
+        val from = gateway.location(t.fromLocationId)
+        val lines = t.lines.map { l ->
+            val got = counted[l.itemId] ?: l.quantity
+            ensure(got.micros >= 0 && got <= l.quantity) { DomainError.InvalidInput("received", "مقدار دریافتی بیشتر از ارسالی است.") }
+            l.copy(received = got)
+        }
+        val value = lines.map { l -> if (l.received == l.quantity) l.value else Money.of(ir.sabou.kernel.Ratio.mulDiv(l.value.rial, l.received!!.micros, l.quantity.micros)) }
+        val inValue = Money.sum(value)
+        val missing = Money.sum(lines.map { it.value }) - inValue
+        val receiptId = GlobalId.new()
+        ctx.number(DocumentSeries.STOCK_TRANSFER, cmd.date, receiptId)
+        val source = SourceDocument(ModuleId.INVENTORY, TRANSFER_RECEIPT, receiptId)
+        val journal = if (inValue.isZero && missing.isZero) null else gateway.postOwn(ctx, JournalDraft(cmd.date, to.scope, TRANSFER_RECEIPT, receiptId, "دریافت کالا از ${from.name}", listOfNotNull(
+            LineDraft(StandardAccounts.INVENTORY, debit = inValue, memo = to.name, by = cap).takeIf { !inValue.isZero },
+            LineDraft(StandardAccounts.INVENTORY_VARIANCE, debit = missing, memo = "کسری در راه", by = cap).takeIf { !missing.isZero },
+            LineDraft(StandardAccounts.INTER_BRANCH, credit = inValue + missing, memo = from.name, by = cap),
+        ))).id
+        lines.zip(value).filter { !it.first.received!!.isZero }.forEach { (l, v) ->
+            gateway.stockIn(ctx, l.itemId, to, l.received!!, v, MovementKind.TRANSFER_IN, cmd.date, journal, source, null, firstParts(l.lots, l.received))
+            gateway.settleShortages(ctx, gateway.ownCapability, to, l.itemId, cmd.date)
+        }
+        documents.save(InventoryDocument(receiptId, TRANSFER_RECEIPT, cmd.scope, cmd.date, note = cmd.note.trim()))
+        transits.save(t.copy(lines = lines, status = StockTransit.Status.RECEIVED, receivedOn = cmd.date, receivedBy = ctx.actor.displayName, receiptId = receiptId))
+        ctx.audit(AuditDraft("TRANSFER_RECEIVE", TRANSFER, t.id.value, "receipt=$receiptId;value=${inValue.rial};missing=${missing.rial}"))
+        receiptId
+    }
+
+    /** The earliest-expiring parts of [lots] adding up to at most [quantity]. */
+    private fun firstParts(lots: List<LotPart>, quantity: Quantity): List<LotPart> {
+        var left = quantity
+        return lots.sortedBy { it.expiresOn }.mapNotNull { p ->
+            val take = if (p.quantity < left) p.quantity else left
+            left -= take
+            if (take.isZero) null else LotPart(p.expiresOn, take)
+        }
+    }
+
+    fun requestStock(c: RequestStock): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val to = requireLocationScope(cmd.toLocationId, cmd.scope)
+        val from = gateway.location(cmd.fromLocationId)
+        ensure(from.id != to.id) { DomainError.InvalidInput("location", "مبدأ و مقصد یکسان است.") }
+        ensure(from.isActive && to.isActive) { DomainError.InvalidState("LOCATION", "INACTIVE") }
+        ensure(cmd.note.length <= 200) { DomainError.InvalidInput("note", "توضیح طولانی است.") }
+        val merged = cmd.lines.groupBy { it.itemId }.map { (id, rows) -> IssueLine(id, rows.fold(Quantity.ZERO) { a, r -> a + r.quantity }) }
+        ensure(merged.isNotEmpty() && merged.none { it.quantity.isZero }) { DomainError.InvalidInput("lines", "مقدار درخواست باید بیشتر از صفر باشد.") }
+        merged.forEach { gateway.item(it.itemId) }
+        val request = StockRequest(GlobalId.new(), cmd.scope, from.scope, from.id, to.id, merged, cmd.note.trim(), cmd.date, ctx.actor.displayName, ctx.actor.userId)
+        requests.save(request)
+        ctx.audit(AuditDraft("STOCK_REQUEST", "STOCK_REQUEST", request.id.value, "from=${from.id};to=${to.id};lines=${merged.size}"))
+        request.id
+    }
+
+    fun fulfilRequest(c: FulfilStockRequest): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val r = requests.byId(cmd.requestId) ?: throw DomainException(DomainError.NotFound("STOCK_REQUEST"))
+        ensure(r.fromScope == cmd.scope) { DomainError.InvalidInput("scope", "این درخواست از انبار این شعبه نیست.") }
+        ensure(r.status == StockRequest.Status.OPEN) { DomainError.InvalidState("STOCK_REQUEST", "NOT_OPEN") }
+        val from = requireLocationScope(r.fromLocationId, cmd.scope)
+        val docId = moveStock(ctx, from, r.toLocationId, cmd.lines, cmd.date, "درخواست ${r.requestedBy}" + if (r.note.isEmpty()) "" else ": ${r.note}", inTransit = true)
+        requests.save(r.copy(status = StockRequest.Status.SENT, handledBy = ctx.actor.displayName, transferId = docId))
+        ctx.audit(AuditDraft("STOCK_REQUEST_SEND", "STOCK_REQUEST", r.id.value, "transfer=$docId"))
         docId
+    }
+
+    fun closeRequest(c: CloseStockRequest): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val r = requests.byId(cmd.requestId) ?: throw DomainException(DomainError.NotFound("STOCK_REQUEST"))
+        ensure(r.status == StockRequest.Status.OPEN) { DomainError.InvalidState("STOCK_REQUEST", "NOT_OPEN") }
+        val reason = cmd.reason.trim()
+        ensure(reason.length <= 200) { DomainError.InvalidInput("reason", "توضیح طولانی است.") }
+        if (cmd.cancel) {
+            ensure(r.scope == cmd.scope) { DomainError.InvalidInput("scope", "این درخواست از این شعبه نیست.") }
+            ensure(r.requesterId == ctx.actor.userId || ctx.actor.role.allows(Permission.INVENTORY_TRANSFER)) { DomainError.PermissionDenied(Permission.INVENTORY_TRANSFER.name) }
+        } else {
+            ensure(r.fromScope == cmd.scope) { DomainError.InvalidInput("scope", "این درخواست از انبار این شعبه نیست.") }
+            ensure(ctx.actor.role.allows(Permission.INVENTORY_TRANSFER)) { DomainError.PermissionDenied(Permission.INVENTORY_TRANSFER.name) }
+            ensure(reason.length >= 3) { DomainError.InvalidInput("reason", "دلیل رد را بنویسید.") }
+        }
+        requests.save(r.copy(status = if (cmd.cancel) StockRequest.Status.CANCELLED else StockRequest.Status.REJECTED, handledBy = ctx.actor.displayName, rejectReason = reason))
+        ctx.audit(AuditDraft(if (cmd.cancel) "STOCK_REQUEST_CANCEL" else "STOCK_REQUEST_REJECT", "STOCK_REQUEST", r.id.value, reason))
+        r.id
     }
 
     fun defineMenuItem(c: DefineMenuItem): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
@@ -559,6 +680,8 @@ class InventoryOperations(
         const val COMP = "INVENTORY_COMP"
         const val COUNT = "INVENTORY_COUNT"
         const val TRANSFER = "INVENTORY_TRANSFER"
+        /** The receiving branch's side of a transfer sent in transit. */
+        const val TRANSFER_RECEIPT = "INVENTORY_TRANSFER_RECEIPT"
         const val PRODUCTION = "INVENTORY_PRODUCTION"
     }
 }

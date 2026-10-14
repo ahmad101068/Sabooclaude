@@ -127,3 +127,15 @@ class InMemoryInventoryDocumentStore : Table<GlobalId, ir.sabou.inventory.Invent
         values().filter { it.scope == scope && it.date >= from && it.date <= to }
     override fun save(document: ir.sabou.inventory.InventoryDocument) = put(document.id, document)
 }
+
+class InMemoryTransitStore : Table<GlobalId, ir.sabou.inventory.StockTransit>(), ir.sabou.inventory.TransitStore {
+    override fun byId(id: GlobalId) = get(id)
+    override fun of(scope: ir.sabou.kernel.Scope.Branch) = values().filter { it.toScope == scope || it.fromScope == scope }
+    override fun save(transit: ir.sabou.inventory.StockTransit) = put(transit.id, transit)
+}
+
+class InMemoryStockRequestStore : Table<GlobalId, ir.sabou.inventory.StockRequest>(), ir.sabou.inventory.StockRequestStore {
+    override fun byId(id: GlobalId) = get(id)
+    override fun of(scope: ir.sabou.kernel.Scope.Branch) = values().filter { it.scope == scope || it.fromScope == scope }
+    override fun save(request: ir.sabou.inventory.StockRequest) = put(request.id, request)
+}

@@ -5,6 +5,8 @@ import ir.sabou.inventory.InventoryOperations
 import ir.sabou.inventory.Item
 import ir.sabou.inventory.MovementKind
 import ir.sabou.inventory.StockMovement
+import ir.sabou.inventory.StockRequest
+import ir.sabou.inventory.StockTransit
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -27,6 +29,18 @@ data class InventoryDocView(
 ) {
     val value: Long get() = lines.filter { it.quantity < 0 }.sumOf { -it.value }.takeIf { it > 0 } ?: lines.sumOf { it.value }
 }
+
+/** A transfer between branches; [incoming] when [branch] is the receiving one. */
+data class TransitView(val transit: StockTransit, val number: String?, val from: String, val to: String, val incoming: Boolean, val lines: List<TransitItem>) {
+    val value: Long get() = transit.lines.sumOf { it.value.rial }
+}
+
+data class TransitItem(val item: Item?, val line: ir.sabou.inventory.TransitLine)
+
+/** A request for goods; [toSend] when [branch] holds the storeroom asked; [onHand] what that storeroom has of each item. */
+data class RequestView(val request: StockRequest, val from: String, val to: String, val toSend: Boolean, val lines: List<RequestItem>, val transferNumber: String?)
+
+data class RequestItem(val itemId: GlobalId, val item: Item?, val quantity: Quantity, val onHand: Quantity)
 
 /** One movement on an item's stock card, with the balance after it. */
 data class CardRow(
@@ -73,6 +87,38 @@ class StockRecords internal constructor(private val core: SabouCore) {
         }
     }
 
+    /**
+     * Every active storeroom and kitchen of every branch, to send goods to or ask them from (a branch the person cannot
+     * open is reached only in transit or by a request, which its own people confirm).
+     */
+    fun allLocations(): List<ir.sabou.inventory.Location> {
+        actor(Permission.INVENTORY_VIEW, Permission.INVENTORY_TRANSFER)
+        return core.locations.all().filter { it.isActive }
+    }
+
+    /** Transfers between branches to or from [branch]: those on the way first, then the rest, newest first. */
+    fun transits(branch: Scope.Branch): List<TransitView> {
+        actor(Permission.INVENTORY_VIEW, Permission.INVENTORY_TRANSFER).require(branch)
+        val items = core.items.all().associateBy { it.id }
+        val places = core.locations.all().associateBy { it.id }
+        return core.transits.of(branch).map { t ->
+            TransitView(t, numberOf(t.id), places[t.fromLocationId]?.name.orEmpty(), places[t.toLocationId]?.name.orEmpty(), t.toScope == branch,
+                t.lines.map { TransitItem(items[it.itemId], it) })
+        }.sortedByDescending { it.transit.status == StockTransit.Status.IN_TRANSIT }
+    }
+
+    /** Requests made by [branch] or sent to its storerooms: open ones first, then the rest, newest first. */
+    fun requests(branch: Scope.Branch): List<RequestView> {
+        actor(Permission.INVENTORY_VIEW).require(branch)
+        val items = core.items.all().associateBy { it.id }
+        val places = core.locations.all().associateBy { it.id }
+        return core.stockRequests.of(branch).map { r ->
+            RequestView(r, places[r.fromLocationId]?.name.orEmpty(), places[r.toLocationId]?.name.orEmpty(), r.fromScope == branch,
+                r.lines.map { RequestItem(it.itemId, items[it.itemId], it.quantity, core.stock.balance(it.itemId, r.fromLocationId).quantity) },
+                r.transferId?.let(::numberOf))
+        }.sortedByDescending { it.request.status == StockRequest.Status.OPEN }
+    }
+
     /** An item's movements at [locationId] in [from]..[to], from the balance before [from]. */
     fun card(itemId: GlobalId, locationId: GlobalId, from: BusinessDate, to: BusinessDate): StockCard {
         val location = core.locations.byId(locationId) ?: throw DomainException(DomainError.NotFound("LOCATION"))
@@ -93,6 +139,7 @@ class StockRecords internal constructor(private val core: SabouCore) {
         InventoryOperations.WASTE -> "ضایعات"
         InventoryOperations.COMP -> "پذیرایی و اهدایی"
         InventoryOperations.TRANSFER -> if (m.kind == MovementKind.TRANSFER_IN) "انتقال از انبار دیگر" else "انتقال به انبار دیگر"
+        InventoryOperations.TRANSFER_RECEIPT -> "دریافت انتقال از شعبه‌ی دیگر"
         InventoryOperations.PRODUCTION -> if (m.kind == MovementKind.PRODUCTION_IN) "تولید" else "مصرف در تولید"
         InventoryOperations.OPENING -> "موجودی اول دوره"
         InventoryOperations.COUNT -> if (m.kind == MovementKind.COUNT_GAIN) "اضافه انبارگردانی" else "کسری انبارگردانی"
@@ -109,6 +156,7 @@ class StockRecords internal constructor(private val core: SabouCore) {
             InventoryOperations.WASTE -> "ضایعات"
             InventoryOperations.COMP -> "پذیرایی و اهدایی"
             InventoryOperations.TRANSFER -> "انتقال"
+            InventoryOperations.TRANSFER_RECEIPT -> "دریافت انتقال"
             InventoryOperations.PRODUCTION -> "تولید"
             InventoryOperations.OPENING -> "موجودی اول دوره"
             else -> type

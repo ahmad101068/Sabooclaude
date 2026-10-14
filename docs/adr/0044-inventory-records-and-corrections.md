@@ -26,3 +26,15 @@ the recipe's exact output.
   retires (empty, no pending count, no open shortage).
 - **Waste** of several items in one document, or of dishes (portions × the recipe in force).
 - **Production** takes `actualOutput`: ingredients for the planned batch, all their cost into what came out.
+
+## Stage 2 — transfers in transit and requests
+- **In transit** — `TransferStock.inTransit` (to another branch; the app defaults to it, and forces it when the sender
+  cannot open the receiving branch). The goods leave the source now (inter-branch ← inventory in the sender's books) and
+  are kept as a `StockTransit` with their value and expiry lots. The receiving branch counts them in with
+  `ReceiveTransfer`: what arrived enters at the sender's cost in proportion (inventory ← inter-branch), what did not is
+  its inventory variance (6106 ← inter-branch), so both branches' inter-branch accounts still mirror each other. A
+  transfer still on the way can be reversed by the sender (the transit is cancelled); once received it cannot.
+- **Requests** — `RequestStock` (INVENTORY_VIEW) asks a storeroom of this or another branch for goods;
+  `FulfilStockRequest` (INVENTORY_TRANSFER, the storeroom's branch) sends what is actually given as a transfer (in
+  transit between branches) and links it; `CloseStockRequest` refuses with a reason or lets the requester withdraw.
+- Schema 24: `stock_transits`, `stock_requests`. Alerts for goods on the way to a branch and requests waiting to be sent.

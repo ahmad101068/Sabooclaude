@@ -465,3 +465,60 @@ class SqlInventoryDocumentStore(db: SqlDatabase) : SqlTable(db), ir.sabou.invent
         )),
     ))
 }
+
+/** Transfers between branches waiting for (or past) the receiving branch's count (ADR-0044). */
+class SqlTransitStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.TransitStore {
+    private fun read(d: Doc) = ir.sabou.inventory.StockTransit(
+        Codec.id(d.str("id")), Codec.branchOf(d.str("fromScope")), Codec.id(d.str("fromLoc")), Codec.branchOf(d.str("toScope")), Codec.id(d.str("toLoc")),
+        Codec.date(d.long("date")),
+        d.docs("lines").map { l ->
+            ir.sabou.inventory.TransitLine(
+                Codec.id(l.str("item")), Codec.qty(l.long("qty")), Codec.money(l.long("value")),
+                l.docsOr("lots").map { p -> ir.sabou.inventory.LotPart(Codec.date(p.long("exp")), Codec.qty(p.long("qty"))) },
+                l.longOrNull("received")?.let(Codec::qty),
+            )
+        },
+        ir.sabou.inventory.StockTransit.Status.valueOf(d.str("status")), d.longOrNull("receivedOn")?.let(Codec::date), d.strOr("receivedBy", ""),
+        Codec.idOrNull(d.strOrNull("receipt")),
+    )
+    override fun byId(id: GlobalId) = doc("SELECT doc FROM stock_transits WHERE id = ?", id.value)?.let(::read)
+    override fun of(scope: Scope.Branch) =
+        docs("SELECT doc FROM stock_transits WHERE from_scope = ? OR to_scope = ? ORDER BY date DESC, rowid DESC", Codec.scope(scope), Codec.scope(scope)).map(::read)
+    override fun save(transit: ir.sabou.inventory.StockTransit) = upsert("stock_transits", "id", mapOf(
+        "id" to transit.id.value, "from_scope" to Codec.scope(transit.fromScope), "to_scope" to Codec.scope(transit.toScope),
+        "date" to transit.date.epochDay, "status" to transit.status.name,
+        "doc" to Json.encode(mapOf(
+            "id" to transit.id.value, "fromScope" to Codec.scope(transit.fromScope), "fromLoc" to transit.fromLocationId.value,
+            "toScope" to Codec.scope(transit.toScope), "toLoc" to transit.toLocationId.value, "date" to transit.date.epochDay,
+            "lines" to transit.lines.map { l ->
+                mapOf("item" to l.itemId.value, "qty" to l.quantity.micros, "value" to l.value.rial, "received" to l.received?.micros,
+                    "lots" to l.lots.map { mapOf("exp" to it.expiresOn.epochDay, "qty" to it.quantity.micros) })
+            },
+            "status" to transit.status.name, "receivedOn" to transit.receivedOn?.epochDay, "receivedBy" to transit.receivedBy, "receipt" to transit.receiptId?.value,
+        )),
+    ))
+}
+
+/** Requests for goods from a storeroom (ADR-0044). */
+class SqlStockRequestStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.StockRequestStore {
+    private fun read(d: Doc) = ir.sabou.inventory.StockRequest(
+        Codec.id(d.str("id")), Codec.branchOf(d.str("scope")), Codec.branchOf(d.str("fromScope")), Codec.id(d.str("fromLoc")), Codec.id(d.str("toLoc")),
+        d.docs("lines").map { ir.sabou.inventory.IssueLine(Codec.id(it.str("item")), Codec.qty(it.long("qty"))) },
+        d.strOr("note", ""), Codec.date(d.long("date")), d.strOr("by", ""), Codec.id(d.str("byId")),
+        ir.sabou.inventory.StockRequest.Status.valueOf(d.str("status")), d.strOr("handledBy", ""), Codec.idOrNull(d.strOrNull("transfer")), d.strOr("reason", ""),
+    )
+    override fun byId(id: GlobalId) = doc("SELECT doc FROM stock_requests WHERE id = ?", id.value)?.let(::read)
+    override fun of(scope: Scope.Branch) =
+        docs("SELECT doc FROM stock_requests WHERE scope = ? OR from_scope = ? ORDER BY date DESC, rowid DESC", Codec.scope(scope), Codec.scope(scope)).map(::read)
+    override fun save(request: ir.sabou.inventory.StockRequest) = upsert("stock_requests", "id", mapOf(
+        "id" to request.id.value, "scope" to Codec.scope(request.scope), "from_scope" to Codec.scope(request.fromScope),
+        "date" to request.date.epochDay, "status" to request.status.name,
+        "doc" to Json.encode(mapOf(
+            "id" to request.id.value, "scope" to Codec.scope(request.scope), "fromScope" to Codec.scope(request.fromScope),
+            "fromLoc" to request.fromLocationId.value, "toLoc" to request.toLocationId.value,
+            "lines" to request.lines.map { mapOf("item" to it.itemId.value, "qty" to it.quantity.micros) },
+            "note" to request.note, "date" to request.date.epochDay, "by" to request.requestedBy, "byId" to request.requesterId.value,
+            "status" to request.status.name, "handledBy" to request.handledBy, "transfer" to request.transferId?.value, "reason" to request.rejectReason,
+        )),
+    ))
+}

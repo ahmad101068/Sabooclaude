@@ -12,7 +12,7 @@ import ir.sabou.platform.Permission
  * only if it comes back.
  */
 data class Alert(val key: String, val kind: Kind, val title: String, val text: String) {
-    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH, EXPIRY, COUNT_DUE, STAFF_DOCUMENT }
+    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH, EXPIRY, COUNT_DUE, STAFF_DOCUMENT, TRANSFER_IN, STOCK_REQUEST }
 }
 
 /**
@@ -63,6 +63,18 @@ class Alerts internal constructor(private val core: SabouCore) {
                             add(Alert("EXPIRY:${v.lot.id.value}:$state", Alert.Kind.EXPIRY,
                                 when { left < 0 -> "«${v.item.name}» تاریخ گذشته است"; left == 0L -> "«${v.item.name}» امروز منقضی می‌شود"; else -> "«${v.item.name}» فردا منقضی می‌شود" },
                                 "${Fa.quantity(v.lot.remaining)} در ${v.location.name} · انقضا ${Fa.date(v.lot.expiresOn)}. اول همین را مصرف کنید یا ضایعات ثبت کنید."))
+                        }
+                    }
+                }
+                if (actor.role.allows(Permission.INVENTORY_TRANSFER)) {
+                    core.branches.all().filter { actor.canAccess(Scope.Branch(it.id)) }.forEach { b ->
+                        safe { core.stockRecords.transits(Scope.Branch(b.id)) }.filter { it.incoming && it.transit.status == ir.sabou.inventory.StockTransit.Status.IN_TRANSIT }.forEach { v ->
+                            add(Alert("TRANSIT:${v.transit.id.value}", Alert.Kind.TRANSFER_IN, "کالا از ${v.from} در راه است",
+                                "${v.lines.size} قلم، ارسال ${Fa.date(v.transit.date)}. با رسیدن کالا آن را در «انتقال بین شعب» تحویل بگیرید."))
+                        }
+                        safe { core.stockRecords.requests(Scope.Branch(b.id)) }.filter { it.toSend && it.request.status == ir.sabou.inventory.StockRequest.Status.OPEN }.forEach { v ->
+                            add(Alert("REQUEST:${v.request.id.value}", Alert.Kind.STOCK_REQUEST, "درخواست کالا برای ${v.to}",
+                                "${v.request.requestedBy}: ${v.lines.size} قلم از ${v.from}"))
                         }
                     }
                 }

@@ -56,6 +56,10 @@ sealed interface Route : java.io.Serializable {
     /** کاردکس: one item's movements at one location. */
     data class StockCard(val itemId: GlobalId, val locationId: GlobalId) : Route
     data object StockDocuments : Route
+    /** Transfers between branches: in transit, received. */
+    data object StockTransits : Route
+    /** Requests for goods from a storeroom. */
+    data object StockRequests : Route
     data object Recipes : Route
     data object PrepRecipes : Route
     data object Production : Route
