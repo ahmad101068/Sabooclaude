@@ -376,6 +376,8 @@ object ReportsScreens {
                         SCard {
                             KeyValue("روند ۴ هفته‌ی اخیر", (if (f.trendBp >= 10_000) "+" else "−") + Fa.percent(kotlin.math.abs(f.trendBp - 10_000)))
                             KeyValue("خطای پیش‌بینی در ۴ هفته‌ی گذشته", f.errorBp?.let(Fa::percent) ?: "سابقه‌ی کافی نیست")
+                            f.wapeBp?.let { KeyValue("خطا به نسبت کل فروش (روزهای پرفروش وزن بیشتر)", Fa.percent(it)) }
+                            f.biasBp?.let { b -> KeyValue("سوگیری", if (b == 0L) "ندارد" else "${if (b > 0) "بیشتر" else "کمتر"} از واقع، ${Fa.percent(kotlin.math.abs(b))}") }
                         }
                         SCard {
                             f.days.forEach { d ->

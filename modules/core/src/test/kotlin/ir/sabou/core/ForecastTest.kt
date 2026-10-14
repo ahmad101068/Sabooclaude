@@ -37,6 +37,21 @@ class ForecastTest {
 
     @AfterTest fun close() { db.close(); dir.toFile().deleteRecursively() }
 
+    @Test fun aSteadyHistoryHasNoErrorAndNoBias() {
+        core.bootstrap("شعبه یک", "مالک", "owner", "123456".toCharArray())
+        val branch = Scope.Branch(core.overview.branches().single().id)
+        val kitchen = core.overview.locations(branch).single().id
+        val cash = core.overview.treasury().single().account.id
+        val dish = core.inventory.defineMenuItem(DefineMenuItem(id(), "غذا")).resultId
+        for (back in 84 downTo 1) {
+            val sale = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, from.plusDays(-back.toLong()), kitchen, listOf(SaleLineInput(dish, Quantity.units(1), Money.of(10_000_000))),
+                Money.ZERO, Money.ZERO, Money.ZERO, listOf(Settlement.Liquid(cash, Money.of(10_000_000))))).resultId
+            core.salesOps.post(PostDailySale(id(), branch, sale))
+        }
+        val f = core.forecasts.sales(branch, from, 7)
+        assertEquals(0L, f.errorBp); assertEquals(0L, f.wapeBp); assertEquals(0L, f.biasBp)
+    }
+
     @Test fun weekdaysSpecialDaysAndError() {
         core.bootstrap("شعبه یک", "مالک", "owner", "123456".toCharArray())
         val branch = Scope.Branch(core.overview.branches().single().id)
@@ -63,6 +78,11 @@ class ForecastTest {
         assertTrue(friday.low < friday.expected && friday.high > friday.expected)
         assertTrue(f.trendBp in 10_900L..11_100L, "trend ${f.trendBp}")                  // ≈ +10 %
         assertTrue(f.errorBp != null && f.errorBp!! < 1_000, "error ${f.errorBp}")       // under 10 % on this regular history
+        // ADR-0055: sales rose 10 % four weeks ago and the weighted mean follows with a lag, so the back-test runs
+        // below actual (negative bias). The bias can never exceed the weighted error, and both stay small.
+        val wape = f.wapeBp!!; val bias = f.biasBp!!
+        assertTrue(bias < 0, "bias $bias")
+        assertTrue(kotlin.math.abs(bias) <= wape && wape < 1_000, "wape $wape bias $bias")
 
         val saturday = f.days.first { JalaliCalendar.weekdayIndex(it.date) == 0 }
         core.specialDayOps.set(SetSpecialDay(id(), branch, saturday.date, SpecialDay.Kind.CLOSED, 0, "تعمیرات"))
