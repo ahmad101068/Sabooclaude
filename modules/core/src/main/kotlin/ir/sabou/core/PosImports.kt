@@ -189,7 +189,7 @@ class PosImports internal constructor(private val core: SabouCore) {
             p.credits.forEach { add(Settlement.Credit(it.customer!!.id, Money.of(it.amount), date)) }
         } else listOf(Settlement.Liquid(accounts.single ?: throw DomainException(DomainError.InvalidInput("account", "حساب دریافت فروش را انتخاب کنید.")), Money.of(p.payable)))
         val sale = SaveSaleDraft(GlobalId.new(), branch, date, kitchen, saleLines, Money.of(p.discount + rounding), Money.of(p.service), Money.of(p.tax), settlements,
-            transactions = p.bills)
+            transactions = p.bills, discountReason = if (p.discount + rounding != 0L) "تخفیف و گرد کردن ثبت‌شده در صندوق" else "")
         val learned = p.lines.filter { it.key in choices.matches }.associate { it.key to it.menuItem!!.id }
         val bills = if (p.hasInvoices) files.flatMap { f ->
             runCatching { (PosReports.parse(Sheets.read(f.name, f.bytes)) as? Parsed.Invoices)?.report?.invoices.orEmpty() }.getOrDefault(emptyList())

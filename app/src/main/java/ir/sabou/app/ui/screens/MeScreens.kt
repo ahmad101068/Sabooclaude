@@ -186,11 +186,29 @@ object MeScreens {
         val session = LocalSession.current
         val data by load(session) { overview.branches() }
         var name by rememberSaveable { mutableStateOf("") }
+        var renaming by rememberSaveable { mutableStateOf<String?>(null) }
+        var newName by rememberSaveable { mutableStateOf("") }
         val action = rememberAction()
+        val rename = rememberAction()
         Column(Modifier.fillMaxSize()) {
             Header("شعب", onBack = nav.back)
             Page {
-                Loaded(data) { list -> list.forEach { b -> SCard { Text(b.name, style = SabouType.bodyStrong, color = Sabou.colors.ink) } } }
+                Loaded(data) { list ->
+                    list.forEach { b ->
+                        SCard(onClick = if (session.actor.isOwner) ({ renaming = b.id.value.value.toString(); newName = b.name }) else null) {
+                            Text(b.name, style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                            if (renaming == b.id.value.value.toString()) {
+                                TextInput("نام تازه", newName, { newName = it })
+                                rename.error?.let { Banner(it) }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    PrimaryButton("ذخیره", { rename.run({ identity.renameBranch(b.id, newName) }) { renaming = null } },
+                                        Modifier.weight(1f), enabled = newName.trim().length >= 2 && !rename.busy, busy = rename.busy)
+                                    SecondaryButton("انصراف", { renaming = null }, Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                }
                 FormCard("شعبه جدید") {
                     TextInput("نام شعبه", name, { name = it })
                     action.error?.let { Banner(it) }
@@ -730,9 +748,10 @@ object MeScreens {
     @Composable
     fun Accounts(nav: Nav) {
         val session = LocalSession.current
-        val data by load(session) { overview.treasury() to overview.branches() }
+        val data by load(session) { overview.allTreasuryAccounts() to overview.branches() }
         var name by rememberSaveable { mutableStateOf("") }
         var kind by rememberSaveable { mutableStateOf(TreasuryKind.CASH) }
+        var editing by rememberSaveable { mutableStateOf<GlobalId?>(null) }
         var orgLevel by rememberSaveable { mutableStateOf(false) }
         val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
         val action = rememberAction()
@@ -740,7 +759,13 @@ object MeScreens {
             Header("صندوق‌ها و حساب‌ها", onBack = nav.back) { BranchSwitcher() }
             Page {
                 Loaded(data) { (balances, _) ->
-                    balances.forEach { b -> SCard { KeyValue("${b.account.name} · ${kindName(b.account.kind)}", if (b.account.scope == Scope.Organization) "سازمان" else "شعبه") } }
+                    balances.forEach { b ->
+                        SCard(onClick = if (session.can(Permission.TREASURY_ACCOUNT_MANAGE)) ({ editing = b.account.id }) else null) {
+                            KeyValue("${b.account.name} · ${kindName(b.account.kind)}", (if (b.account.scope == Scope.Organization) "سازمان" else "شعبه") +
+                                if (!b.account.isActive) " · بسته" else "", if (b.account.isActive) Sabou.colors.ink else Sabou.colors.muted)
+                            if (editing == b.account.id) AccountEdit(b.account) { editing = null }
+                        }
+                    }
                 }
                 FormCard("حساب جدید") {
                     TextInput("نام", name, { name = it }, placeholder = "مثلاً کارت‌خوان ملت")
@@ -762,6 +787,52 @@ object MeScreens {
     }
 
     @Composable
+    private fun AccountEdit(account: ir.sabou.treasury.TreasuryAccount, onDone: () -> Unit) {
+        var name by rememberSaveable { mutableStateOf(account.name) }
+        var active by rememberSaveable { mutableStateOf(account.isActive) }
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
+        val action = rememberAction()
+        TextInput("نام", name, { name = it })
+        Row(Modifier.clickable { active = !active }, verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = active, onCheckedChange = { active = it })
+            Text("فعال (حساب بسته فقط وقتی مانده و چک بازی ندارد)", style = SabouType.body, color = Sabou.colors.ink)
+        }
+        action.error?.let { Banner(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PrimaryButton("ذخیره", {
+                action.run({ treasury.updateAccount(ir.sabou.treasury.UpdateTreasuryAccount(id.value, account.scope, account.id, name, active)) }) { onDone() }
+            }, Modifier.weight(1f), enabled = name.trim().length >= 2 && !action.busy, busy = action.busy)
+            SecondaryButton("انصراف", onDone, Modifier.weight(1f))
+        }
+    }
+
+    @Composable
+    private fun CustomerEdit(branch: Scope.Branch, c: ir.sabou.sales.Customer, onDone: () -> Unit) {
+        var name by rememberSaveable { mutableStateOf(c.name) }
+        var phone by rememberSaveable { mutableStateOf(c.phone) }
+        var type by rememberSaveable { mutableStateOf(c.type) }
+        var limit by rememberSaveable { mutableStateOf<Money?>(c.creditLimit) }
+        var active by rememberSaveable { mutableStateOf(c.isActive) }
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
+        val action = rememberAction()
+        TextInput("نام", name, { name = it })
+        Picker("نوع", listOf(Choice(CustomerType.COMPANY, "شرکت"), Choice(CustomerType.PERSON, "شخص")), type, { type = it })
+        TextInput("تلفن", phone, { phone = it }, keyboard = KeyboardType.Phone)
+        MoneyInput("سقف اعتبار", limit, { limit = it })
+        Row(Modifier.clickable { active = !active }, verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = active, onCheckedChange = { active = it })
+            Text("فعال (مشتری غیرفعال نسیه نمی‌خرد)", style = SabouType.body, color = Sabou.colors.ink)
+        }
+        action.error?.let { Banner(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PrimaryButton("ذخیره", {
+                action.run({ salesOps.updateCustomer(ir.sabou.sales.UpdateCustomer(id.value, branch, c.id, name, type, phone, limit!!, active)) }) { onDone() }
+            }, Modifier.weight(1f), enabled = name.trim().length >= 2 && limit != null && !action.busy, busy = action.busy)
+            SecondaryButton("انصراف", onDone, Modifier.weight(1f))
+        }
+    }
+
+    @Composable
     fun Customers(nav: Nav) {
         val session = LocalSession.current
         Column(Modifier.fillMaxSize()) {
@@ -772,11 +843,17 @@ object MeScreens {
                 var phone by rememberSaveable { mutableStateOf("") }
                 var type by rememberSaveable { mutableStateOf(CustomerType.COMPANY) }
                 var limit by rememberSaveable { mutableStateOf<Money?>(null) }
+                var editing by rememberSaveable { mutableStateOf<GlobalId?>(null) }
                 val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
                 val action = rememberAction()
                 Page {
                     Loaded(data) { list ->
-                        list.forEach { (c, owed) -> SCard { KeyValue(c.name, "بدهی ${Fa.rial(owed)} از سقف ${Fa.rialShort(c.creditLimit.rial)}") } }
+                        list.forEach { (c, owed) ->
+                            SCard(onClick = if (session.can(Permission.CUSTOMER_MANAGE)) ({ editing = c.id }) else null) {
+                                KeyValue(c.name + if (!c.isActive) " · غیرفعال" else "", "بدهی ${Fa.rial(owed)} از سقف ${Fa.rialShort(c.creditLimit.rial)}")
+                                if (editing == c.id) CustomerEdit(branch, c) { editing = null }
+                            }
+                        }
                     }
                     FormCard("مشتری جدید") {
                         TextInput("نام", name, { name = it })

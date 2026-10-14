@@ -64,6 +64,11 @@ data class SalesDayView(
     val cashBoxes: List<AccountBalance> = emptyList(),
     /** The day's cash count number once closed. */
     val countNumber: String? = null,
+    /** The service charge and VAT in force (basis points), to work out a sale's figures; null when not set. */
+    val serviceBp: Long? = null,
+    val vatBp: Long? = null,
+    /** Menu items with no recipe on the day: sold without taking stock. */
+    val noRecipe: Set<ir.sabou.kernel.GlobalId> = emptySet(),
 )
 data class CustomerBalance(val customer: Customer, val owed: Money)
 data class OpenReceivable(val receivable: Receivable, val customer: String, val outstanding: Money)
@@ -147,6 +152,12 @@ class Overview internal constructor(private val core: SabouCore) {
     }
 
     // ------------------------------------------------------------ Treasury
+
+    /** Every cash box and account the person may see, closed ones included (to manage them). */
+    fun allTreasuryAccounts(): List<AccountBalance> {
+        val a = actor(Permission.TREASURY_VIEW, Permission.TREASURY_ACCOUNT_MANAGE)
+        return core.treasuryAccounts.all().filter { a.canAccess(it.scope) }.map { AccountBalance(it, core.treasuryGateway.balance(it.id)) }
+    }
 
     fun treasury(): List<AccountBalance> {
         val a = actor(Permission.TREASURY_VIEW)
@@ -339,16 +350,20 @@ class Overview internal constructor(private val core: SabouCore) {
         return SalesDayView(
             sales = sales,
             day = core.sales.day(branch, date),
-            customers = core.customers.all().filter { it.isActive && it.registeredIn == branch },
+            // A customer of any branch may buy on credit here.
+            customers = core.customers.all().filter { it.isActive },
             // A cheque box takes customers' cheques (with their details); a cheque book never receives.
             accounts = core.treasuryAccounts.all().filter { it.isActive && it.scope == branch && it.kind != ir.sabou.treasury.TreasuryKind.ISSUED_CHEQUES },
             numbers = sales.mapNotNull { s -> core.numbers.of(ir.sabou.platform.DocumentSeries.DAILY_SALE, s.id)?.let { s.id to it.text } }.toMap(),
             cashBoxes = if (a.role.allows(Permission.SALES_DAY_CLOSE) || a.role.allows(Permission.TREASURY_VIEW)) {
                 core.treasuryAccounts.all().filter {
                     it.isActive && it.scope == branch && (it.kind == ir.sabou.treasury.TreasuryKind.CASH || it.kind == ir.sabou.treasury.TreasuryKind.PETTY_CASH)
-                }.map { AccountBalance(it, core.treasuryGateway.balance(it.id)) }
+                }.map { AccountBalance(it, core.treasuryMovements.balanceAsOf(it.id, date)) }   // as it stood at the end of that day
             } else emptyList(),
             countNumber = core.sales.day(branch, date)?.countId?.let { core.numbers.of(ir.sabou.platform.DocumentSeries.CASH_COUNT, it)?.text },
+            serviceBp = core.salesOps.serviceCharge(),
+            vatBp = core.taxStore.profile()?.vatOn(date),
+            noRecipe = core.recipes.menuItems().filter { it.isActive && !core.recipeBook.hasRecipeOn(it.id, date) }.map { it.id }.toSet(),
         )
     }
 

@@ -157,7 +157,7 @@ class SyncTest {
         val draft = p.replica.salesOps.saveDraft(
             SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLineInput(pizza, Quantity.units(20), rial(600_000))),
                 rial(1_000_000), rial(0), rial(990_000),
-                listOf(Settlement.Liquid(cash, rial(8_990_000)), Settlement.Credit(customer, rial(3_000_000), day.plusDays(10)))),
+                listOf(Settlement.Liquid(cash, rial(8_990_000)), Settlement.Credit(customer, rial(3_000_000), day.plusDays(10))), discountReason = "مشتری دائمی"),
         ).resultId
         p.replica.salesOps.post(PostDailySale(id(), branch, draft))
 

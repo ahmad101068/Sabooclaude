@@ -121,7 +121,7 @@ class SabouCoreTest {
         val draft = core.salesOps.saveDraft(
             SaveSaleDraft(id(), w.branch, day, w.kitchen, listOf(SaleLineInput(w.pizza, Quantity.units(20), rial(600_000))),
                 rial(1_000_000), rial(0), rial(990_000),
-                listOf(Settlement.Liquid(w.cash, rial(8_990_000)), Settlement.Credit(w.customer, rial(3_000_000), day.plusDays(10)))),
+                listOf(Settlement.Liquid(w.cash, rial(8_990_000)), Settlement.Credit(w.customer, rial(3_000_000), day.plusDays(10))), discountReason = "مشتری دائمی"),
         ).resultId
         core.salesOps.post(PostDailySale(id(), w.branch, draft))
         val receivable = core.sales.receivablesOfSale(draft).single()

@@ -450,8 +450,12 @@ class PurchasingOperations(
         ensure(purchases.payments(invoice.id).none { !it.reversed }) { DomainError.InvalidState("PURCHASE_INVOICE", "HAS_ACTIVE_PAYMENTS") }
         ensure(purchases.returns(invoice.id).isEmpty()) { DomainError.InvalidState("PURCHASE_INVOICE", "HAS_RETURNS") }
         ensure(purchases.allocationsTo(invoice.id).none { !it.released }) { DomainError.InvalidState("PURCHASE_INVOICE", "HAS_CREDITS") }
-        ensure(invoice.reviewLines.none { it.resolution != null }) { DomainError.InvalidState("PURCHASE_INVOICE", "HAS_RESOLVED_LINES") }
         if (invoice.lines.isNotEmpty()) inventory.reverseDocument(ctx, capability, INVOICE, invoice.id, cmd.date, cmd.reason)
+        // Lines assigned after recording go back too: the goods leave stock (they must still be there), or the expense is reversed.
+        invoice.reviewLines.mapNotNull { it.resolution }.forEach { r ->
+            if (r.itemId != null) inventory.reverseDocument(ctx, capability, REVIEW, r.documentId, cmd.date, cmd.reason)
+            else ledger.reverse(ctx, capability, emptySet(), r.journalId, cmd.date, cmd.reason)
+        }
         invoice.journalIds.forEach { ledger.reverse(ctx, capability, emptySet(), it, cmd.date, cmd.reason) }
         ctx.number(DocumentSeries.REVERSAL, cmd.date, cmd.commandId, reverses = DocumentSeries.PURCHASE_INVOICE to invoice.id)
         purchases.saveInvoice(invoice.copy(status = InvoiceStatus.REVERSED))

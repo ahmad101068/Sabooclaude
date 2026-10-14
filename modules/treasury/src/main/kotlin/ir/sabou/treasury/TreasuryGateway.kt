@@ -5,6 +5,7 @@ import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
 import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Money
+import ir.sabou.kernel.Scope
 import ir.sabou.kernel.ensure
 import ir.sabou.ledger.JournalDraft
 import ir.sabou.ledger.JournalEntry
@@ -29,12 +30,17 @@ class TreasuryGateway(
     private val accounts: TreasuryAccountStore,
     private val movements: MovementStore,
     private val cheques: ChequeStore = ir.sabou.treasury.memory.InMemoryChequeStore(),
+    /** Whether the sales day of [Scope] on a date is closed: its cash box was counted and stays as counted. */
+    private val cashDayClosed: (Scope, BusinessDate) -> Boolean = { _, _ -> false },
 ) {
     init {
         require(capability.module == ModuleId.TREASURY)
     }
 
     fun balance(accountId: GlobalId): Long = movements.balance(accountId)
+
+    /** Whether a cheque box or book still holds an open cheque (or one deposited from it is not yet collected). */
+    fun holdsCheques(accountId: GlobalId): Boolean = cheques.all().any { it.pending && (it.accountId == accountId || it.bankAccountId == accountId) }
 
     fun account(accountId: GlobalId): TreasuryAccount {
         val account = accounts.byId(accountId) ?: throw DomainException(DomainError.NotFound("TREASURY_ACCOUNT"))
@@ -62,7 +68,8 @@ class TreasuryGateway(
         description: String,
     ): Long {
         ensure(account(accountId).kind.isOrdinary) { DomainError.InvalidInput("account", "صندوق و دسته‌چک شمارش نمی‌شوند؛ وضعیت هر چک را ثبت کنید.") }
-        val book = balance(accountId)
+        // What the box should hold at the end of [date]: movements dated later (recorded since) are not in it.
+        val book = movements.balanceAsOf(accountId, date)
         val difference = counted.rial - book
         context.number(ir.sabou.platform.DocumentSeries.CASH_COUNT, date, documentId)
         context.audit(AuditDraft("TREASURY_COUNT", "TREASURY_ACCOUNT", accountId.value, "book=$book;counted=${counted.rial}"))
@@ -93,6 +100,7 @@ class TreasuryGateway(
         ensure(!amount.isZero) { DomainError.InvalidInput("amount", "مبلغ باید بیشتر از صفر باشد.") }
         val account = account(accountId)
         context.requireScope(account.scope)
+        requireCashDayOpen(account, date)
         val chequeStep = prepareCheque(account, direction, amount, cheque)
         if (direction == Direction.PAYMENT) requireFunds(account, amount)
         val counterDebit = Money.sum(counterLines.map { it.debit })
@@ -146,6 +154,7 @@ class TreasuryGateway(
         originals.groupBy { it.accountId }.forEach { (accountId, rows) ->
             val account = accounts.byId(accountId) ?: throw DomainException(DomainError.NotFound("TREASURY_ACCOUNT"))
             context.requireScope(account.scope)
+            requireCashDayOpen(account, date)
             val outflow = rows.fold(0L) { acc, m -> if (m.direction == Direction.RECEIPT) acc + m.amount.rial else acc - m.amount.rial }
             if (outflow > 0) requireFunds(account, Money.of(outflow))
         }
@@ -175,6 +184,13 @@ class TreasuryGateway(
         }
     }
 
+    /** A cash box counted at a day's close is not changed afterwards on that day (reopen the day first). */
+    private fun requireCashDayOpen(account: TreasuryAccount, date: BusinessDate) {
+        ensure(!(account.kind == TreasuryKind.CASH || account.kind == TreasuryKind.PETTY_CASH) || !cashDayClosed(account.scope, date)) {
+            DomainError.InvalidState("SALES_DAY", "CLOSED")
+        }
+    }
+
     /** Same-scope transfer: one journal, two movements. Used only by [TreasuryOperations]. */
     internal fun recordTransferWithinScope(
         context: CommandContext,
@@ -186,6 +202,7 @@ class TreasuryGateway(
         description: String,
     ): JournalEntry {
         requireFunds(from, amount)
+        requireCashDayOpen(from, date); requireCashDayOpen(to, date)
         val journal = ledger.post(
             context, capability,
             JournalDraft(

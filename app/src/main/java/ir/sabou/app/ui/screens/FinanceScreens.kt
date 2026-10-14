@@ -185,6 +185,7 @@ object FinanceScreens {
                     NavRow(R.drawable.ic_finance, "گزارش‌های مدیریتی", "سود و زیان، پایان روز، پرفروش‌ها، مصرف مواد، کارکرد — با خروجی اکسل و PDF", onClick = { nav.go(Route.Reports) })
                 }
                 if (session.can(Permission.SALES_VIEW)) item { NavRow(R.drawable.ic_person, "طلب از مشتریان", "دریافت نسیه‌ها", onClick = { nav.go(Route.Receivables) }) }
+                if (session.can(Permission.TREASURY_PAYMENT)) item { NavRow(R.drawable.ic_payment, "مالیات و عوارض فروش", "مانده‌ی بدهی و پرداخت به اداره‌ی مالیات", onClick = { nav.go(Route.SalesTax) }) }
                 if (session.can(Permission.PURCHASE_VIEW)) item { NavRow(R.drawable.ic_purchase, "بدهی به تأمین‌کنندگان", "فاکتورهای پرداخت‌نشده", onClick = { nav.go(Route.Purchases) }) }
                 if (session.can(Permission.LEDGER_VIEW)) item { NavRow(R.drawable.ic_finance, "تراز آزمایشی", "مانده همه حساب‌های دفتر کل", onClick = { nav.go(Route.TrialBalance) }) }
                 if (session.can(Permission.PERIOD_CLOSE)) item { NavRow(R.drawable.ic_check, "بستن ماه", "چک‌لیست پایان دوره و قفل دوره", onClick = { nav.go(Route.MonthClose) }) }
@@ -449,8 +450,30 @@ object FinanceScreens {
                             action.run({ salesOps.collect(CollectReceivable(commandId.value, r.scope, r.id, accountId!!, amount!!, date, cheque)) }) { nav.back() }
                         }, enabled = accountId != null && amount != null && (!byCheque || cheque != null) && session.can(Permission.RECEIVABLE_COLLECT), busy = action.busy)
                     }
+                    if (session.can(Permission.CREDIT_OVERRIDE)) WriteOff(r, outstanding) { nav.back() }
                 }
             }
+        }
+    }
+
+    /** Gives up (part of) a customer's debt as uncollectible: bad-debt expense, with the reason. */
+    @Composable
+    private fun WriteOff(r: ir.sabou.sales.Receivable, outstanding: Money, onDone: () -> Unit) {
+        val session = LocalSession.current
+        var amount by rememberSaveable { mutableStateOf<Money?>(null) }
+        var reason by rememberSaveable { mutableStateOf("") }
+        var date by rememberSaveable { mutableStateOf(session.today) }
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
+        val action = rememberAction()
+        FormCard("سوخت کردن طلب") {
+            Text("طلبی که دیگر وصول نمی‌شود به هزینه‌ی «مطالبات سوخت‌شده» می‌رود. فروش اصلی دست نمی‌خورد.", style = SabouType.caption, color = Sabou.colors.muted)
+            MoneyInput("مبلغ (حداکثر ${Fa.rial(outstanding)})", amount, { amount = it })
+            TextInput("دلیل", reason, { reason = it }, placeholder = "مثلاً مشتری در دسترس نیست")
+            DateInput("تاریخ", date, { date = it }, session.today)
+            action.error?.let { Banner(it) }
+            SecondaryButton("ثبت سوخت", {
+                action.run({ salesOps.writeOff(ir.sabou.sales.WriteOffReceivable(id.value, r.scope, r.id, amount!!, date, reason)) }) { onDone() }
+            }, enabled = amount != null && reason.trim().length >= 3 && !action.busy, danger = true)
         }
     }
 

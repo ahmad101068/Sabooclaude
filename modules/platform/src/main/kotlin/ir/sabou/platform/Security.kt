@@ -23,6 +23,8 @@ enum class Permission {
     CUSTOMER_MANAGE, CREDIT_OVERRIDE,
     /** Set menu prices (for every branch or one); sell at a price other than the menu's, with a reason. */
     MENU_PRICE_MANAGE, SALES_PRICE_OVERRIDE,
+    /** Give a discount on a sale (with its reason). */
+    SALES_DISCOUNT,
     /** The seller's tax identity, VAT rates and the menu's tax product IDs (ADR-0037). */
     TAX_SETTINGS,
     // Purchasing & inventory

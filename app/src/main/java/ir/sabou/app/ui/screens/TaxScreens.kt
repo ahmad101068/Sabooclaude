@@ -29,6 +29,7 @@ import ir.sabou.app.ui.components.SCard
 import ir.sabou.app.ui.components.SecondaryButton
 import ir.sabou.app.ui.components.TextInput
 import ir.sabou.app.ui.load
+import ir.sabou.app.ui.orNull
 import ir.sabou.app.ui.rememberAction
 import ir.sabou.app.ui.theme.Sabou
 import ir.sabou.app.ui.theme.SabouType
@@ -42,6 +43,25 @@ import ir.sabou.sales.VatRate
 
 /** The seller's tax identity, VAT rates and the data the tax system will need (ADR-0037). Nothing is sent from here. */
 object TaxScreens {
+    /** The service charge the sale form works out (after discount); none when blank. */
+    @Composable
+    private fun ServiceCharge() {
+        val session = LocalSession.current
+        val current by load(session) { salesOps.serviceCharge() }
+        var percent by rememberSaveable { mutableStateOf("") }
+        val action = rememberAction()
+        FormCard("حق سرویس") {
+            KeyValue("حق سرویس فعلی", current.orNull()?.let(Fa::percent) ?: "ندارد")
+            TextInput("درصد (مثلاً ۱۰؛ خالی یعنی ندارد)", percent, { percent = it }, keyboard = KeyboardType.Decimal)
+            Text("در فرم فروش، «محاسبه‌ی خودکار» حق سرویس را از فروش پس از تخفیف و مالیات را از فروش به‌اضافه‌ی حق سرویس حساب می‌کند؛ عدد را می‌شود دستی عوض کرد.",
+                style = SabouType.caption, color = Sabou.colors.muted)
+            action.error?.let { Banner(it) }
+            val bp = Fa.latinDigits(percent.trim()).replace('٫', '.').toBigDecimalOrNull()?.movePointRight(2)?.toLong()
+            PrimaryButton("ذخیره", { action.run({ salesOps.setServiceCharge(ir.sabou.sales.SetServiceCharge(GlobalId.new(), bp?.takeIf { it > 0 })) }) { percent = "" } },
+                enabled = (percent.isBlank() || bp != null) && !action.busy, busy = action.busy)
+        }
+    }
+
     @Composable
     fun Settings(nav: Nav) {
         val session = LocalSession.current
@@ -77,6 +97,7 @@ object TaxScreens {
                             action.run({ taxOps.setProfile(SetTaxProfile(GlobalId.new(), seller, memory, rates)) }) { vatPercent = "" }
                         }, enabled = session.can(Permission.TAX_SETTINGS) && seller.isNotBlank() && (newBp != null || !p?.vatRates.isNullOrEmpty()) && !action.busy, busy = action.busy)
                     }
+                    if (session.can(Permission.MENU_PRICE_MANAGE)) ServiceCharge()
                     if (r.dishesWithoutId.isNotEmpty() || r.codes.isNotEmpty()) FormCard("شناسه‌ی کالا/خدمت آیتم‌های منو") {
                         Text("شناسه‌ی ۱۳ رقمی هر غذا را از سامانه‌ی شناسه‌ی کالا و خدمات (stuffid.tax.gov.ir) بگیرید؛ کد واحد برای «پرس» یا «عدد» را از جدول واحدهای سامانه.",
                             style = SabouType.caption, color = Sabou.colors.muted)
