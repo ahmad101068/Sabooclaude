@@ -278,9 +278,11 @@ class PurchasingTest {
         assertEquals("INVALID_STATE:REVIEW_LINE:ALREADY_RESOLVED", code {
             ops.resolveReviewLine(ResolveReviewLine(GlobalId.new(), branchA, inv, 1, null, null, null, StandardAccounts.RENT, day))
         })
-        assertEquals("INVALID_STATE:PURCHASE_INVOICE:HAS_RESOLVED_LINES", code {
-            ops.reverseInvoice(ReversePurchaseInvoice(GlobalId.new(), branchA, inv, day, "اشتباه"))
-        })
+        // Reversing the invoice takes the assigned lines back too: the cheese leaves stock, the expense is reversed.
+        ops.reverseInvoice(ReversePurchaseInvoice(GlobalId.new(), branchA, inv, day, "اشتباه"))
+        assertEquals(0, inventory.balance(cheese, storeA).quantity.micros)
+        assertEquals(0, ledger.balance(StandardAccounts.OTHER_EXPENSE, branchA).rial)
+        assertEquals(0, ledger.balance(StandardAccounts.PURCHASES_PENDING_REVIEW, branchA).rial)
         apMatchesSubLedger()
     }
 
