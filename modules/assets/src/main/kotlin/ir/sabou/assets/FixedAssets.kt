@@ -7,6 +7,7 @@ import ir.sabou.platform.IssuesDocument
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
+import ir.sabou.platform.NoDocument
 import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Ratio
@@ -112,6 +113,25 @@ sealed interface Funding : java.io.Serializable {
     data class Paid(val treasuryAccountId: GlobalId, val cheque: ChequeDetails? = null, val chequeId: GlobalId? = null) : Funding
     /** Already owned when the books started (or brought in by the owner): against capital, with depreciation so far. */
     data class Existing(val accumulatedSoFar: Money, val depreciatedThrough: BusinessDate?) : Funding
+    /** Bought on credit or in instalments: owed in 2110 (paid later from treasury against that account). */
+    data class OnCredit(val seller: String) : Funding
+}
+
+/** Renames an asset or changes its group (its cost and depreciation never change). */
+@NoDocument
+data class UpdateAsset(override val commandId: GlobalId, override val scope: Scope.Branch, val assetId: GlobalId, val name: String, val category: String) : Command {
+    override val requiredPermission = Permission.ASSET_MANAGE
+    override fun fingerprint() = "$scope|$assetId|$name|$category"
+}
+
+/**
+ * Moves an asset to another branch with its cost and depreciation so far (each branch balanced through the
+ * inter-branch account); depreciation after [date] is the new branch's. Book depreciation up to the move first.
+ */
+@IssuesDocument(DocumentSeries.ASSET)
+data class TransferAsset(override val commandId: GlobalId, override val scope: Scope.Branch, val assetId: GlobalId, val to: Scope.Branch, val date: BusinessDate) : Command {
+    override val requiredPermission = Permission.ASSET_MANAGE
+    override fun fingerprint() = "$scope|$assetId|$to|${date.epochDay}"
 }
 
 @IssuesDocument(DocumentSeries.ASSET)
@@ -133,6 +153,7 @@ data class AcquireAsset(
     override fun fingerprint() = "$scope|$name|$category|${cost.rial}|${salvage.rial}|${date.epochDay}|$method|$usefulLifeMonths|$rateBp|" + when (funding) {
         is Funding.Paid -> "paid:${funding.treasuryAccountId}:${funding.cheque?.fingerprint()}:${funding.chequeId}"
         is Funding.Existing -> "existing:${funding.accumulatedSoFar.rial}:${funding.depreciatedThrough?.epochDay}"
+        is Funding.OnCredit -> "credit:${funding.seller}"
     }
 }
 
@@ -218,6 +239,14 @@ class AssetOperations(
                 )))
                 f.accumulatedSoFar to f.depreciatedThrough
             }
+            is Funding.OnCredit -> {
+                ensure(f.seller.trim().length in 2..120) { DomainError.InvalidInput("seller", "نام فروشنده را بنویسید.") }
+                ledger.post(ctx, capability, JournalDraft(cmd.date, cmd.scope, ACQUISITION, id, "$title (نسیه از ${f.seller.trim()})", listOf(
+                    LineDraft(StandardAccounts.FIXED_ASSETS, debit = cmd.cost, memo = name, by = capability),
+                    LineDraft(StandardAccounts.ASSET_PURCHASE_PAYABLE, credit = cmd.cost, memo = f.seller.trim(), by = capability),
+                )))
+                Money.ZERO to null
+            }
         }
         val asset = FixedAsset(
             id, name, cmd.category.trim(), cmd.scope, cmd.cost, cmd.salvage, cmd.date, cmd.method,
@@ -302,7 +331,45 @@ class AssetOperations(
         docId
     }
 
+    fun update(c: UpdateAsset): CommandOutcome = bus.execute(ModuleId.ASSETS, c) { cmd, ctx ->
+        val asset = assets.byId(cmd.assetId) ?: throw DomainException(DomainError.NotFound("FIXED_ASSET"))
+        ensure(asset.scope == cmd.scope) { DomainError.InvalidInput("scope", "متعلق به این شعبه نیست.") }
+        val name = cmd.name.trim()
+        ensure(name.length in 2..120 && cmd.category.trim().length <= 60) { DomainError.InvalidInput("name", "نام دارایی الزامی است.") }
+        assets.save(asset.copy(name = name, category = cmd.category.trim()))
+        ctx.audit(AuditDraft("ASSET_UPDATE", "FIXED_ASSET", asset.id.value, "name=$name;category=${cmd.category.trim()}"))
+        asset.id
+    }
+
+    fun transfer(c: TransferAsset): CommandOutcome = bus.execute(ModuleId.ASSETS, c) { cmd, ctx ->
+        val asset = assets.byId(cmd.assetId) ?: throw DomainException(DomainError.NotFound("FIXED_ASSET"))
+        ensure(asset.scope == cmd.scope) { DomainError.InvalidInput("scope", "متعلق به این شعبه نیست.") }
+        ensure(asset.status == AssetStatus.ACTIVE) { DomainError.InvalidState("FIXED_ASSET", asset.status.name) }
+        ensure(cmd.to != cmd.scope) { DomainError.InvalidInput("to", "شعبه‌ی مقصد همان شعبه است.") }
+        ensure(cmd.date >= asset.acquiredOn && (asset.depreciatedThrough == null || cmd.date >= asset.depreciatedThrough)) {
+            DomainError.InvalidInput("date", "تاریخ انتقال قبل از آخرین استهلاک ثبت‌شده است.")
+        }
+        val id = GlobalId.new()
+        ctx.number(DocumentSeries.ASSET, cmd.date, id)
+        val net = asset.cost - asset.accumulated
+        val title = "انتقال دارایی: ${asset.name}"
+        ledger.post(ctx, capability, JournalDraft(cmd.date, cmd.scope, TRANSFER, id, "$title (به شعبه‌ی دیگر)", listOfNotNull(
+            LineDraft(StandardAccounts.INTER_BRANCH, debit = net, memo = asset.name, by = capability).takeIf { !net.isZero },
+            LineDraft(StandardAccounts.ACCUMULATED_DEPRECIATION, debit = asset.accumulated, memo = asset.name, by = capability).takeIf { !asset.accumulated.isZero },
+            LineDraft(StandardAccounts.FIXED_ASSETS, credit = asset.cost, memo = asset.name, by = capability),
+        )))
+        ledger.post(ctx, capability, JournalDraft(cmd.date, cmd.to, TRANSFER, id, "$title (از شعبه‌ی دیگر)", listOfNotNull(
+            LineDraft(StandardAccounts.FIXED_ASSETS, debit = asset.cost, memo = asset.name, by = capability),
+            LineDraft(StandardAccounts.ACCUMULATED_DEPRECIATION, credit = asset.accumulated, memo = asset.name, by = capability).takeIf { !asset.accumulated.isZero },
+            LineDraft(StandardAccounts.INTER_BRANCH, credit = net, memo = asset.name, by = capability).takeIf { !net.isZero },
+        )))
+        assets.save(asset.copy(scope = cmd.to))
+        ctx.audit(AuditDraft("ASSET_TRANSFER", "FIXED_ASSET", asset.id.value, "to=${cmd.to.branchId.value};cost=${asset.cost.rial};accumulated=${asset.accumulated.rial}"))
+        id
+    }
+
     companion object {
+        const val TRANSFER = "ASSET_TRANSFER"
         const val ACQUISITION = "ASSET_ACQUISITION"
         const val DEPRECIATION = "ASSET_DEPRECIATION"
         const val DISPOSAL = "ASSET_DISPOSAL"
