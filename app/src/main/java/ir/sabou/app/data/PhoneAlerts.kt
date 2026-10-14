@@ -42,7 +42,13 @@ object PhoneAlerts {
 
     fun setEnabled(c: Context, on: Boolean) {
         prefs(c).edit().putBoolean(ENABLED, on).apply()
-        if (on) schedule(c) else c.getSystemService(JobScheduler::class.java).cancel(PERIODIC_JOB)
+        reschedule(c)
+    }
+
+    /** The hourly check runs while this phone's notifications or SMS alerts (ADR-0046) need it. */
+    fun reschedule(c: Context) {
+        val needed = (enabled(c) && prefs(c).getString(USER, null) != null) || SmsOutbox.hasRecipients(c)
+        if (needed) schedule(c) else c.getSystemService(JobScheduler::class.java).cancel(PERIODIC_JOB)
     }
 
     /** The phone's user is whoever signed in last here. */
@@ -50,13 +56,14 @@ object PhoneAlerts {
         val p = prefs(c)
         // A different person on this phone starts with nothing announced.
         if (p.getString(USER, null) != userId.value) p.edit().putString(USER, userId.value).putStringSet(SENT, emptySet()).apply()
-        if (enabled(c)) schedule(c)
+        reschedule(c)
     }
 
     /** Forget the user (factory reset, restore): no alerts until someone signs in again. */
     fun forget(c: Context) {
         prefs(c).edit().clear().apply()
         c.getSystemService(JobScheduler::class.java).cancelAll()
+        reschedule(c)
     }
 
     private fun schedule(c: Context) {
@@ -70,7 +77,7 @@ object PhoneAlerts {
     /** Check shortly (after something was saved): a purchase may have made a price jump or a sale a shortage. */
     fun soon() {
         val c = app ?: return
-        if (!enabled(c) || prefs(c).getString(USER, null) == null) return
+        if ((!enabled(c) || prefs(c).getString(USER, null) == null) && !SmsOutbox.hasRecipients(c)) return
         val info = JobInfo.Builder(SOON_JOB, ComponentName(c, AlertJobService::class.java))
             .setMinimumLatency(3_000L).setOverrideDeadline(60_000L).build()
         c.getSystemService(JobScheduler::class.java).schedule(info)
@@ -78,13 +85,17 @@ object PhoneAlerts {
 
     /** Computes the user's alerts and posts the new ones. Runs on a background thread. */
     internal fun check(c: Context) {
-        if (!enabled(c)) return
         val p = prefs(c)
-        val user = p.getString(USER, null)?.let { runCatching { GlobalId.parse(it) }.getOrNull() } ?: return
+        val user = p.getString(USER, null)?.let { runCatching { GlobalId.parse(it) }.getOrNull() }
+        val phone = enabled(c) && user != null
+        if (!phone && !SmsOutbox.hasRecipients(c)) return
         val container = (c.applicationContext as SabouApplication).container
         container.ensureOpen()
         val core = (container.state.value as? AppState.Ready)?.core ?: return
-        val alerts = core.alerts.forUser(user, BusinessDate(LocalDate.now().toEpochDay()))
+        // SMS alerts go to their own recipients, whatever this phone's notifications are set to.
+        runCatching { SmsOutbox.checkAlerts(c, core) }
+        if (!phone) return
+        val alerts = core.alerts.forUser(user!!, BusinessDate(LocalDate.now().toEpochDay()))
         val sent = p.getStringSet(SENT, emptySet()).orEmpty()
         val fresh = alerts.filter { it.key !in sent }
         // Keys of resolved situations are dropped, so a recurrence is announced again.
@@ -96,7 +107,7 @@ object PhoneAlerts {
         if (Build.VERSION.SDK_INT >= 33 && c.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val manager = c.getSystemService(NotificationManager::class.java)
         Alert.Kind.entries.forEach { kind ->
-            manager.createNotificationChannel(NotificationChannel(channel(kind), channelName(kind), NotificationManager.IMPORTANCE_DEFAULT))
+            manager.createNotificationChannel(NotificationChannel(channel(kind), kindName(kind), NotificationManager.IMPORTANCE_DEFAULT))
         }
         val open = PendingIntent.getActivity(c, 0, Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -119,7 +130,7 @@ object PhoneAlerts {
 
     private fun channel(kind: Alert.Kind) = "alerts.${kind.name.lowercase()}"
 
-    private fun channelName(kind: Alert.Kind) = when (kind) {
+    fun kindName(kind: Alert.Kind) = when (kind) {
         Alert.Kind.LOW_STOCK -> "کمبود کالا"
         Alert.Kind.PRICE_CHANGE -> "تغییر قیمت خرید"
         Alert.Kind.CHEQUE_DUE -> "سررسید چک"

@@ -637,6 +637,7 @@ private fun Pages(route: Route, nav: Nav) {
         Route.StaffHub -> OperationsScreens.StaffHub(nav)
         Route.TwoPhones -> ir.sabou.app.ui.screens.SyncScreens.TwoPhonesPage(nav)
         Route.Security -> MeScreens.Security(nav)
+        Route.Sms -> ir.sabou.app.ui.screens.SmsScreens.Settings(nav)
         Route.PosImport -> PosImportScreen(nav)
         Route.Home, Route.Sales, Route.Operations, Route.Finance, Route.Me -> Unit
     }

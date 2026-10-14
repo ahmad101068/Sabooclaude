@@ -14,6 +14,8 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -1089,6 +1091,7 @@ object PurchaseScreens {
                     var taxId by rememberSaveable { mutableStateOf(s.taxId) }
                     var address by rememberSaveable { mutableStateOf(s.address) }
                     var sheba by rememberSaveable { mutableStateOf(s.sheba) }
+                    var orderSms by rememberSaveable { mutableStateOf(s.orderSms) }
                     val id = rememberCommandId(supplierId)
                     val action = rememberAction()
                     val leadDays = Fa.latinDigits(lead).trim().toIntOrNull()
@@ -1112,13 +1115,18 @@ object PurchaseScreens {
                         TextInput("نشانی", address, { address = it }, singleLine = false)
                         TextInput("شماره شبا (برای واریز)", sheba, { sheba = it }, placeholder = "IR…",
                             error = if (sheba.isNotBlank() && !ir.sabou.kernel.Sheba.isValid(sheba)) "شبا معتبر نیست" else null)
+                        Row(Modifier.clickable { orderSms = !orderSms }, verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = orderSms, onCheckedChange = { orderSms = it })
+                            Text("سفارش‌ها خودکار به همین شماره پیامک شود", style = SabouType.body, color = Sabou.colors.ink)
+                        }
+                        if (orderSms && !ir.sabou.kernel.Mobile.isValid(phone)) Text("برای پیامک، شماره همراه (۰۹…) وارد کنید.", style = SabouType.caption, color = Sabou.colors.danger)
                         Row(Modifier.clickable { active = !active }, verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = active, onCheckedChange = { active = it })
                             Text("فعال", style = SabouType.body, color = Sabou.colors.ink)
                         }
                         action.error?.let { Banner(it) }
                         PrimaryButton("ذخیره", {
-                            action.run({ purchasing.updateSupplier(UpdateSupplier(id.value, s.id, name, phone, active, days.toSet(), cutoffMinutes, leadDays!!, note, taxId, address, sheba)) }) { nav.back() }
+                            action.run({ purchasing.updateSupplier(UpdateSupplier(id.value, s.id, name, phone, active, days.toSet(), cutoffMinutes, leadDays!!, note, taxId, address, sheba, orderSms)) }) { nav.back() }
                         }, enabled = name.trim().length >= 2 && leadDays != null && leadDays in 0..14, busy = action.busy)
                     }
                     if (aliases.isNotEmpty()) SCard {
@@ -1173,6 +1181,7 @@ object PurchaseScreens {
     @Composable
     fun NewOrder(nav: Nav, prefill: Route.NewOrder) {
         val session = LocalSession.current
+        val context = LocalContext.current
         Column(Modifier.fillMaxSize()) {
             Header("سفارش خرید", "پیش از تحویل؛ کالا و بدهی هنگام تحویل ثبت می‌شود", onBack = nav.back)
             WithBranch { branch ->
@@ -1240,7 +1249,9 @@ object PurchaseScreens {
                         action.error?.let { Banner(it) }
                         PrimaryButton("ثبت سفارش", {
                             val cmd = CreatePurchaseOrder(id.value, branch, supplier!!, loc!!, date, expectedDate, rows.map { OrderLine(it.item!!, it.qty!!, it.price!!) }, note)
-                            action.run({ orders.create(cmd) }) { result -> nav.back(); nav.go(Route.OrderDetail(result.resultId)) }
+                            action.run({
+                                orders.create(cmd).also { r -> ir.sabou.app.data.SmsOutbox.orderPlaced(context, this, r.resultId) }
+                            }) { result -> nav.back(); nav.go(Route.OrderDetail(result.resultId)) }
                         }, enabled = supplier != null && loc != null && rows.isNotEmpty() && rows.all { it.item != null && it.qty != null && it.price != null }, busy = action.busy)
                     }
                 }
@@ -1284,7 +1295,8 @@ object PurchaseScreens {
                     if (o.status == OrderStatus.OPEN && session.can(Permission.PURCHASE_RECORD)) {
                         PrimaryButton("کالا رسید: ثبت فاکتور", { nav.go(Route.PurchaseFromOrder(o.id)) })
                     }
-                    Text("برای فرستادن سفارش به تأمین‌کننده، PDF آن را بسازید و در پیام‌رسان بفرستید.", style = SabouType.caption, color = Sabou.colors.muted)
+                    OrderSmsCard(o.id, o.status == OrderStatus.OPEN && session.can(Permission.PURCHASE_ORDER))
+                    Text("برای فرستادن فهرست کامل با قیمت‌ها، PDF سفارش را بسازید و در پیام‌رسان بفرستید.", style = SabouType.caption, color = Sabou.colors.muted)
                     ExportButtons("سفارش-${Fa.latinDigits(Fa.number(o.number))}") {
                         listOf(ReportTables.order(buying.order(orderId), overview.items().associateBy { it.id }, branches[o.scope.branchId.value] ?: ""))
                     }
@@ -1299,6 +1311,47 @@ object PurchaseScreens {
                         onConfirm = { confirmCancel = false; action.run({ orders.cancel(CancelPurchaseOrder(GlobalId.new(), o.scope, o.id, reason)) }) },
                         onDismiss = { confirmCancel = false }, danger = true)
                 }
+            }
+        }
+    }
+
+    /** The order's SMS to its supplier (ADR-0046): what was sent, and sending (again) by hand. */
+    @Composable
+    private fun OrderSmsCard(orderId: GlobalId, canSend: Boolean) {
+        val session = LocalSession.current
+        val context = LocalContext.current
+        val sms by load(session, orderId) { buying.orderSms(orderId) }
+        var sent by remember { mutableStateOf(ir.sabou.app.data.SmsOutbox.log(context).filter { it.ref == ir.sabou.app.data.SmsOutbox.orderRef(orderId) }) }
+        var busy by remember { mutableStateOf(false) }
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
+        // An automatic send runs in the background right after saving; look again shortly.
+        androidx.compose.runtime.LaunchedEffect(orderId) {
+            repeat(6) { kotlinx.coroutines.delay(2_000); sent = ir.sabou.app.data.SmsOutbox.log(context).filter { it.ref == ir.sabou.app.data.SmsOutbox.orderRef(orderId) } }
+        }
+        val s = sms.orNull() ?: return
+        val ready = ir.sabou.app.data.SmsOutbox.ready(context)
+        if (!ready && sent.isEmpty() && !s.autoSend) return
+        SCard {
+            Text("پیامک سفارش", style = SabouType.section, color = Sabou.colors.ink)
+            sent.firstOrNull()?.let { e ->
+                val time = Fa.digits(java.text.SimpleDateFormat("HH:mm yyyy/MM/dd", java.util.Locale.US).format(java.util.Date(e.at)))
+                if (e.error == null) Banner("به ${Fa.digits(e.to)} فرستاده شد · $time", ChipKind.PRIMARY, R.drawable.ic_check)
+                else Banner("ارسال نشد ($time): ${e.error}", ChipKind.DANGER)
+            }
+            Text(s.text, style = SabouType.caption, color = Sabou.colors.muted)
+            when {
+                s.mobile == null -> Text("شماره همراه تأمین‌کننده ثبت نشده است.", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
+                !ready -> Text("ارسال پیامک در «من › امنیت و داده‌ها › پیامک» روشن نیست.", style = SabouType.caption, color = Sabou.colors.onAccentSoft)
+                canSend -> SecondaryButton(if (sent.isEmpty()) "ارسال پیامک به ${Fa.digits(s.mobile!!)}" else "ارسال دوباره", {
+                    busy = true
+                    scope.launch {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            ir.sabou.app.data.SmsOutbox.send(context, listOf(s.mobile!!), s.text, ir.sabou.app.data.SmsOutbox.orderRef(orderId))
+                        }
+                        busy = false
+                        sent = ir.sabou.app.data.SmsOutbox.log(context).filter { it.ref == ir.sabou.app.data.SmsOutbox.orderRef(orderId) }
+                    }
+                }, enabled = !busy)
             }
         }
     }
