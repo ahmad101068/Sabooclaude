@@ -131,12 +131,16 @@ class SabouCore private constructor(
     internal val lots = ir.sabou.persistence.SqlLotStore(db)
     internal val inventoryGateway = InventoryGateway(ledger, registry.issue(ModuleId.INVENTORY), items, locations, stock, shortages, lots)
     internal val inventoryDocuments = ir.sabou.persistence.SqlInventoryDocumentStore(db)
+    internal val transits = ir.sabou.persistence.SqlTransitStore(db)
+    internal val stockRequests = ir.sabou.persistence.SqlStockRequestStore(db)
     val inventory = InventoryOperations(bus, inventoryGateway, items, locations, recipes,
         menuItemInUse = { id -> menuPrices.versions(id).isNotEmpty() || sales.usesMenuItem(id) },
         itemReferenced = { id -> items.isReferenced(id) },
         stock = stock,
         pendingCountAt = { loc -> stockCounts.all().any { it.locationId == loc && it.status == ir.sabou.inventory.CountStatus.PENDING } },
         documents = inventoryDocuments,
+        transits = transits,
+        requests = stockRequests,
     )
     internal val countPlans = ir.sabou.persistence.SqlCountPlanStore(db)
     val counts = ir.sabou.inventory.StockCountOperations(bus, inventoryGateway, stockCounts, countPlans)

@@ -169,6 +169,205 @@ object InventoryScreens {
         }
     }
 
+    /** Transfers between branches: those coming here are received with what actually arrived. */
+    @Composable
+    fun Transits(nav: Nav) {
+        val session = LocalSession.current
+        var receiving by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        Column(Modifier.fillMaxSize()) {
+            Header("انتقال بین شعب", onBack = nav.back) { BranchSwitcher() }
+            WithBranch { branch ->
+                val data by load(session, branch) { stockRecords.transits(branch) }
+                Page {
+                    Loaded(data) { list ->
+                        if (list.isEmpty()) EmptyState("انتقالی بین این شعبه و شعبه‌های دیگر ثبت نشده است. انتقال «در راه» را از «انتقال» ثبت کنید.")
+                        list.forEach { v ->
+                            val t = v.transit
+                            SCard {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text((if (v.incoming) "از ${v.from}" else "به ${v.to}") + (v.number?.let { " · ${Fa.digits(it)}" } ?: ""), style = SabouType.bodyStrong,
+                                        color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                                    when (t.status) {
+                                        ir.sabou.inventory.StockTransit.Status.IN_TRANSIT -> Chip("در راه", ChipKind.ACCENT)
+                                        ir.sabou.inventory.StockTransit.Status.RECEIVED -> Chip("تحویل شد", ChipKind.PRIMARY)
+                                        ir.sabou.inventory.StockTransit.Status.CANCELLED -> Chip("برگشت‌خورده", ChipKind.NEUTRAL)
+                                    }
+                                }
+                                Text("ارسال ${Fa.date(t.date)}" + (t.receivedOn?.let { " · تحویل ${Fa.date(it)} توسط ${t.receivedBy}" } ?: "") + " · ${Fa.rial(v.value)} ریال",
+                                    style = SabouType.caption, color = Sabou.colors.muted)
+                                v.lines.forEach { l ->
+                                    val unit = l.item?.let { unitName(it.unit) }.orEmpty()
+                                    val got = l.line.received
+                                    KeyValue(l.item?.name.orEmpty(), Fa.quantity(l.line.quantity) + " $unit" +
+                                        if (got != null && got != l.line.quantity) " · رسید ${Fa.quantity(got)}" else "",
+                                        valueColor = if (got != null && got != l.line.quantity) Sabou.colors.danger else Sabou.colors.ink)
+                                }
+                                if (v.incoming && t.status == ir.sabou.inventory.StockTransit.Status.IN_TRANSIT && session.can(Permission.INVENTORY_TRANSFER)) {
+                                    if (receiving == t.id) ReceiveForm(branch, v, session.today) { receiving = null }
+                                    else PrimaryButton("تحویل گرفتن", { receiving = t.id })
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun ReceiveForm(branch: ir.sabou.kernel.Scope.Branch, v: ir.sabou.core.TransitView, today: BusinessDate, onDone: () -> Unit) {
+        val got = ir.sabou.app.ui.rememberValueMap<GlobalId, Quantity?>()
+        var note by rememberSaveable { mutableStateOf("") }
+        var date by rememberSaveable { mutableStateOf(maxOf(today, v.transit.date)) }
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
+        val action = rememberAction()
+        Text("مقدار رسیده‌ی هر کالا را بشمارید؛ اگر همه رسیده، دست نزنید. کسری بین راه به مغایرت انبار این شعبه می‌رود.", style = SabouType.caption, color = Sabou.colors.muted)
+        v.lines.forEach { l ->
+            ItemQuantityInput("رسیده: ${l.item?.name.orEmpty()}", l.item, { got[l.line.itemId] = it }, blankAs = l.line.quantity, value = l.line.quantity)
+        }
+        val over = v.lines.any { l -> (got[l.line.itemId] ?: l.line.quantity) > l.line.quantity }
+        if (over) Text("مقدار رسیده از ارسالی بیشتر است؛ اضافه را با انبارگردانی ثبت کنید.", style = SabouType.caption, color = Sabou.colors.danger)
+        TextInput("توضیح", note, { note = it }, placeholder = "مثلاً یک بسته آسیب دیده بود")
+        DateInput("تاریخ دریافت", date, { date = it }, today)
+        action.error?.let { Banner(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PrimaryButton("ثبت دریافت", {
+                val lines = v.lines.map { l -> IssueLine(l.line.itemId, got[l.line.itemId] ?: l.line.quantity) }
+                action.run({ inventory.receiveTransfer(ir.sabou.inventory.ReceiveTransfer(id.value, branch, v.transit.id, lines, date, note)) }) { onDone() }
+            }, Modifier.weight(1f), enabled = !over && !action.busy, busy = action.busy)
+            SecondaryButton("انصراف", onDone, Modifier.weight(1f))
+        }
+    }
+
+    /** Requests for goods: the kitchen (or another branch) asks a storeroom; its storekeeper sends what he has, or refuses. */
+    @Composable
+    fun Requests(nav: Nav) {
+        val session = LocalSession.current
+        var asking by rememberSaveable { mutableStateOf(false) }
+        var handling by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        Column(Modifier.fillMaxSize()) {
+            Header("درخواست کالا", onBack = nav.back) { BranchSwitcher() }
+            WithBranch { branch ->
+                val data by load(session, branch) { stockRecords.requests(branch) }
+                Page {
+                    if (asking) RequestForm(branch) { asking = false }
+                    else PrimaryButton("درخواست تازه", { asking = true })
+                    Loaded(data) { list ->
+                        if (list.isEmpty()) EmptyState("درخواستی ثبت نشده است.")
+                        list.forEach { v ->
+                            val r = v.request
+                            SCard {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("${v.from} ← ${v.to}", style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                                    when (r.status) {
+                                        ir.sabou.inventory.StockRequest.Status.OPEN -> Chip(if (v.toSend) "منتظر ارسال" else "باز", ChipKind.ACCENT)
+                                        ir.sabou.inventory.StockRequest.Status.SENT -> Chip("ارسال شد", ChipKind.PRIMARY)
+                                        ir.sabou.inventory.StockRequest.Status.REJECTED -> Chip("رد شد", ChipKind.DANGER)
+                                        ir.sabou.inventory.StockRequest.Status.CANCELLED -> Chip("لغو شد", ChipKind.NEUTRAL)
+                                    }
+                                }
+                                Text("${r.requestedBy} · ${Fa.date(r.date)}" + (if (r.handledBy.isNotBlank()) " · رسیدگی: ${r.handledBy}" else "") +
+                                    (v.transferNumber?.let { " · انتقال ${Fa.digits(it)}" } ?: ""), style = SabouType.caption, color = Sabou.colors.muted)
+                                v.lines.forEach { l ->
+                                    val unit = l.item?.let { unitName(it.unit) }.orEmpty()
+                                    KeyValue(l.item?.name.orEmpty(), Fa.quantity(l.quantity) + " $unit" + if (v.toSend && r.status == ir.sabou.inventory.StockRequest.Status.OPEN) " · موجود ${Fa.quantity(l.onHand)}" else "",
+                                        valueColor = if (v.toSend && r.status == ir.sabou.inventory.StockRequest.Status.OPEN && l.onHand < l.quantity) Sabou.colors.danger else Sabou.colors.ink)
+                                }
+                                if (r.note.isNotBlank()) Text(r.note, style = SabouType.caption, color = Sabou.colors.muted)
+                                if (r.rejectReason.isNotBlank()) Text("دلیل: ${r.rejectReason}", style = SabouType.caption, color = Sabou.colors.danger)
+                                if (r.status == ir.sabou.inventory.StockRequest.Status.OPEN) {
+                                    if (handling == r.id) {
+                                        if (v.toSend && session.can(Permission.INVENTORY_TRANSFER)) FulfilForm(branch, v, session.today) { handling = null }
+                                        else CancelRequest(branch, r.id) { handling = null }
+                                    } else if (v.toSend && session.can(Permission.INVENTORY_TRANSFER)) PrimaryButton("ارسال یا رد", { handling = r.id })
+                                    else if (r.scope == branch) Text("لغو درخواست", style = SabouType.label, color = Sabou.colors.danger,
+                                        modifier = Modifier.clickable { handling = r.id }.padding(vertical = 6.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun RequestForm(branch: ir.sabou.kernel.Scope.Branch, onDone: () -> Unit) {
+        val session = LocalSession.current
+        val data by load(session, branch) { Triple(overview.items().filter { it.isActive }, overview.locations(branch).filter { it.isActive }, stockRecords.allLocations()) }
+        var source by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var target by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        val lines = ir.sabou.app.ui.rememberRows<IssueLine>({ listOf(it.itemId, it.quantity) }, { IssueLine(it[0] as GlobalId, it[1] as Quantity) }) { emptyList() }
+        var note by rememberSaveable { mutableStateOf("") }
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
+        val action = rememberAction()
+        Loaded(data) { (items, own, all) ->
+            ir.sabou.app.ui.components.FormCard("درخواست تازه") {
+                Picker("برای (انبار یا آشپزخانه‌ی این شعبه)", own.map { Choice(it.id, it.name) }, target, { target = it })
+                Picker("از انبار", all.filter { it.id != target }.map { Choice(it.id, it.name, if (it.scope != branch) "شعبه دیگر" else null) }, source, { source = it })
+                Divider()
+                ItemLines(items, lines) { null }
+                TextInput("توضیح", note, { note = it }, placeholder = "مثلاً برای شیفت شب")
+                action.error?.let { Banner(it) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PrimaryButton("ثبت درخواست", {
+                        action.run({ inventory.requestStock(ir.sabou.inventory.RequestStock(id.value, branch, source!!, target!!, lines.toList(), note, session.today)) }) { onDone() }
+                    }, Modifier.weight(1f), enabled = source != null && target != null && lines.isNotEmpty() && !action.busy, busy = action.busy)
+                    SecondaryButton("انصراف", onDone, Modifier.weight(1f))
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun FulfilForm(branch: ir.sabou.kernel.Scope.Branch, v: ir.sabou.core.RequestView, today: BusinessDate, onDone: () -> Unit) {
+        val give = ir.sabou.app.ui.rememberValueMap<GlobalId, Quantity?>()
+        var date by rememberSaveable { mutableStateOf(today) }
+        var reason by rememberSaveable { mutableStateOf("") }
+        var rejecting by rememberSaveable { mutableStateOf(false) }
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
+        val action = rememberAction()
+        if (!rejecting) {
+            Text("مقدار ارسالی هر کالا را وارد کنید (پیش‌فرض: همان درخواست). صفر یعنی این کالا ارسال نمی‌شود." +
+                if (v.request.scope != branch) " کالا «در راه» می‌رود و شعبه‌ی درخواست‌کننده تحویل می‌گیرد." else "", style = SabouType.caption, color = Sabou.colors.muted)
+            v.lines.forEach { l ->
+                ItemQuantityInput("ارسالی: ${l.item?.name.orEmpty()}", l.item, { give[l.itemId] = it }, blankAs = Quantity.ZERO, value = minOf(l.quantity, l.onHand))
+            }
+            DateInput("تاریخ ارسال", date, { date = it }, today)
+        } else {
+            TextInput("دلیل رد", reason, { reason = it }, placeholder = "مثلاً موجود نیست")
+        }
+        action.error?.let { Banner(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!rejecting) {
+                val lines = v.lines.map { l -> IssueLine(l.itemId, give[l.itemId] ?: minOf(l.quantity, l.onHand)) }.filter { !it.quantity.isZero }
+                PrimaryButton("ارسال", {
+                    action.run({ inventory.fulfilRequest(ir.sabou.inventory.FulfilStockRequest(id.value, v.request.fromScope, v.request.id, lines, date)) }) { onDone() }
+                }, Modifier.weight(1f), enabled = lines.isNotEmpty() && !action.busy, busy = action.busy)
+                SecondaryButton("رد درخواست", { rejecting = true }, Modifier.weight(1f), danger = true)
+            } else {
+                PrimaryButton("ثبت رد", {
+                    action.run({ inventory.closeRequest(ir.sabou.inventory.CloseStockRequest(id.value, v.request.fromScope, v.request.id, reason)) }) { onDone() }
+                }, Modifier.weight(1f), enabled = reason.trim().length >= 3 && !action.busy, busy = action.busy)
+                SecondaryButton("انصراف", onDone, Modifier.weight(1f))
+            }
+        }
+    }
+
+    @Composable
+    private fun CancelRequest(branch: ir.sabou.kernel.Scope.Branch, requestId: GlobalId, onDone: () -> Unit) {
+        val id = rememberSaveable { mutableStateOf(GlobalId.new()) }
+        val action = rememberAction()
+        Text("درخواست لغو شود؟", style = SabouType.body, color = Sabou.colors.ink)
+        action.error?.let { Banner(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SecondaryButton("لغو درخواست", {
+                action.run({ inventory.closeRequest(ir.sabou.inventory.CloseStockRequest(id.value, branch, requestId, "", cancel = true)) }) { onDone() }
+            }, Modifier.weight(1f), enabled = !action.busy, danger = true)
+            SecondaryButton("نه", onDone, Modifier.weight(1f))
+        }
+    }
+
     fun wasteReasonName(name: String) = when (name) {
         "SPOILAGE" -> "فساد"; "EXPIRED" -> "تاریخ گذشته"; "PREPARATION" -> "ضایعات آماده‌سازی"; "DAMAGE" -> "آسیب‌دیدگی"; "OTHER" -> "سایر"
         "COMPLIMENTARY" -> "پذیرایی مهمان"; "STAFF_MEAL" -> "غذای پرسنل"; "DONATION" -> "اهدایی"; else -> name

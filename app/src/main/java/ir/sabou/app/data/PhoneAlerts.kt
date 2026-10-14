@@ -130,6 +130,8 @@ object PhoneAlerts {
         Alert.Kind.EXPIRY -> "تاریخ انقضا"
         Alert.Kind.COUNT_DUE -> "موعد انبارگردانی"
         Alert.Kind.STAFF_DOCUMENT -> "مدارک کارکنان"
+        Alert.Kind.TRANSFER_IN -> "کالای در راه"
+        Alert.Kind.STOCK_REQUEST -> "درخواست کالا"
     }
 }
 

@@ -173,6 +173,8 @@ object OperationsScreens {
             if (session.can(Permission.INVENTORY_VIEW)) item { NavRow(R.drawable.ic_operations, "موجودی", lowCount?.let { if (it > 0) "${Fa.number(it.toLong())} کالا زیر حداقل" else "همه کالاها بالای حداقل" }, onClick = { nav.go(Route.Stock) }) }
             if (session.can(Permission.INVENTORY_COUNT) || session.can(Permission.INVENTORY_ADJUST)) item { NavRow(R.drawable.ic_count, "انبارگردانی", "شمارش، بررسی و تأیید اختلاف با دلیل", onClick = { nav.go(Route.Count) }) }
             if (session.can(Permission.INVENTORY_TRANSFER)) item { NavRow(R.drawable.ic_transfer, "انتقال", "بین انبارها و شعب", onClick = { nav.go(Route.StockTransfer) }) }
+            if (session.can(Permission.INVENTORY_VIEW)) item { NavRow(R.drawable.ic_transfer, "درخواست کالا", "آشپزخانه یا شعبه درخواست می‌دهد، انبار ارسال می‌کند", onClick = { nav.go(Route.StockRequests) }) }
+            if (session.can(Permission.INVENTORY_TRANSFER)) item { NavRow(R.drawable.ic_transfer, "انتقال بین شعب", "کالای در راه؛ تحویل گرفتن با مقدار رسیده", onClick = { nav.go(Route.StockTransits) }) }
             if (session.can(Permission.INVENTORY_WASTE)) item { NavRow(R.drawable.ic_waste, "ضایعات", "ثبت با دلیل؛ چند کالا یا یک غذا", onClick = { nav.go(Route.Waste) }) }
             if (session.can(Permission.INVENTORY_VIEW)) item { NavRow(R.drawable.ic_count, "اسناد انبار", "ضایعات، انتقال، تولید و موجودی اول دوره؛ برگشت سند اشتباه", onClick = { nav.go(Route.StockDocuments) }) }
             if (kitchen) item { SectionTitle("آشپزخانه") }
@@ -620,8 +622,10 @@ object OperationsScreens {
             Header("انتقال کالا", onBack = nav.back)
             WithBranch { branch ->
                 val data by load(session, branch) {
-                    Triple(overview.items().filter { it.isActive }, overview.locations(branch).filter { it.isActive }, overview.transferTargets())
+                    Triple(overview.items().filter { it.isActive }, overview.locations(branch).filter { it.isActive }, stockRecords.allLocations())
                 }
+                val mine by load(session) { overview.branches().map { ir.sabou.kernel.Scope.Branch(it.id) }.toSet() }
+                var inTransit by rememberSaveable { mutableStateOf(true) }
                 var source by rememberSaveable { mutableStateOf<GlobalId?>(null) }
                 var target by rememberSaveable { mutableStateOf<GlobalId?>(null) }
                 val lines = ir.sabou.app.ui.rememberRows<IssueLine>({ listOf(it.itemId, it.quantity) }, { IssueLine(it[0] as GlobalId, it[1] as Quantity) }) { emptyList() }
@@ -639,9 +643,21 @@ object OperationsScreens {
                             InventoryScreens.ItemLines(items, lines) { if (source == null) null else available[it] ?: Quantity.ZERO }
                             TextInput("توضیح", note, { note = it })
                             DateInput("تاریخ", date, { date = it }, session.today)
+                            val dest = all.firstOrNull { it.id == target }
+                            val otherBranch = dest != null && dest.scope != branch
+                            // A branch this person cannot open confirms the goods itself.
+                            val mustTransit = otherBranch && mine.orNull()?.contains(dest!!.scope) != true
+                            if (otherBranch) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable(enabled = !mustTransit) { inTransit = !inTransit }) {
+                                    androidx.compose.material3.Checkbox(checked = inTransit || mustTransit, onCheckedChange = { inTransit = it }, enabled = !mustTransit)
+                                    Text("در راه: شعبه‌ی مقصد هنگام رسیدن تحویل می‌گیرد", style = SabouType.body, color = Sabou.colors.ink)
+                                }
+                                Text(if (inTransit || mustTransit) "کالا همین حالا از این انبار کم می‌شود و وقتی شعبه‌ی مقصد مقدار رسیده را تأیید کرد به موجودی آن اضافه می‌شود؛ کسری بین راه، مغایرت انبار مقصد است."
+                                    else "کالا همین حالا به موجودی شعبه‌ی مقصد اضافه می‌شود.", style = SabouType.caption, color = Sabou.colors.muted)
+                            }
                             action.error?.let { Banner(it) }
                             PrimaryButton("ثبت انتقال", {
-                                action.run({ inventory.transfer(TransferStock(id.value, branch, source!!, target!!, lines.toList(), date, note)) }) { nav.back() }
+                                action.run({ inventory.transfer(TransferStock(id.value, branch, source!!, target!!, lines.toList(), date, note, inTransit = otherBranch && (inTransit || mustTransit))) }) { nav.back() }
                             }, enabled = source != null && target != null && lines.isNotEmpty(), busy = action.busy)
                         }
                     }

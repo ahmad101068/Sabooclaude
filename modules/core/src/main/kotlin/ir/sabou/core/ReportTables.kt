@@ -293,15 +293,15 @@ object ReportTables {
 
     fun usage(u: UsageReport): ReportTable = ReportTable(
         "مصرف واقعی در برابر تئوریک", "${u.place} · ${period(u.from, u.to)}",
-        listOf("کالا", "واحد", "موجودی اول", "خرید", "انتقال", "تولید", "موجودی پایان", "مصرف واقعی", "مصرف تئوریک (فروش)", "ضایعات", "پذیرایی و اهدایی", "اختلاف توضیح‌داده‌نشده", "ارزش اختلاف", "کارایی"),
+        listOf("کالا", "گروه", "واحد", "موجودی اول", "خرید", "انتقال", "تولید", "موجودی پایان", "مصرف واقعی", "مصرف تئوریک (فروش)", "ضایعات", "پذیرایی و اهدایی", "اختلاف توضیح‌داده‌نشده", "ارزش اختلاف", "کارایی"),
         u.rows.map {
             listOf(
-                Cell.of(it.item.name), Cell.of(unitName(it.item.unit)), Cell.Qty(it.opening.quantity), Cell.Qty(it.purchases.quantity), Cell.Qty(it.transfers.quantity),
+                Cell.of(it.item.name), Cell.of(it.item.category), Cell.of(unitName(it.item.unit)), Cell.Qty(it.opening.quantity), Cell.Qty(it.purchases.quantity), Cell.Qty(it.transfers.quantity),
                 Cell.Qty(it.production.quantity), Cell.Qty(it.closing.quantity), Cell.Qty(it.actual.quantity), Cell.Qty(it.theoretical.quantity),
                 Cell.Qty(it.waste.quantity), Cell.Qty(it.comps.quantity), Cell.Qty(it.unexplained.quantity), Cell.Amount(it.unexplained.value), pct(it.efficiencyBp),
             )
         },
-        footer = listOf(Cell.of("جمع ارزش"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(u.actualValue),
+        footer = listOf(Cell.of("جمع ارزش"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(u.actualValue),
             Cell.Amount(u.theoreticalValue), Cell.Amount(u.wasteValue), Cell.Amount(u.compsValue), Cell.EMPTY, Cell.Amount(u.unexplainedValue), Cell.EMPTY),
         notes = listOf(
             "مصرف واقعی = موجودی اول + خرید + انتقال + تولید − موجودی پایان. اختلاف توضیح‌داده‌نشده همان کسری (منهای اضافه‌ی) انبارگردانی است.",

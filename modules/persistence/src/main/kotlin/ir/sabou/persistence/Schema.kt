@@ -318,6 +318,18 @@ object Schema {
                 "CREATE INDEX inventory_documents_day ON inventory_documents(scope, date)",
             ),
         ),
+        Migration(
+            24,
+            listOf(
+                // Transfers between branches in transit, and requests for goods from a storeroom (ADR-0044).
+                "CREATE TABLE stock_transits (id TEXT PRIMARY KEY, from_scope TEXT NOT NULL, to_scope TEXT NOT NULL, date INTEGER NOT NULL, status TEXT NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX stock_transits_to ON stock_transits(to_scope, status)",
+                "CREATE INDEX stock_transits_from ON stock_transits(from_scope, date)",
+                "CREATE TABLE stock_requests (id TEXT PRIMARY KEY, scope TEXT NOT NULL, from_scope TEXT NOT NULL, date INTEGER NOT NULL, status TEXT NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX stock_requests_scope ON stock_requests(scope, status)",
+                "CREATE INDEX stock_requests_from ON stock_requests(from_scope, status)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }
