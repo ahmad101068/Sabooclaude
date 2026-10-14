@@ -194,6 +194,7 @@ class SabouCore private constructor(
     internal val specialDays = ir.sabou.persistence.SqlSpecialDayStore(db)
     val specialDayOps = ir.sabou.sales.SpecialDayOperations(bus, specialDays)
     val forecasts = Forecasts(this)
+    val cashFlows = CashFlows(this)
     val books = Books(this)
     /** Two phones, one set of books (ADR-0042). */
     val sync = Sync(this)
