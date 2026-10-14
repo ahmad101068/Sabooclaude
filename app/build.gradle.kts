@@ -63,6 +63,15 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (signingComplete) signingConfig = signingConfigs.getByName("release")
         }
+        // The release build (minified by R8) signed with the public debug key as a separate app: CI installs and
+        // starts it on the emulator, so a shrinking problem is found before a real release (docs/RELEASE.md).
+        create("releaseCheck") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".check"
+            versionNameSuffix = "-check"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
+        }
     }
 
     compileOptions {
