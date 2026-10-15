@@ -195,6 +195,7 @@ class SabouCore private constructor(
     val specialDayOps = ir.sabou.sales.SpecialDayOperations(bus, specialDays)
     val forecasts = Forecasts(this)
     val profitBridges = ProfitBridges(this)
+    val cashFlows = CashFlows(this)
     val books = Books(this)
     /** Two phones, one set of books (ADR-0042). */
     val sync = Sync(this)

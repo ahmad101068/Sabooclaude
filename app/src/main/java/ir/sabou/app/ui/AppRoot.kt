@@ -586,6 +586,8 @@ private fun Pages(route: Route, nav: Nav) {
         Route.DailyPnl -> ReportsScreens.DailyPnl(nav)
         Route.SalesForecast -> ReportsScreens.SalesForecast(nav)
         Route.ProfitBridge -> ReportsScreens.ProfitBridge(nav)
+        Route.CashForecast -> ReportsScreens.CashForecast(nav)
+        Route.CreditCustomers -> ReportsScreens.CreditCustomers(nav)
         Route.Usage -> ReportsScreens.Usage(nav)
         Route.AttendanceReport -> ReportsScreens.AttendanceReport(nav)
         Route.Stock -> OperationsScreens.Stock(nav)

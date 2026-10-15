@@ -47,6 +47,8 @@ import ir.sabou.sales.CustomerType
 import ir.sabou.sales.DailySale
 import ir.sabou.sales.Receivable
 import ir.sabou.sales.SaleLine
+import ir.sabou.sales.ChannelShare
+import ir.sabou.sales.SalesChannel
 import ir.sabou.sales.SaleStatus
 import ir.sabou.sales.SalesDay
 import ir.sabou.sales.SalesStore
@@ -325,6 +327,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
         status = SaleStatus.valueOf(d.str("status")), revenueJournalId = Codec.idOrNull(d.strOrNull("revenueJournal")),
         cost = Codec.money(d.long("cost")), consumed = d.bool("consumed"),
         guests = d.intOr("guests", 0), transactions = d.intOr("transactions", 0), discountReason = d.strOr("discountReason", ""),
+        channels = d.docsOr("channels").map { ChannelShare(SalesChannel.valueOf(it.str("channel")), Codec.money(it.long("amount")), it.intOr("bills", 0)) },
     )
 
     /**
@@ -370,6 +373,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
                     },
                     "status" to sale.status.name, "revenueJournal" to sale.revenueJournalId?.value, "cost" to sale.cost.rial, "consumed" to sale.consumed,
                     "guests" to sale.guests, "transactions" to sale.transactions, "discountReason" to sale.discountReason,
+                    "channels" to sale.channels.map { mapOf("channel" to it.channel.name, "amount" to it.amount.rial, "bills" to it.transactions) },
                 ),
             ),
         ),

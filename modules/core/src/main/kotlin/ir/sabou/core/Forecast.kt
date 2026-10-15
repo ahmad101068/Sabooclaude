@@ -40,6 +40,15 @@ class Forecasts internal constructor(private val core: SabouCore) {
         return SalesForecast(forecast, trend, backtest(branch, from))
     }
 
+    /**
+     * Expected net sales of each of the 7 days from [from] as a normal day (no special-day mark): the weekly pattern
+     * the cash forecast repeats over its weeks (ADR-0051). No permission check: callers check their own.
+     */
+    internal fun normalWeek(branch: Scope.Branch, from: BusinessDate): List<Long> {
+        val history = dailyNet(branch, from.plusDays(-HISTORY_DAYS.toLong()), from.plusDays(-1))
+        return (0 until 7).map { day(from.plusDays(it.toLong()), history, null).expected }
+    }
+
     /** The forecast of one day from [history] (net sales of each recorded day, see [tradingDays]). */
     /**
      * The weighted mean already follows a recent change of level (last week weighs 8 times the eighth), so the trend
