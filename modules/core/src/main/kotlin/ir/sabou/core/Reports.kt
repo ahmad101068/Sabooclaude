@@ -125,14 +125,44 @@ data class MixRow(
     val shareBp: Long,
     /** Ingredient cost of one portion at today's average costs (null: no recipe or no cost known). */
     val unitCost: Money?,
+    /**
+     * What was actually taken from stock for this dish when its sales were posted (ADR-0050), over the portions
+     * whose cost was recorded: [costedPortions] of [portions], sold for [costedGross], at [actualCost] in all. Zero
+     * portions (and a null [actualCost]) for roles that do not see costs, or when no posted line carries a cost.
+     */
+    val costedPortions: Quantity = Quantity.ZERO,
+    val costedGross: Money = Money.ZERO,
+    val actualCost: Money? = null,
+    /** Some of those portions were posted while an ingredient was short in book stock: [actualCost] is too low. */
+    val actualCostShort: Boolean = false,
 ) {
     val averagePrice: Money? get() = if (portions.isZero) null else Money.of(Ratio.mulDiv(gross.rial, Quantity.SCALE, portions.micros))
     val unitMargin: Long? get() = unitCost?.let { c -> averagePrice?.let { it.rial - c.rial } }
     /** Food cost of the item as basis points of its price. */
     val costBp: Long? get() = unitCost?.let { c -> averagePrice?.takeIf { !it.isZero }?.let { Ratio.mulDiv(c.rial, 10_000, it.rial) } }
+
+    /** Actual ingredient cost of one portion in the period, at the costs of the day each sale was posted. */
+    val actualUnitCost: Money? get() = actualCost?.takeIf { costedPortions > Quantity.ZERO }?.let { Money.of(Ratio.mulDiv(it.rial, Quantity.SCALE, costedPortions.micros)) }
+    /** Actual margin of one portion: the costed portions' average price less their actual cost. */
+    val actualUnitMargin: Long? get() = actualCost?.takeIf { costedPortions > Quantity.ZERO }?.let { c ->
+        Ratio.mulDivSigned(costedGross.rial - c.rial, Quantity.SCALE, costedPortions.micros)
+    }
+    /** Actual food cost as basis points of what those portions sold for. */
+    val actualCostBp: Long? get() = actualCost?.takeIf { !costedGross.isZero && costedGross.rial > 0 }?.let { Ratio.mulDiv(it.rial, 10_000, costedGross.rial) }
+    /** Whether every portion of the period carries its actual cost. */
+    val fullyCosted: Boolean get() = actualCost != null && costedPortions == portions
 }
 
-data class ProductMix(val from: BusinessDate, val to: BusinessDate, val branch: String, val rows: List<MixRow>, val gross: Money, val days: Int)
+/** Net food sales of one channel in a period (ADR-0052); [channel] null: sales recorded without a channel. */
+data class ChannelRow(val channel: ir.sabou.sales.SalesChannel?, val net: Money, val transactions: Int, val shareBp: Long) {
+    val perTransaction: Money? get() = if (transactions <= 0) null else Money.of(net.rial / transactions)
+}
+
+data class ProductMix(
+    val from: BusinessDate, val to: BusinessDate, val branch: String, val rows: List<MixRow>, val gross: Money, val days: Int,
+    /** Net food sales by channel, biggest first; empty when no sale of the period has a channel. */
+    val channels: List<ChannelRow> = emptyList(),
+)
 
 /**
  * Menu engineering (Kasavana & Smith): an item is *popular* when its share of portions sold reaches 70 % of an
@@ -476,14 +506,32 @@ class Reports internal constructor(private val core: SabouCore) {
         val costs = UnitCosts(branch, to)
         val rows = lines.map { (id, l) ->
             val g = Money.sum(l.map { it.gross })
+            val costed = if (seesCosts) l.filter { it.cost != null } else emptyList()
             MixRow(
                 menuItemId = id, name = names[id].orEmpty(),
                 portions = l.fold(Quantity.ZERO) { acc, x -> acc + x.portions }, gross = g,
                 shareBp = if (gross.isZero) 0 else Ratio.mulDiv(g.rial, 10_000, gross.rial),
                 unitCost = if (seesCosts) costs.portion(id, to) else null,
+                costedPortions = costed.fold(Quantity.ZERO) { acc, x -> acc + x.portions },
+                costedGross = Money.sum(costed.map { it.gross }),
+                actualCost = costed.takeIf { it.isNotEmpty() }?.let { c -> Money.sum(c.map { it.cost!! }) },
+                actualCostShort = costed.any { it.costShort },
             )
         }.sortedByDescending { it.gross }
-        return ProductMix(from, to, scopeName(branch), rows, gross, posted.size)
+        return ProductMix(from, to, scopeName(branch), rows, gross, posted.size, channelRows(posted))
+    }
+
+    /** Net food sales by channel over [posted] (ADR-0052); sales without one are a row of their own. */
+    private fun channelRows(posted: List<ir.sabou.sales.DailySale>): List<ChannelRow> {
+        if (posted.none { it.channels.isNotEmpty() }) return emptyList()
+        val net = HashMap<ir.sabou.sales.SalesChannel?, Long>(); val bills = HashMap<ir.sabou.sales.SalesChannel?, Int>()
+        posted.forEach { s ->
+            if (s.channels.isEmpty()) { net.merge(null, s.netFood.rial, Long::plus); bills.merge(null, s.transactions, Int::plus) }
+            else s.channels.forEach { c -> net.merge(c.channel, c.amount.rial, Long::plus); bills.merge(c.channel, c.transactions, Int::plus) }
+        }
+        val total = net.values.sum()
+        return net.entries.map { e -> ChannelRow(e.key, Money.of(e.value), bills[e.key] ?: 0, if (total <= 0) 0L else Ratio.mulDiv(e.value, 10_000, total)) }
+            .sortedWith(compareBy<ChannelRow> { it.channel == null }.thenByDescending { it.net.rial })
     }
 
     fun dayFlash(branch: Scope.Branch, date: BusinessDate): DayFlash {

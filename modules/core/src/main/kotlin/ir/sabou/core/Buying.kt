@@ -74,9 +74,20 @@ data class Suggestion(
     val unitPrice: Long?,
     /** The delivery the par was chosen for, when it is a weekday's own par. */
     val deliveryDay: BusinessDate? = null,
+    /**
+     * From the sales forecast (ADR-0054): what the expected dishes use from the delivery until the one after it.
+     * The order then restores the larger of [par] and this cover; [planned] is the expected use before the delivery.
+     */
+    val forecastCover: Quantity? = null,
 ) {
     val value: Money? get() = unitPrice?.let { Money.of(Ratio.mulDiv(it, suggested.micros, Quantity.SCALE)) }
 }
+
+/**
+ * An ingredient the expected dishes use up before its next delivery (ADR-0054): [need] until [delivery] (or the
+ * next 7 days without one) is more than [onHand] + [onOrder] in the branch; [runsOutOn] is the first day short.
+ */
+data class RunOut(val item: Item, val onHand: Quantity, val onOrder: Quantity, val need: Quantity, val runsOutOn: BusinessDate, val delivery: BusinessDate?, val supplier: String?)
 
 /** The last price paid for an item: per unit, to whom, when. */
 data class LastPaid(val price: Long, val supplier: String, val date: BusinessDate)
@@ -97,6 +108,11 @@ data class SuggestedOrders(val groups: List<SuggestionGroup>, val problems: List
  * orders, supplier item names and attachments. Same rules: signed-in actor, permission, branch scope.
  */
 class Buying internal constructor(private val core: SabouCore) {
+    companion object {
+        /** Days ahead the run-out check looks without a delivery to wait for. */
+        const val RUN_OUT_DAYS = 7
+    }
+
     private fun actor(vararg anyOf: Permission): Actor {
         val a = core.session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
         if (anyOf.none { a.role.allows(it) }) throw DomainException(DomainError.PermissionDenied(anyOf.first().name))
@@ -198,25 +214,29 @@ class Buying internal constructor(private val core: SabouCore) {
         return changes.sortedByDescending { it.date }
     }
 
-    /** The last unit price paid for each item, from any supplier, in what the person can see (form hints). */
+    /**
+     * The last unit price paid for each item in [branch], from any supplier (form hints). Only [branch]'s own
+     * invoices: another branch buys at its own prices, so its last price is no hint here. (Price-change alerts in
+     * [priceChanges] do compare across what the person can see, by design.)
+     */
     fun lastPaid(branch: Scope.Branch): Map<GlobalId, LastPaid> {
         val a = actor(Permission.PURCHASE_VIEW, Permission.PURCHASE_RECORD, Permission.PURCHASE_ORDER)
         a.require(branch)
         val names = supplierNames()
         val result = HashMap<GlobalId, LastPaid>()
-        postedInOrder(a).forEach { inv -> inv.lines.filter { !it.quantity.isZero }.forEach { result[it.itemId] = LastPaid(it.unitPrice, names[inv.supplierId].orEmpty(), inv.date) } }
+        postedInOrder(a).filter { it.scope == branch }.forEach { inv -> inv.lines.filter { !it.quantity.isZero }.forEach { result[it.itemId] = LastPaid(it.unitPrice, names[inv.supplierId].orEmpty(), inv.date) } }
         return result
     }
 
     private fun postedInOrder(a: Actor) = core.purchases.invoices().filter { it.status == InvoiceStatus.POSTED && a.canAccess(it.scope) }
         .withIndex().sortedWith(compareBy({ it.value.date }, { it.index })).map { it.value }
 
-    /** The last unit price paid to [supplierId] for each item (form hints and price warnings). */
+    /** The last unit price paid to [supplierId] for each item in [branch] (form hints and price warnings). */
     fun lastPrices(supplierId: GlobalId, branch: Scope.Branch): Map<GlobalId, Long> {
         val a = actor(Permission.PURCHASE_VIEW, Permission.PURCHASE_ORDER)
         a.require(branch)
         val result = HashMap<GlobalId, Long>()
-        core.purchases.invoices().filter { it.status == InvoiceStatus.POSTED && it.supplierId == supplierId && a.canAccess(it.scope) }
+        core.purchases.invoices().filter { it.status == InvoiceStatus.POSTED && it.supplierId == supplierId && it.scope == branch }
             .withIndex().sortedWith(compareBy({ it.value.date }, { it.index })).map { it.value }
             .forEach { inv -> inv.lines.filter { !it.quantity.isZero }.forEach { result[it.itemId] = it.unitPrice } }
         return result
@@ -263,24 +283,111 @@ class Buying internal constructor(private val core: SabouCore) {
      * recipes are broken down into what they are made of, after using what is already prepared).
      */
     fun suggestions(locationId: GlobalId, plan: List<PlanLine>, date: BusinessDate, minutesNow: Int): SuggestedOrders {
+        val location = suggestionLocation(locationId)
+        val problems = ArrayList<RecipeProblem>()
+        val dishes = HashMap<GlobalId, Long>()
+        plan.filter { !it.portions.isZero }.forEach { dishes[it.menuItemId] = (dishes[it.menuItemId] ?: 0L) + it.portions.micros }
+        val need = rawNeed(dishes, date, { core.stock.balance(it, locationId).quantity.micros }, problems)
+        return build(location, date, minutesNow, problems) { item, _ -> (need[item.id] ?: 0L) to null }
+    }
+
+    /**
+     * Suggested purchases from the sales forecast (ADR-0054): for each item, what the expected dishes use until its
+     * supplier's next delivery, plus the larger of its par and what they use from that delivery until the one after
+     * (7 days without delivery days; tomorrow and a week for an item without a supplier).
+     */
+    fun forecastSuggestions(locationId: GlobalId, date: BusinessDate, minutesNow: Int): SuggestedOrders {
+        val location = suggestionLocation(locationId)
+        val problems = ArrayList<RecipeProblem>()
+        val windows = HashMap<Pair<Long, Long>, Pair<Map<GlobalId, Long>, Map<GlobalId, Long>>>()
+        fun onHand(id: GlobalId) = core.stock.balance(id, locationId).quantity.micros
+        val suppliers = core.suppliers.all().associateBy { it.id }
+        return build(location, date, minutesNow, problems) { item, _ ->
+            val supplier = item.preferredSupplierId?.let { suppliers[it] }?.takeIf { it.isActive }
+            val (d1, d2) = deliveryWindow(supplier, date, minutesNow)
+            val (before, cover) = windows.getOrPut(d1.epochDay to d2.epochDay) {
+                // Prepared stock is used up first, once: before the delivery; the cover after it takes none of it.
+                rawNeed(forecastDishes(location.scope as Scope.Branch, date, d1), date, ::onHand, problems) to
+                    rawNeed(forecastDishes(location.scope as Scope.Branch, d1, d2), d1, { 0L }, ArrayList())
+            }
+            (before[item.id] ?: 0L) to (cover[item.id] ?: 0L)
+        }
+    }
+
+    /**
+     * Ingredients the expected dishes use up before their next delivery, branch-wide (ADR-0054), soonest first:
+     * day by day from [date], the first day the cumulative need passes what is in the branch and on order.
+     */
+    fun runOuts(branch: Scope.Branch, date: BusinessDate, minutesNow: Int): List<RunOut> {
+        val a = actor(Permission.PURCHASE_ORDER, Permission.PURCHASE_RECORD, Permission.INVENTORY_VIEW)
+        a.require(branch)
+        val places = core.locations.all().filter { it.scope == branch && it.isActive }
+        if (places.isEmpty()) return emptyList()
+        val items = core.items.all().filter { it.isActive && !it.prepared }
+        val suppliers = core.suppliers.all().associateBy { it.id }
+        val onHand = items.associate { i -> i.id to places.sumOf { core.stock.balance(i.id, it.id).quantity.micros } }
+        val onOrder = HashMap<GlobalId, Long>().also { m -> places.forEach { p -> openOrders(p.id).forEach { (k, v) -> m[k] = (m[k] ?: 0L) + v } } }
+        fun prepared(id: GlobalId) = places.sumOf { core.stock.balance(id, it.id).quantity.micros }
+        // Cumulative need per day over the longest window any item needs.
+        val horizon = items.map { i -> deliveryWindow(i.preferredSupplierId?.let { suppliers[it] }?.takeIf { it.isActive }, date, minutesNow).first }
+            .maxOfOrNull { it.epochDay - date.epochDay }?.coerceIn(1, RUN_OUT_DAYS.toLong()) ?: 1L
+        val cumulative = ArrayList<Map<GlobalId, Long>>()
+        val dishes = HashMap<GlobalId, Long>()
+        for (d in 0 until horizon) {
+            core.prep.forecastOf(branch, date.plusDays(d)).forEach { f -> dishes[f.item.id] = (dishes[f.item.id] ?: 0L) + f.portions.micros }
+            cumulative += rawNeed(HashMap(dishes), date, ::prepared, ArrayList())
+        }
+        return items.mapNotNull { item ->
+            val supplier = item.preferredSupplierId?.let { suppliers[it] }?.takeIf { it.isActive }
+            val delivery = supplier?.nextDelivery(date, minutesNow)?.date
+            val days = ((delivery ?: date.plusDays(RUN_OUT_DAYS.toLong())).epochDay - date.epochDay).coerceIn(1, horizon).toInt()
+            val have = (onHand[item.id] ?: 0L) + (onOrder[item.id] ?: 0L)
+            val short = (0 until days).firstOrNull { (cumulative[it][item.id] ?: 0L) > have } ?: return@mapNotNull null
+            RunOut(item, Quantity.of(onHand[item.id] ?: 0L), Quantity.of(onOrder[item.id] ?: 0L), Quantity.of(cumulative[days - 1][item.id] ?: 0L),
+                date.plusDays(short.toLong()), delivery, supplier?.name)
+        }.sortedWith(compareBy({ it.runsOutOn.epochDay }, { it.item.name }))
+    }
+
+    private fun suggestionLocation(locationId: GlobalId): ir.sabou.inventory.Location {
         val a = actor(Permission.PURCHASE_ORDER, Permission.PURCHASE_RECORD)
         val location = core.locations.byId(locationId) ?: throw DomainException(DomainError.NotFound("LOCATION"))
         a.require(location.scope)
+        return location
+    }
+
+    /** The order's delivery and the one after it; without delivery days tomorrow and a week later. */
+    private fun deliveryWindow(supplier: ir.sabou.purchasing.Supplier?, date: BusinessDate, minutesNow: Int): Pair<BusinessDate, BusinessDate> {
+        val d1 = supplier?.nextDelivery(date, minutesNow)?.date ?: date.plusDays(1)
+        val d2 = supplier?.takeIf { it.deliveryDays.isNotEmpty() }?.let { s ->
+            (1L..14L).map { d1.plusDays(it) }.firstOrNull { ir.sabou.purchasing.Weekdays.index(it) in s.deliveryDays }
+        } ?: d1.plusDays(7)
+        return d1 to d2
+    }
+
+    /** Portions per dish the forecast expects on the days [from] … before [until] (ADR-0041, ADR-0033). */
+    private fun forecastDishes(branch: Scope.Branch, from: BusinessDate, until: BusinessDate): Map<GlobalId, Long> {
+        val out = HashMap<GlobalId, Long>()
+        var d = from
+        while (d < until) {
+            core.prep.forecastOf(branch, d).forEach { f -> out[f.item.id] = (out[f.item.id] ?: 0L) + f.portions.micros }
+            d = d.plusDays(1)
+        }
+        return out
+    }
+
+    /** Dishes → raw ingredients; prepared items → their ingredients for what [onHand] does not cover. */
+    private fun rawNeed(dishes: Map<GlobalId, Long>, date: BusinessDate, onHand: (GlobalId) -> Long, problems: MutableList<RecipeProblem>): Map<GlobalId, Long> {
         val items = core.items.all().associateBy { it.id }
         val book = RecipeBook(core.recipes)
-        fun onHand(id: GlobalId) = core.stock.balance(id, locationId).quantity.micros
-
-        // Planned need: dishes → ingredients; prepared items → their ingredients for the shortfall only.
-        val problems = ArrayList<RecipeProblem>()
-        val dishes = HashMap<GlobalId, Long>()
-        plan.filter { !it.portions.isZero }.forEach { p ->
-            val lines = runCatching { book.requirements(p.menuItemId, date, p.portions) }.getOrNull()
+        val needs = HashMap<GlobalId, Long>()
+        dishes.filter { it.value > 0 }.forEach { (menuItemId, portions) ->
+            val lines = runCatching { book.requirements(menuItemId, date, Quantity.of(portions)) }.getOrNull()
             if (lines == null) {
-                problems += RecipeProblem(core.recipes.menuItem(p.menuItemId)?.name ?: "آیتم منو", RecipeProblem.Kind.NO_RECIPE, "رسپی این آیتم منو در این تاریخ نیست؛ مواد آن در پیشنهاد نیامده است.")
+                problems += RecipeProblem(core.recipes.menuItem(menuItemId)?.name ?: "آیتم منو", RecipeProblem.Kind.NO_RECIPE, "رسپی این آیتم منو در این تاریخ نیست؛ مواد آن در پیشنهاد نیامده است.")
             }
-            lines?.forEach { dishes[it.itemId] = (dishes[it.itemId] ?: 0L) + it.quantity.micros }
+            lines?.forEach { needs[it.itemId] = (needs[it.itemId] ?: 0L) + it.quantity.micros }
         }
-        val expansion = PrepGraph(core.recipes) { items[it]?.prepared == true }.expand(dishes, date, ::onHand)
+        val expansion = PrepGraph(core.recipes) { items[it]?.prepared == true }.expand(needs, date, onHand)
         expansion.problems.forEach { pr ->
             problems += when (pr) {
                 is PrepGraph.Problem.NoRecipe -> RecipeProblem(items[pr.itemId]?.name ?: "کالای آماده", RecipeProblem.Kind.NO_RECIPE,
@@ -289,16 +396,33 @@ class Buying internal constructor(private val core: SabouCore) {
                     "رسپی‌ها چرخه دارند: " + pr.path.joinToString(" ← ") { items[it]?.name ?: "؟" })
             }
         }
-        val need = expansion.need
+        return expansion.need
+    }
+
+    /** What open orders to [locationId] still bring, per item (a partial delivery's goods are in stock already). */
+    private fun openOrders(locationId: GlobalId): Map<GlobalId, Long> {
         val onOrder = HashMap<GlobalId, Long>()
         core.purchases.orders().filter { it.status == OrderStatus.OPEN && it.locationId == locationId }
             .forEach { o ->
-                // What a partial delivery already brought is in stock, not on order.
                 val got = o.invoiceIds.mapNotNull { core.purchases.invoice(it) }.filter { it.status == InvoiceStatus.POSTED }.flatMap { it.lines }
                     .groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } }
                 o.lines.groupBy { it.itemId }.forEach { (item, l) -> onOrder[item] = (onOrder[item] ?: 0) + maxOf(0L, l.sumOf { it.quantity.micros } - (got[item] ?: 0L)) }
             }
+        return onOrder
+    }
 
+    /**
+     * The suggestion rows: [planned] gives, per item, what is used before the delivery and (forecast only) the cover
+     * after it. suggested = planned + max(par, cover) − on hand − on order.
+     */
+    private fun build(
+        location: ir.sabou.inventory.Location, date: BusinessDate, minutesNow: Int, problems: List<RecipeProblem>,
+        planned: (Item, BusinessDate?) -> Pair<Long, Long?>,
+    ): SuggestedOrders {
+        val locationId = location.id
+        val items = core.items.all().associateBy { it.id }
+        fun onHand(id: GlobalId) = core.stock.balance(id, locationId).quantity.micros
+        val onOrder = openOrders(locationId)
         val branchInvoices = core.purchases.invoices().filter { it.status == InvoiceStatus.POSTED && it.scope == location.scope }
             .withIndex().sortedWith(compareBy({ it.value.date }, { it.index })).map { it.value }
         val lastBySupplier = HashMap<Pair<GlobalId, GlobalId>, Long>()
@@ -309,23 +433,24 @@ class Buying internal constructor(private val core: SabouCore) {
 
         val suppliers = core.suppliers.all().associateBy { it.id }
         val rows = items.values.filter { it.isActive && !it.prepared }.mapNotNull { item ->
-            val planned = need[item.id] ?: 0L
             // The par of the weekday the goods will arrive (the supplier's next delivery), else the item's usual par.
             val delivery = item.preferredSupplierId?.let { suppliers[it] }?.takeIf { it.isActive }?.nextDelivery(date, minutesNow)?.date
+            val (before, cover) = planned(item, delivery)
             val par = item.parAt(locationId, delivery)
-            if (par.isZero && planned == 0L) return@mapNotNull null
-            val raw = par.micros + planned - onHand(item.id) - (onOrder[item.id] ?: 0L)
+            val target = maxOf(par.micros, cover ?: 0L)
+            if (target == 0L && before == 0L) return@mapNotNull null
+            val raw = target + before - onHand(item.id) - (onOrder[item.id] ?: 0L)
             val suggested = roundUp(item, maxOf(0L, raw))
             val price = item.preferredSupplierId?.let { lastBySupplier[it to item.id] } ?: lastAny[item.id]
-            item to Suggestion(item, Quantity.of(onHand(item.id)), Quantity.of(onOrder[item.id] ?: 0L), par, Quantity.of(planned), Quantity.of(suggested), price,
-                delivery?.takeIf { par != item.parLevel })
+            item to Suggestion(item, Quantity.of(onHand(item.id)), Quantity.of(onOrder[item.id] ?: 0L), par, Quantity.of(before), Quantity.of(suggested), price,
+                delivery?.takeIf { par != item.parLevel }, cover?.let { Quantity.of(it) })
         }.filter { !it.second.suggested.isZero }
         return rows.groupBy { (item, _) -> item.preferredSupplierId?.let { suppliers[it] }?.takeIf { it.isActive } }
             .map { (supplier, l) ->
                 SuggestionGroup(supplier, supplier?.nextDelivery(date, minutesNow), l.map { it.second }.sortedBy { it.item.shelf + "\u0000" + it.item.name })
             }
             .sortedWith(compareBy({ it.supplier == null }, { it.delivery?.orderBy?.epochDay ?: Long.MAX_VALUE }, { it.supplier?.name }))
-            .let { SuggestedOrders(it, problems) }
+            .let { SuggestedOrders(it, problems.distinct()) }
     }
 
     /** Countable units are bought whole. */

@@ -35,6 +35,14 @@ data class SaleLine(
     val gross: Money,
     val listPrice: Money? = null,
     val overrideReason: String? = null,
+    /**
+     * What this line took from stock at cost when the sale was posted (the kitchen's moving average at that moment;
+     * the lines of a sale add up to [DailySale.cost]). Null: not posted, the dish had no recipe on the sale's date,
+     * or posted before line costs were recorded (ADR-0050).
+     */
+    val cost: Money? = null,
+    /** Part of an ingredient was not in book stock at posting (ADR-0022): [cost] leaves that part out. */
+    val costShort: Boolean = false,
 ) {
     val overridden: Boolean get() = listPrice != null && unitPrice != listPrice
 
@@ -74,6 +82,15 @@ enum class SaleStatus { DRAFT, POSTED, REVERSED, DISCARDED }
  * as many as needed, each numbered when posted. Amounts are entered once; the totals the user sees are computed
  * here, so screen and books cannot disagree.
  */
+/** How a sale reached us (ADR-0052). Corporate: contract and company orders; online: ordering apps and the website. */
+enum class SalesChannel { DINE_IN, TAKEAWAY, DELIVERY, ONLINE, CORPORATE, OTHER }
+
+/**
+ * The part of a sale's net food sales (before service and tax) that came through [channel], with its bills. In a
+ * recorded sale the shares add up exactly to [DailySale.netFood]; in [SaveSaleDraft] they are proportions.
+ */
+data class ChannelShare(val channel: SalesChannel, val amount: Money, val transactions: Int = 0) : java.io.Serializable
+
 data class DailySale(
     val id: GlobalId,
     val scope: Scope.Branch,
@@ -93,6 +110,8 @@ data class DailySale(
     val transactions: Int = 0,
     /** Why the [discount] was given (required with a discount). */
     val discountReason: String = "",
+    /** Net food sales by channel (ADR-0052); empty: not recorded. */
+    val channels: List<ChannelShare> = emptyList(),
 ) {
     val gross: Money get() = Money.sum(lines.map { it.gross })
     val netFood: Money get() = gross - discount

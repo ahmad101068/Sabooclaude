@@ -13,6 +13,7 @@ import ir.sabou.kernel.DomainException
 import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
+import ir.sabou.kernel.Ratio
 import ir.sabou.kernel.Scope
 import ir.sabou.ledger.StandardAccounts
 import ir.sabou.persistence.JdbcSqlDatabase
@@ -194,6 +195,119 @@ class ReportsTest {
         val slip = policy.calculate(e, rial(30_000_000), 0, 60, payableDays = 20)
         val run = ir.sabou.payroll.PayrollRun(id(), branch, day, day.plusDays(29), "T", listOf(slip), ir.sabou.payroll.RunStatus.DRAFT, id(), null, null)
         return listOf(ReportTables.payrollRun(run, mapOf(e to "سرآشپز"), "شعبه"), ReportTables.payslip(run, slip, "سرآشپز", "شعبه"))
+    }
+
+    /**
+     * ADR-0050: each posted line keeps what it took from stock, at that day's cost. Two dishes share the cheese
+     * (split by what each recipe asked), the price rises between the days, so the period's actual cost per portion
+     * differs from today's; a dish without a recipe has no cost (unknown, not zero); a short sale is flagged.
+     */
+    @Test fun actualMarginFollowsTheCostOfTheDayEachSaleWasPosted() {
+        core.bootstrap("شعبه ونک", "مالک", "owner", "123456".toCharArray())
+        branch = Scope.Branch(core.overview.branches().single().id)
+        kitchen = core.overview.locations(branch).single().id
+        val cash = core.overview.treasury().single().account.id
+        cheese = core.inventory.createItem(CreateItem(id(), "پنیر", StockUnit.KILOGRAM, Quantity.units(0))).resultId
+        val pizza = core.inventory.defineMenuItem(DefineMenuItem(id(), "پیتزا")).resultId
+        val lasagna = core.inventory.defineMenuItem(DefineMenuItem(id(), "لازانیا")).resultId
+        val tea = core.inventory.defineMenuItem(DefineMenuItem(id(), "چای")).resultId          // no recipe
+        core.inventory.publishRecipe(PublishRecipe(id(), pizza, BusinessDate(19_000), listOf(RecipeLine(cheese, Quantity.of(200_000)))))
+        core.inventory.publishRecipe(PublishRecipe(id(), lasagna, BusinessDate(19_000), listOf(RecipeLine(cheese, Quantity.of(100_000)))))
+        val supplier = core.purchasing.registerSupplier(RegisterSupplier(id(), "لبنیات", "021")).resultId
+        fun buy(date: BusinessDate, no: String, kg: Long, value: Long) =
+            core.purchasing.postInvoice(PostPurchaseInvoice(id(), branch, supplier, no, kitchen, date, date, listOf(InvoiceLine(cheese, Quantity.units(kg), rial(value)))))
+        fun sell(date: BusinessDate, vararg lines: Triple<GlobalId, Long, Long>): GlobalId {
+            val total = lines.sumOf { it.second * it.third }
+            val sale = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, date, kitchen,
+                lines.map { SaleLineInput(it.first, Quantity.units(it.second), rial(it.third)) },
+                rial(0), rial(0), rial(0), listOf(Settlement.Liquid(cash, rial(total))))).resultId
+            core.salesOps.post(PostDailySale(id(), branch, sale))
+            return sale
+        }
+        val day2 = day.plusDays(1)
+        buy(day, "1", 10, 30_000_000)                                   // 3,000,000/kg
+        val first = sell(day, Triple(pizza, 10, 5_000_000), Triple(lasagna, 4, 4_000_000), Triple(tea, 5, 100_000))
+        // 2.4 kg left the kitchen at 3,000,000: pizza asked 2 kg of it, lasagna 0.4 kg.
+        val posted = core.sales.sale(first)!!
+        assertEquals(listOf(rial(6_000_000), rial(1_200_000), null), posted.lines.map { it.cost })
+        assertEquals(posted.cost, Money.sum(posted.lines.mapNotNull { it.cost }))
+        buy(day2, "2", 8, 32_000_000)                                   // 7.6 kg at 3,000,000 + 8 kg at 4,000,000
+        val second = sell(day2, Triple(pizza, 10, 5_000_000))            // 2 kg at the new average
+        val secondCost = core.sales.sale(second)!!.cost
+        assertTrue(secondCost.rial in 7_025_640..7_025_642, "$secondCost")   // 2 × 54,800,000 / 15.6
+
+        val mix = core.reports.productMix(branch, day, day2)
+        val p = mix.rows.single { it.menuItemId == pizza }
+        assertEquals(rial(6_000_000 + secondCost.rial), p.actualCost)
+        assertEquals(Quantity.units(20), p.costedPortions)
+        assertTrue(p.fullyCosted)
+        assertEquals(Money.of(Ratio.mulDiv(p.actualCost!!.rial, Quantity.SCALE, Quantity.units(20).micros)), p.actualUnitCost)
+        assertEquals(5_000_000 - p.actualUnitCost!!.rial, p.actualUnitMargin)
+        // Today's cost is the current average, dearer than the period's actual cost.
+        assertTrue(p.unitCost!!.rial > p.actualUnitCost!!.rial)
+        assertEquals(rial(300_000), mix.rows.single { it.menuItemId == lasagna }.actualUnitCost)
+        val t = mix.rows.single { it.menuItemId == tea }
+        assertNull(t.actualCost); assertNull(t.actualUnitCost); assertTrue(!t.fullyCosted)
+        assertTrue(mix.rows.none { it.actualCostShort })
+
+        // A dish sold below its cost has a negative actual margin (no failure).
+        val cheap = sell(day2, Triple(lasagna, 1, 100_000))
+        assertTrue(core.sales.sale(cheap)!!.lines.single().cost!!.rial > 100_000)
+        val below = core.reports.productMix(branch, day2, day2).rows.single { it.menuItemId == lasagna }
+        assertTrue(below.actualUnitMargin!! < 0, "${below.actualUnitMargin}")
+        assertEquals(-(below.actualUnitCost!!.rial - 100_000), below.actualUnitMargin)
+
+        // Selling beyond book stock: the line is costed for what was there and flagged.
+        val day3 = day2.plusDays(1)
+        sell(day3, Triple(pizza, 100, 5_000_000))                        // asks 20 kg, 13.6 kg in book stock
+        val short = core.reports.productMix(branch, day3, day3).rows.single()
+        assertTrue(short.actualCostShort)
+        assertEquals(Quantity.units(100), short.costedPortions)
+        // A cashier sees no costs, actual or current.
+        core.identity.createUser("cashier2", "صندوقدار", Role.CASHIER, setOf(branch.branchId), "654321".toCharArray())
+        core.identity.logout(); core.identity.login("cashier2", "654321".toCharArray())
+        core.reports.productMix(branch, day, day2).rows.forEach { assertNull(it.actualCost); assertNull(it.unitCost) }
+    }
+
+    /** ADR-0052: a sale's channels are proportions scaled exactly to its net sales; the mix sums them by channel. */
+    @Test fun salesByChannel() {
+        core.bootstrap("شعبه ونک", "مالک", "owner", "123456".toCharArray())
+        branch = Scope.Branch(core.overview.branches().single().id)
+        kitchen = core.overview.locations(branch).single().id
+        val cash = core.overview.treasury().single().account.id
+        val tea = core.inventory.defineMenuItem(DefineMenuItem(id(), "چای")).resultId
+        fun sell(portions: Long, discount: Long, channels: List<ir.sabou.sales.ChannelShare>, bills: Int = 0): GlobalId {
+            val net = portions * 100_000 - discount
+            val s = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLineInput(tea, Quantity.units(portions), rial(100_000))),
+                rial(discount), rial(0), rial(0), listOf(Settlement.Liquid(cash, rial(net))), transactions = bills,
+                discountReason = if (discount > 0) "مشتری ثابت" else "", channels = channels)).resultId
+            core.salesOps.post(PostDailySale(id(), branch, s))
+            return s
+        }
+        val dineIn = ir.sabou.sales.SalesChannel.DINE_IN; val takeaway = ir.sabou.sales.SalesChannel.TAKEAWAY
+        // One channel for the whole sale: any amount stands for "all of it".
+        val a = sell(30, 0, listOf(ir.sabou.sales.ChannelShare(dineIn, rial(1), 12)))
+        assertEquals(listOf(ir.sabou.sales.ChannelShare(dineIn, rial(3_000_000), 12)), core.sales.sale(a)!!.channels)
+        // A split 1 : 2 of 1,999,999 net (after a discount): exact to the Rial.
+        val b = sell(20, 1, listOf(ir.sabou.sales.ChannelShare(takeaway, rial(2), 4), ir.sabou.sales.ChannelShare(dineIn, rial(1), 2)))
+        val split = core.sales.sale(b)!!.channels
+        assertEquals(listOf(dineIn, takeaway), split.map { it.channel })
+        assertEquals(1_999_999L, split.sumOf { it.amount.rial })
+        assertEquals(666_666L, split.first().amount.rial)
+        // A sale without a channel is its own row.
+        sell(10, 0, emptyList(), bills = 3)
+        val rows = core.reports.productMix(branch, day, day).channels
+        assertEquals(listOf(dineIn, takeaway, null), rows.map { it.channel })
+        assertEquals(listOf(3_666_666L, 1_333_333L, 1_000_000L), rows.map { it.net.rial })
+        assertEquals(listOf(14, 4, 3), rows.map { it.transactions })
+        assertTrue(rows.sumOf { it.shareBp } in 9_998..10_002)                // shares rounded per row
+        assertEquals(rial(3_666_666 / 14), rows.first().perTransaction)
+        val table = ReportTables.channels(core.reports.productMix(branch, day, day))
+        assertEquals(listOf("حضوری (سالن)", "بیرون‌بر", "نامشخص"), table.rows.map { it.first().text })
+        // The same channel twice is refused.
+        assertTrue(assertFailsWith<DomainException> {
+            sell(1, 0, listOf(ir.sabou.sales.ChannelShare(dineIn, rial(1)), ir.sabou.sales.ChannelShare(dineIn, rial(1))))
+        }.error.code.startsWith("INVALID_INPUT"))
     }
 
     @Test fun aCashierSeesSalesFiguresButNoCostsPurchasesOrWaste() {

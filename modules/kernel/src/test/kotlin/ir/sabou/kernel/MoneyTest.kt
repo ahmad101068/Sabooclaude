@@ -44,5 +44,13 @@ class MoneyTest {
         assertEquals(-17L, Ratio.changeBp(600, 599))
         assertEquals(null, Ratio.changeBp(0, 10))
     }
-}
 
+    @Test fun signedMulDivMirrorsThePositiveOne() {
+        assertEquals(3_333, Ratio.mulDivSigned(10_000, 1, 3))
+        assertEquals(-3_333, Ratio.mulDivSigned(-10_000, 1, 3))
+        assertEquals(-3_333, Ratio.mulDivSigned(10_000, -1, 3))
+        assertEquals(3_333, Ratio.mulDivSigned(-10_000, -1, 3))
+        assertEquals(-2, Ratio.mulDivSigned(-3, 1, 2))                  // half away from zero
+        assertEquals(0, Ratio.mulDivSigned(0, -5, 7))
+    }
+}

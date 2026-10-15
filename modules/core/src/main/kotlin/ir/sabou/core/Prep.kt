@@ -53,6 +53,11 @@ class Prep internal constructor(private val core: SabouCore) {
      */
     fun forecast(branch: Scope.Branch, date: BusinessDate, weeks: Int = FORECAST_WEEKS): List<DishForecast> {
         actor(Permission.INVENTORY_PRODUCE, Permission.INVENTORY_VIEW, Permission.SALES_VIEW).require(branch)
+        return forecastOf(branch, date, weeks)
+    }
+
+    /** [forecast] without the permission check, for callers that check their own (purchase suggestions, ADR-0054). */
+    internal fun forecastOf(branch: Scope.Branch, date: BusinessDate, weeks: Int = FORECAST_WEEKS): List<DishForecast> {
         val days = core.tradingDays(branch, (1..weeks).map { date.plusDays(-7L * it) })
         if (days.isEmpty()) return emptyList()
         // A day marked closed needs nothing; a holiday or event scales every dish (ADR-0041).

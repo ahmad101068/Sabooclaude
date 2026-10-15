@@ -7,7 +7,9 @@ import ir.sabou.platform.DocumentSeries
 import ir.sabou.platform.IssuesDocument
 
 import ir.sabou.inventory.InventoryGateway
+import ir.sabou.inventory.IssueLine
 import ir.sabou.inventory.RecipeBook
+import ir.sabou.kernel.Ratio
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -62,9 +64,15 @@ data class SaveSaleDraft(
     val saleId: GlobalId? = null,
     /** Why the discount was given; required with a discount, which needs [Permission.SALES_DISCOUNT]. */
     val discountReason: String = "",
+    /**
+     * Channels of the sale (ADR-0052) as proportions: one channel with any amount for a whole sale, or the POS's
+     * split. Recorded scaled exactly to the sale's net food sales. Empty: not recorded.
+     */
+    val channels: List<ChannelShare> = emptyList(),
 ) : Command {
     override val requiredPermission = Permission.SALES_RECORD
     override fun fingerprint() = "$saleId|$scope|${date.epochDay}|$kitchenLocationId|${discount.rial}|$discountReason|${serviceCharge.rial}|${tax.rial}|$guests|$transactions|" +
+        channels.joinToString(";") { "${it.channel}:${it.amount.rial}:${it.transactions}" } + "|" +
         lines.joinToString(";") { "${it.menuItemId}:${it.portions.micros}:${it.unitPrice?.rial}:${it.overrideReason}" } + "|" +
         settlements.joinToString(";") { s -> when (s) {
             is Settlement.Liquid -> "L:${s.treasuryAccountId}:${s.amount.rial}:${s.cheque?.fingerprint()}"
@@ -342,9 +350,21 @@ class SalesOperations(
             ensure((account.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES) == (s.cheque != null)) { DomainError.InvalidInput("cheque", "مشخصات چک فقط و حتماً برای صندوق چک لازم است.") }
             s.cheque?.validate()
         }
-        sales.saveSale(sale)
+        val recorded = sale.copy(channels = channelsOf(cmd.channels, sale.netFood))
+        sales.saveSale(recorded)
         ctx.audit(AuditDraft("SALE_DRAFT_SAVE", "DAILY_SALE", sale.id.value, "payable=${sale.payable.rial};settled=${sale.settled.rial}"))
-        return sale
+        return recorded
+    }
+
+    /** [shares] as proportions, scaled exactly to [net] (ADR-0052); one entry per channel, in channel order. */
+    private fun channelsOf(shares: List<ChannelShare>, net: Money): List<ChannelShare> {
+        if (shares.isEmpty()) return emptyList()
+        ensure(shares.map { it.channel }.distinct().size == shares.size) { DomainError.InvalidInput("channels", "هر کانال فروش فقط یک‌بار بیاید.") }
+        ensure(shares.all { it.transactions in 0..100_000 }) { DomainError.InvalidInput("channels", "تعداد فاکتور کانال معتبر نیست.") }
+        ensure(shares.any { !it.amount.isZero }) { DomainError.InvalidInput("channels", "سهم کانال‌ها صفر است.") }
+        val sorted = shares.sortedBy { it.channel.ordinal }
+        val amounts = Ratio.allocate(net.rial, sorted.map { it.amount.rial })
+        return sorted.mapIndexed { i, c -> c.copy(amount = Money.of(amounts[i])) }
     }
 
     fun discardDraft(c: DiscardSaleDraft): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
@@ -361,6 +381,24 @@ class SalesOperations(
      * than the menu's is an override: it needs [Permission.SALES_PRICE_OVERRIDE] and a reason, both kept on the line
      * (and in the command's audit record).
      */
+    /**
+     * Each line's share of what the sale took from stock (ADR-0050). An ingredient's issued cost is split over the
+     * lines by the quantity each line's recipe asked of it, exactly (the shares add up to the issued cost), so the
+     * lines add up to [Consumption.totalCost]. A line without a recipe keeps no cost (unknown, not zero).
+     */
+    internal fun lineCosts(lines: List<SaleLine>, perLine: List<List<IssueLine>?>, consumption: ir.sabou.inventory.Consumption): List<SaleLine> {
+        val cost = LongArray(lines.size)
+        consumption.lines.groupBy { it.itemId }.forEach { (itemId, issued) ->
+            val weights = perLine.map { reqs -> reqs?.filter { it.itemId == itemId }?.sumOf { it.quantity.micros.coerceAtLeast(0) } ?: 0L }
+            Ratio.allocate(issued.sumOf { it.cost.rial }, weights).forEachIndexed { i, v -> cost[i] = Math.addExact(cost[i], v) }
+        }
+        val short = consumption.shortages.map { it.itemId }.toSet()
+        return lines.mapIndexed { i, l ->
+            val reqs = perLine[i] ?: return@mapIndexed l.copy(cost = null, costShort = false)
+            l.copy(cost = Money.of(cost[i]), costShort = reqs.any { it.itemId in short && !it.quantity.isZero })
+        }
+    }
+
     private fun price(input: SaleLineInput, branch: Scope.Branch, date: BusinessDate, role: ir.sabou.platform.Role): SaleLine {
         val item = recipes.menuItem(input.menuItemId) ?: throw DomainException(DomainError.NotFound("MENU_ITEM"))
         ensure(item.isActive) { DomainError.InvalidInput("lines", "«${item.name}» از منو خارج شده است.") }
@@ -423,9 +461,11 @@ class SalesOperations(
 
         ctx.number(DocumentSeries.DAILY_SALE, sale.date, sale.id)
         // A dish with no recipe yet is sold all the same; it takes no stock (shown as "without recipe" in the day).
-        val requirements = sale.lines.filter { recipes.hasRecipeOn(it.menuItemId, sale.date) }.flatMap { recipes.requirements(it.menuItemId, sale.date, it.portions) }
+        val perLine = sale.lines.map { if (recipes.hasRecipeOn(it.menuItemId, sale.date)) recipes.requirements(it.menuItemId, sale.date, it.portions) else null }
+        val requirements = perLine.filterNotNull().flatten()
         // Sold is sold: a book-stock shortage does not stop the sale; it waits as an open shortage (ADR-0022).
         val consumption = inventory.consume(ctx, capability, sale.kitchenLocationId, requirements, sale.date, CONSUMPTION, sale.id, "مصرف فروش", allowShortage = true)
+        val costedLines = lineCosts(sale.lines, perLine, consumption)
 
         val liquid = Money.sum(sale.settlements.filterIsInstance<Settlement.Liquid>().map { it.amount })
         val credit = Money.sum(sale.settlements.filterIsInstance<Settlement.Credit>().map { it.amount })
@@ -448,7 +488,7 @@ class SalesOperations(
                 is Settlement.Credit -> sales.saveReceivable(Receivable(GlobalId.new(), s.customerId, sale.scope, sale.id, s.amount, s.dueDate, voided = false))
             }
         }
-        sales.saveSale(sale.copy(status = SaleStatus.POSTED, revenueJournalId = revenue.id, cost = consumption.totalCost, consumed = consumption.lines.isNotEmpty()))
+        sales.saveSale(sale.copy(lines = costedLines, status = SaleStatus.POSTED, revenueJournalId = revenue.id, cost = consumption.totalCost, consumed = consumption.lines.isNotEmpty()))
         ctx.audit(AuditDraft("SALE_POST", "DAILY_SALE", sale.id.value, "payable=${sale.payable.rial};cost=${consumption.totalCost.rial}"))
         ctx.emit("DailySalePosted", mapOf("saleId" to sale.id.value, "payable" to sale.payable.rial.toString()))
         return sale.id
