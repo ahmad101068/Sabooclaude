@@ -198,25 +198,29 @@ class Buying internal constructor(private val core: SabouCore) {
         return changes.sortedByDescending { it.date }
     }
 
-    /** The last unit price paid for each item, from any supplier, in what the person can see (form hints). */
+    /**
+     * The last unit price paid for each item in [branch], from any supplier (form hints). Only [branch]'s own
+     * invoices: another branch buys at its own prices, so its last price is no hint here. (Price-change alerts in
+     * [priceChanges] do compare across what the person can see, by design.)
+     */
     fun lastPaid(branch: Scope.Branch): Map<GlobalId, LastPaid> {
         val a = actor(Permission.PURCHASE_VIEW, Permission.PURCHASE_RECORD, Permission.PURCHASE_ORDER)
         a.require(branch)
         val names = supplierNames()
         val result = HashMap<GlobalId, LastPaid>()
-        postedInOrder(a).forEach { inv -> inv.lines.filter { !it.quantity.isZero }.forEach { result[it.itemId] = LastPaid(it.unitPrice, names[inv.supplierId].orEmpty(), inv.date) } }
+        postedInOrder(a).filter { it.scope == branch }.forEach { inv -> inv.lines.filter { !it.quantity.isZero }.forEach { result[it.itemId] = LastPaid(it.unitPrice, names[inv.supplierId].orEmpty(), inv.date) } }
         return result
     }
 
     private fun postedInOrder(a: Actor) = core.purchases.invoices().filter { it.status == InvoiceStatus.POSTED && a.canAccess(it.scope) }
         .withIndex().sortedWith(compareBy({ it.value.date }, { it.index })).map { it.value }
 
-    /** The last unit price paid to [supplierId] for each item (form hints and price warnings). */
+    /** The last unit price paid to [supplierId] for each item in [branch] (form hints and price warnings). */
     fun lastPrices(supplierId: GlobalId, branch: Scope.Branch): Map<GlobalId, Long> {
         val a = actor(Permission.PURCHASE_VIEW, Permission.PURCHASE_ORDER)
         a.require(branch)
         val result = HashMap<GlobalId, Long>()
-        core.purchases.invoices().filter { it.status == InvoiceStatus.POSTED && it.supplierId == supplierId && a.canAccess(it.scope) }
+        core.purchases.invoices().filter { it.status == InvoiceStatus.POSTED && it.supplierId == supplierId && it.scope == branch }
             .withIndex().sortedWith(compareBy({ it.value.date }, { it.index })).map { it.value }
             .forEach { inv -> inv.lines.filter { !it.quantity.isZero }.forEach { result[it.itemId] = it.unitPrice } }
         return result

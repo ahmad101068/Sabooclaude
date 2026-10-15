@@ -35,6 +35,14 @@ data class SaleLine(
     val gross: Money,
     val listPrice: Money? = null,
     val overrideReason: String? = null,
+    /**
+     * What this line took from stock at cost when the sale was posted (the kitchen's moving average at that moment;
+     * the lines of a sale add up to [DailySale.cost]). Null: not posted, the dish had no recipe on the sale's date,
+     * or posted before line costs were recorded (ADR-0050).
+     */
+    val cost: Money? = null,
+    /** Part of an ingredient was not in book stock at posting (ADR-0022): [cost] leaves that part out. */
+    val costShort: Boolean = false,
 ) {
     val overridden: Boolean get() = listPrice != null && unitPrice != listPrice
 

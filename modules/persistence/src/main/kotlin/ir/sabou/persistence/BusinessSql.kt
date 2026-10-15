@@ -336,7 +336,8 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
         val gross = Codec.money(d.long("gross"))
         val unit = d.longOrNull("unitPrice")?.let(Codec::money)
             ?: Codec.money(if (portions.isZero) 0 else ir.sabou.kernel.Ratio.mulDiv(gross.rial, ir.sabou.kernel.Quantity.SCALE, portions.micros, ir.sabou.kernel.Rounding.HALF_UP))
-        return SaleLine(Codec.id(d.str("menuItem")), portions, unit, gross, d.longOrNull("listPrice")?.let(Codec::money), d.strOrNull("reason"))
+        return SaleLine(Codec.id(d.str("menuItem")), portions, unit, gross, d.longOrNull("listPrice")?.let(Codec::money), d.strOrNull("reason"),
+            cost = d.longOrNull("cost")?.let(Codec::money), costShort = d.boolOr("costShort", false))
     }
 
     /** Whether any recorded sale (draft, posted or reversed) has a line of [menuItemId]. */
@@ -358,7 +359,7 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
                     "id" to sale.id.value, "scope" to Codec.scope(sale.scope), "date" to sale.date.epochDay, "kitchen" to sale.kitchenLocationId.value,
                     "lines" to sale.lines.map {
                         mapOf("menuItem" to it.menuItemId.value, "portions" to it.portions.micros, "unitPrice" to it.unitPrice.rial, "gross" to it.gross.rial,
-                            "listPrice" to it.listPrice?.rial, "reason" to it.overrideReason)
+                            "listPrice" to it.listPrice?.rial, "reason" to it.overrideReason, "cost" to it.cost?.rial, "costShort" to it.costShort.takeIf { b -> b })
                     },
                     "discount" to sale.discount.rial, "service" to sale.serviceCharge.rial, "tax" to sale.tax.rial,
                     "settlements" to sale.settlements.map {

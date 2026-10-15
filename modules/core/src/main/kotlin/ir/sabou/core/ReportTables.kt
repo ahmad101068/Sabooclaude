@@ -60,14 +60,21 @@ object ReportTables {
 
     fun productMix(m: ProductMix) = ReportTable(
         "اقلام پرفروش و حاشیه‌ی سود", "${m.branch} · ${period(m.from, m.to)} · ${Fa.number(m.days.toLong())} روز فروش",
-        listOf("آیتم منو", "تعداد", "فروش", "سهم از فروش", "میانگین قیمت", "بهای مواد هر پرس", "حاشیه‌ی هر پرس", "درصد بهای غذا"),
+        listOf("آیتم منو", "تعداد", "فروش", "سهم از فروش", "میانگین قیمت", "بهای مواد هر پرس", "حاشیه‌ی هر پرس", "درصد بهای غذا",
+            "بهای واقعی هر پرس", "حاشیه‌ی واقعی هر پرس", "درصد بهای واقعی", "پرس‌های با بهای ثبت‌شده"),
         m.rows.map {
             listOf(Cell.of(it.name), Cell.Qty(it.portions.micros), Cell.Amount(it.gross.rial), Cell.Percent(it.shareBp), amount(it.averagePrice?.rial),
-                amount(it.unitCost?.rial), amount(it.unitMargin), pct(it.costBp))
+                amount(it.unitCost?.rial), amount(it.unitMargin), pct(it.costBp),
+                amount(it.actualUnitCost?.rial), amount(it.actualUnitMargin), pct(it.actualCostBp),
+                if (it.actualCost == null) Cell.EMPTY else Cell.Qty(it.costedPortions.micros))
         },
-        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.Amount(m.gross.rial), Cell.Percent(if (m.gross.isZero) 0 else 10_000), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY),
-        notes = listOf(RIAL, "بهای مواد با رسپی فعلی و میانگین بهای امروز انبارهای شعبه حساب شده است (اگر موجودی نباشد، آخرین قیمت خرید).",
-            "این بها برای تصمیم قیمت و منو است؛ سود واقعی این بازه را گزارش «سود و زیان» از دفاتر نشان می‌دهد."),
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.Amount(m.gross.rial), Cell.Percent(if (m.gross.isZero) 0 else 10_000), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY,
+            Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY),
+        notes = listOfNotNull(RIAL, "بهای مواد با رسپی فعلی و میانگین بهای امروز انبارهای شعبه حساب شده است (اگر موجودی نباشد، آخرین قیمت خرید).",
+            "این بها برای تصمیم قیمت و منو است؛ سود واقعی این بازه را گزارش «سود و زیان» از دفاتر نشان می‌دهد.",
+            "«بهای واقعی» همان است که هنگام ثبت هر فروش از انبار برداشته شد (به بهای همان روز)، فقط برای پرس‌هایی که بهایشان ثبت شده است.",
+            "در بعضی پرس‌ها کالا در موجودی دفتری کم بود؛ بهای واقعی آن‌ها تا تعیین تکلیف کسری کمتر از واقع است."
+                .takeIf { m.rows.any { it.actualCostShort } }),
     )
 
     /** ADR-0051: the weeks, then every item with its date and whether it is estimated. */
