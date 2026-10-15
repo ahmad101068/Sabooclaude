@@ -214,5 +214,23 @@ class BuyingTest {
         // The form's hint knows it too, whoever the supplier is.
         assertEquals(450_000L, core.buying.lastPaid(branch)[cheese]?.price)
     }
+
+    /** Another branch buys at its own prices: its invoices never become this branch's hints (and back). */
+    @Test fun priceHintsComeOnlyFromTheBranchsOwnInvoices() {
+        setUp()                                                         // ونک: cheese last bought at 360,000
+        val other = Scope.Branch(core.identity.createBranch("شعبه تجریش"))
+        val otherKitchen = core.inventory.createLocation(ir.sabou.inventory.CreateLocation(id(), other, "آشپزخانه تجریش")).resultId
+        // Later and dearer, from the same supplier, in the other branch — the owner sees both branches.
+        core.purchasing.postInvoice(PostPurchaseInvoice(id(), other, supplier, "T1", otherKitchen, day, day, listOf(InvoiceLine(cheese, kg(1), rial(500_000)))))
+        assertEquals(360_000L, core.buying.lastPaid(branch)[cheese]?.price)
+        assertEquals(500_000L, core.buying.lastPaid(other)[cheese]?.price)
+        assertEquals(mapOf(cheese to 360_000L), core.buying.lastPrices(supplier, branch))
+        assertEquals(mapOf(cheese to 500_000L), core.buying.lastPrices(supplier, other))
+        // A branch with no purchase of tomatoes gets no hint for them, whatever the other branch paid.
+        core.purchasing.postInvoice(PostPurchaseInvoice(id(), other, supplier, "T2", otherKitchen, day, day, listOf(InvoiceLine(tomato, kg(3), rial(240_000)))))
+        assertNull(core.buying.lastPaid(branch)[tomato])
+        // The price-change alert still compares across the branches the person can see (by design).
+        assertTrue(core.buying.priceChanges(day, day).any { it.price == 500_000L && it.previousPrice == 360_000L })
+    }
 }
 

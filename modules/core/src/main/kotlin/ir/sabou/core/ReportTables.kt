@@ -60,15 +60,114 @@ object ReportTables {
 
     fun productMix(m: ProductMix) = ReportTable(
         "اقلام پرفروش و حاشیه‌ی سود", "${m.branch} · ${period(m.from, m.to)} · ${Fa.number(m.days.toLong())} روز فروش",
-        listOf("آیتم منو", "تعداد", "فروش", "سهم از فروش", "میانگین قیمت", "بهای مواد هر پرس", "حاشیه‌ی هر پرس", "درصد بهای غذا"),
+        listOf("آیتم منو", "تعداد", "فروش", "سهم از فروش", "میانگین قیمت", "بهای مواد هر پرس", "حاشیه‌ی هر پرس", "درصد بهای غذا",
+            "بهای واقعی هر پرس", "حاشیه‌ی واقعی هر پرس", "درصد بهای واقعی", "پرس‌های با بهای ثبت‌شده"),
         m.rows.map {
             listOf(Cell.of(it.name), Cell.Qty(it.portions.micros), Cell.Amount(it.gross.rial), Cell.Percent(it.shareBp), amount(it.averagePrice?.rial),
-                amount(it.unitCost?.rial), amount(it.unitMargin), pct(it.costBp))
+                amount(it.unitCost?.rial), amount(it.unitMargin), pct(it.costBp),
+                amount(it.actualUnitCost?.rial), amount(it.actualUnitMargin), pct(it.actualCostBp),
+                if (it.actualCost == null) Cell.EMPTY else Cell.Qty(it.costedPortions.micros))
         },
-        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.Amount(m.gross.rial), Cell.Percent(if (m.gross.isZero) 0 else 10_000), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY),
-        notes = listOf(RIAL, "بهای مواد با رسپی فعلی و میانگین بهای امروز انبارهای شعبه حساب شده است (اگر موجودی نباشد، آخرین قیمت خرید).",
-            "این بها برای تصمیم قیمت و منو است؛ سود واقعی این بازه را گزارش «سود و زیان» از دفاتر نشان می‌دهد."),
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.Amount(m.gross.rial), Cell.Percent(if (m.gross.isZero) 0 else 10_000), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY,
+            Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY),
+        notes = listOfNotNull(RIAL, "بهای مواد با رسپی فعلی و میانگین بهای امروز انبارهای شعبه حساب شده است (اگر موجودی نباشد، آخرین قیمت خرید).",
+            "این بها برای تصمیم قیمت و منو است؛ سود واقعی این بازه را گزارش «سود و زیان» از دفاتر نشان می‌دهد.",
+            "«بهای واقعی» همان است که هنگام ثبت هر فروش از انبار برداشته شد (به بهای همان روز)، فقط برای پرس‌هایی که بهایشان ثبت شده است.",
+            "در بعضی پرس‌ها کالا در موجودی دفتری کم بود؛ بهای واقعی آن‌ها تا تعیین تکلیف کسری کمتر از واقع است."
+                .takeIf { m.rows.any { it.actualCostShort } }),
     )
+
+    /** ADR-0053: from the base profit through each cause to the current profit. */
+    fun profitBridge(b: ProfitBridge) = ReportTable(
+        "چرا سود تغییر کرد", "${b.branchName} · ${period(b.current.from, b.current.to)} در برابر ${period(b.base.from, b.base.to)}",
+        listOf("عامل", "اثر بر سود", "بیشترین سهم‌ها"),
+        listOf(listOf(Cell.of("سود دوره‌ی مبنا"), Cell.Amount(b.base.profit), Cell.EMPTY)) +
+            b.steps.map { s -> listOf(Cell.of(ProfitBridges.stepName(s.kind)), Cell.Amount(s.amount), Cell.of(s.details.joinToString("؛ ") { "${it.name} ${Fa.rial(it.amount)}" })) } +
+            listOf(listOf(Cell.of("سود این دوره"), Cell.Amount(b.current.profit), Cell.EMPTY)),
+        notes = listOf(RIAL) + b.summary + listOf(
+            "عامل‌ها دقیقاً با تغییر سود در دفاتر برابرند. تعداد، ترکیب، قیمت و بهای مواد از ردیف‌های فروش و بهای واقعی‌شان (ADR-0050) است؛ بقیه از حساب‌های سود و زیان."),
+    )
+
+    /** ADR-0051: the weeks, then every item with its date and whether it is estimated. */
+    fun cashForecast(f: CashForecast): List<ReportTable> {
+        val kinds = CashItem.Kind.entries.filter { k -> f.weeks.any { (it.byKind[k] ?: 0L) != 0L } }
+        val weeks = ReportTable(
+            "پیش‌بینی نقدینگی", "${f.branchName} · از ${Fa.date(f.today)} · سناریوی ${f.scenario.name}",
+            listOf("هفته", "از", "تا", "مانده‌ی اول") + kinds.map { cashKindName(it) } + listOf("ورودی", "خروجی", "مانده‌ی پایان"),
+            f.weeks.map { w ->
+                listOf(Cell.of(Fa.number(w.index.toLong())), Cell.of(Fa.date(w.from)), Cell.of(Fa.date(w.to)), Cell.Amount(w.opening)) +
+                    kinds.map { Cell.Amount(w.byKind[it] ?: 0L) } + listOf(Cell.Amount(w.inflow), Cell.Amount(-w.outflow), Cell.Amount(w.closing))
+            },
+            notes = listOfNotNull(RIAL, CASH_BASIS,
+                "فرض‌ها: ${cashAssumptions(f.assumptions)}",
+                f.unscheduled.takeIf { it.isNotEmpty() }?.joinToString("؛ ", "بدون تاریخ (در جدول نیامده): ") { "${it.title} ${Fa.rial(it.amount)}" }),
+        )
+        val items = ReportTable(
+            "اقلام پیش‌بینی نقدینگی", "${f.branchName} · سناریوی ${f.scenario.name}",
+            listOf("تاریخ", "نوع", "شرح", "مبلغ", "برآوردی"),
+            f.items.map { listOf(Cell.of(Fa.date(it.date)), Cell.of(cashKindName(it.kind)), Cell.of(it.text), Cell.Amount(it.amount), Cell.of(if (it.estimated) "برآورد" else "سند")) },
+            notes = listOf(RIAL, "مبلغ مثبت ورودی و منفی خروجی است."),
+        )
+        return listOf(weeks, items)
+    }
+
+    fun customers(r: CustomerReport) = ReportTable(
+        "مشتریان نسیه: سهم و وصول", "${r.branchName} · ${period(r.from, r.to)}",
+        listOf("مشتری", "فروش نسیه", "سهم از فروش", "مانده‌ی طلب", "سررسیدگذشته", "تأخیر معمول (روز)", "وصول پس از فروش (روز)", "طلب وصول‌شده"),
+        r.rows.map {
+            listOf(Cell.of(it.customer.name), Cell.Amount(it.sales), pct(it.shareBp), Cell.Amount(it.outstanding), Cell.Amount(it.overdue),
+                it.delayDays?.let { d -> Cell.of(Fa.number(d.toLong())) } ?: Cell.of("—"),
+                it.collectionDays?.let { d -> Cell.of(Fa.number(d.toLong())) } ?: Cell.of("—"), Cell.of(Fa.number(it.collectedDebts.toLong())))
+        },
+        footer = listOf(Cell.of("جمع"), Cell.Amount(r.rows.sumOf { it.sales }), pct(r.creditShareBp), Cell.Amount(r.rows.sumOf { it.outstanding }),
+            Cell.Amount(r.rows.sumOf { it.overdue }), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY),
+        notes = listOf(RIAL, "فروش کل شعبه در این بازه ${Fa.rial(r.totalSales)} ریال (قابل پرداخت).",
+            "تأخیر و مدت وصول از طلب‌هایی است که کامل وصول شده‌اند، به نسبت مبلغ."),
+    )
+
+    fun cashKindName(k: CashItem.Kind) = when (k) {
+        CashItem.Kind.CASH_SALES -> "فروش نقد و کارت"
+        CashItem.Kind.CREDIT_SALES -> "وصول فروش نسیه‌ی آینده"
+        CashItem.Kind.RECEIVABLE -> "وصول مطالبات"
+        CashItem.Kind.CHEQUE_IN -> "چک‌های دریافتی"
+        CashItem.Kind.SUPPLIER -> "فاکتورهای خرید"
+        CashItem.Kind.CHEQUE_OUT -> "چک‌های پرداختی"
+        CashItem.Kind.PURCHASES -> "خرید مواد آینده"
+        CashItem.Kind.PAYROLL -> "حقوق"
+        CashItem.Kind.PAYROLL_DUES -> "بیمه و مالیات حقوق"
+        CashItem.Kind.OVERHEADS -> "هزینه‌های جاری (بودجه)"
+    }
+
+    fun cashAssumptions(a: CashAssumptions): String = listOfNotNull(
+        if (a.liquidBp == null) "سابقه‌ی فروش نیست؛ فروش آینده در پیش‌بینی نیامده"
+        else "${Fa.number(a.historyDays.toLong())} روز فروش اخیر: نقد و کارت ${Fa.percent(a.liquidBp)}، نسیه ${Fa.percent(a.creditBp ?: 0)}، خرید مواد ${Fa.percent(a.purchaseBp ?: 0)} از خالص فروش",
+        "مهلت پرداخت به تأمین‌کننده ${Fa.number(a.supplierTermDays.toLong())} روز",
+        "وصول نسیه ${Fa.number(a.collectionDays.toLong())} روز پس از فروش",
+        if (a.payrollKnown) "حقوق ماهانه مثل آخرین حقوق تأییدشده" else "حقوقی تأیید نشده؛ حقوق آینده در پیش‌بینی نیامده",
+        if (a.overheadsBudgeted) "اجاره و هزینه‌های جاری از بودجه" else "برای اجاره و هزینه‌های جاری بودجه ثبت نشده؛ در پیش‌بینی نیامده",
+    ).joinToString("؛ ")
+
+    const val CASH_BASIS = "مانده‌ی اول: صندوق، بانک، کارتخوان و تنخواه شعبه. اقلام سنددار (طلب، چک، فاکتور خرید، حقوق تأییدشده) در سررسیدشان؛ فروش، خرید آینده، حقوق ماه‌های بعد و هزینه‌های جاری برآوردی‌اند."
+
+    /** ADR-0052: net food sales of the period by channel. */
+    fun channels(m: ProductMix) = ReportTable(
+        "فروش به تفکیک کانال", "${m.branch} · ${period(m.from, m.to)}",
+        listOf("کانال", "خالص فروش", "سهم", "تعداد فاکتور", "میانگین هر فاکتور"),
+        m.channels.map { listOf(Cell.of(channelName(it.channel)), Cell.Amount(it.net.rial), Cell.Percent(it.shareBp), Cell.of(Fa.number(it.transactions.toLong())), amount(it.perTransaction?.rial)) },
+        footer = listOf(Cell.of("جمع"), Cell.Amount(m.channels.sumOf { it.net.rial }), Cell.Percent(if (m.channels.isEmpty()) 0 else 10_000),
+            Cell.of(Fa.number(m.channels.sumOf { it.transactions }.toLong())), Cell.EMPTY),
+        notes = listOf(RIAL, "خالص فروش: پس از تخفیف، پیش از سرویس و مالیات. کانال هر فروش هنگام ثبت انتخاب می‌شود یا از «نوع فروش» فاکتورهای صندوق می‌آید."),
+    )
+
+    fun channelName(c: ir.sabou.sales.SalesChannel?) = when (c) {
+        ir.sabou.sales.SalesChannel.DINE_IN -> "حضوری (سالن)"
+        ir.sabou.sales.SalesChannel.TAKEAWAY -> "بیرون‌بر"
+        ir.sabou.sales.SalesChannel.DELIVERY -> "ارسال با پیک"
+        ir.sabou.sales.SalesChannel.ONLINE -> "سفارش اینترنتی"
+        ir.sabou.sales.SalesChannel.CORPORATE -> "شرکتی و قراردادی"
+        ir.sabou.sales.SalesChannel.OTHER -> "سایر"
+        null -> "نامشخص"
+    }
 
     fun dayFlash(f: DayFlash): ReportTable {
         val rows = buildList {

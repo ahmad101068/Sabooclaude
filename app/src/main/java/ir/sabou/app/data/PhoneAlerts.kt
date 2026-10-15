@@ -146,6 +146,7 @@ object PhoneAlerts {
         Alert.Kind.BILL_DUE -> "سررسید فاکتور خرید"
         Alert.Kind.RECEIVABLE_LATE -> "طلب سررسیدگذشته"
         Alert.Kind.RUN_OUT -> "تمام شدن کالا پیش از تحویل"
+        Alert.Kind.CASH_LOW -> "کمبود نقدینگی"
     }
 }
 

@@ -71,6 +71,17 @@ object Ratio {
     }
 
     /**
+     * [value] × [multiplier] / [divisor] for signed operands (a margin below zero, a change in profit), exact and
+     * rounded half away from zero, so the result of a negative value is the mirror of the positive one.
+     */
+    fun mulDivSigned(value: Long, multiplier: Long, divisor: Long): Long {
+        require(divisor > 0) { "ratio_divisor_not_positive" }
+        val negative = (value < 0) != (multiplier < 0) && value != 0L && multiplier != 0L
+        val magnitude = mulDiv(Math.absExact(value), Math.absExact(multiplier), divisor, Rounding.HALF_UP)
+        return if (negative) -magnitude else magnitude
+    }
+
+    /**
      * Relative change from [previous] to [now] in basis points (+ = up), exact (no intermediate overflow) and
      * rounded half away from zero; null when [previous] is not positive (there is nothing to compare with).
      * The one place a percentage change is computed: prices, sales against last month, budgets.
