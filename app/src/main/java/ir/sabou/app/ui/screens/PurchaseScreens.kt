@@ -1371,26 +1371,44 @@ object PurchaseScreens {
             WithBranch { branch ->
                 val setup by load(session, branch) { overview.locations(branch).filter { it.isActive } to overview.menu().filter { it.item.isActive } }
                 var locationId by rememberSaveable(branch) { mutableStateOf<GlobalId?>(null) }
+                var fromForecast by rememberSaveable { mutableStateOf(true) }
                 val plan = rememberRows<PlanRow>({ listOf(it.menu, it.portions) }, { PlanRow(it[0] as GlobalId?, it[1] as Quantity?) }) { emptyList() }
                 Page {
                     Loaded(setup) { (locations, menu) ->
                         val loc = locationId ?: locations.firstOrNull()?.id
+                        // ADR-0054: what runs out before its delivery, from the sales forecast.
+                        val runOuts by load(session, branch) { buying.runOuts(branch, session.today, minutesNow()) }
+                        Loaded(runOuts) { list ->
+                            if (list.isNotEmpty()) SCard {
+                                Text("پیش از تحویل بعدی تمام می‌شود", style = SabouType.section, color = Sabou.colors.danger)
+                                list.forEach { r ->
+                                    Text("«${r.item.name}» تا ${Fa.dayTitle(r.runsOutOn)} · نیاز ${Fa.quantity(r.need)} · موجودی ${Fa.quantity(r.onHand)}" +
+                                        (if (!r.onOrder.isZero) " · در راه ${Fa.quantity(r.onOrder)}" else "") + (r.delivery?.let { " · تحویل ${Fa.dayTitle(it)}" } ?: ""),
+                                        style = SabouType.caption, color = Sabou.colors.ink)
+                                }
+                            }
+                        }
                         SCard {
                             if (locations.size > 1) Picker("انبار", locations.map { Choice(it.id, it.name) }, loc, { locationId = it })
-                            Text("غذاهایی که تا تحویل بعدی می‌فروشید (اختیاری):", style = SabouType.bodyStrong, color = Sabou.colors.ink)
-                            plan.forEach { r ->
+                            ir.sabou.app.ui.components.Segmented(listOf("از پیش‌بینی فروش", "غذاهای دستی"), if (fromForecast) 0 else 1, { fromForecast = it == 0 })
+                            if (fromForecast) Text("نیاز تا تحویل بعدی + بیشترِ سطح مطلوب و نیاز تا تحویل پس از آن، از پیش‌بینی هر غذا (میانگین همان روز هفته در ۴ هفته‌ی اخیر).",
+                                style = SabouType.caption, color = Sabou.colors.muted)
+                            else Text("غذاهایی که تا تحویل بعدی می‌فروشید (اختیاری):", style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                            if (!fromForecast) plan.forEach { r ->
                                 key(r) {
                                     Picker("غذا", menu.map { Choice(it.item.id, it.item.name) }, r.menu, { r.menu = it })
                                     QuantityInput("تعداد پرس", "پرس", { r.portions = it }, value = r.portions)
                                     Text("حذف", style = SabouType.label, color = Sabou.colors.danger, modifier = Modifier.clickable { plan.remove(r) }.padding(6.dp))
                                 }
                             }
-                            SecondaryButton("افزودن غذا", { plan.add(PlanRow(null, null)) })
+                            if (!fromForecast) SecondaryButton("افزودن غذا", { plan.add(PlanRow(null, null)) })
                         }
                         val lines = plan.mapNotNull { r -> if (r.menu != null && r.portions != null) PlanLine(r.menu!!, r.portions!!) else null }
                         if (loc == null) EmptyState("انباری برای این شعبه تعریف نشده است.")
                         else {
-                            val result by load(session, loc, lines) { buying.suggestions(loc, lines, session.today, minutesNow()) }
+                            val result by load(session, loc, lines, fromForecast) {
+                                if (fromForecast) buying.forecastSuggestions(loc, session.today, minutesNow()) else buying.suggestions(loc, lines, session.today, minutesNow())
+                            }
                             Loaded(result) { suggested ->
                                 val groups = suggested.groups
                                 // What could not be broken down is said, never silently left out of the order.
@@ -1407,7 +1425,8 @@ object PurchaseScreens {
                                             val unit = unitName(s.item.unit)
                                             KeyValue("${s.item.name}: ${Fa.quantity(s.suggested)} $unit", s.value?.let { Fa.rial(it) } ?: "—")
                                             Text("موجودی ${Fa.quantity(s.onHand)} · در راه ${Fa.quantity(s.onOrder)} · مطلوب ${Fa.quantity(s.par)}" + (s.deliveryDay?.let { " (تحویل ${Fa.weekday(it)})" } ?: "") +
-                                                if (!s.planned.isZero) " · برنامه ${Fa.quantity(s.planned)}" else "", style = SabouType.caption, color = Sabou.colors.muted)
+                                                (if (!s.planned.isZero) " · ${if (s.forecastCover != null) "نیاز تا تحویل" else "برنامه"} ${Fa.quantity(s.planned)}" else "") +
+                                                (s.forecastCover?.takeIf { !it.isZero }?.let { " · نیاز هفته‌ی بعد از تحویل ${Fa.quantity(it)}" } ?: ""), style = SabouType.caption, color = Sabou.colors.muted)
                                         }
                                         Divider()
                                         KeyValue("جمع تقریبی (ریال)", Fa.rial(g.total), strong = true)
@@ -1419,7 +1438,7 @@ object PurchaseScreens {
                                     }
                                 }
                                 if (groups.isNotEmpty()) ExportButtons("پیشنهاد-خرید") {
-                                    listOf(ReportTables.suggestions(buying.suggestions(loc, lines, session.today, minutesNow()).groups, locations.firstOrNull { it.id == loc }?.name ?: "", session.today))
+                                    listOf(ReportTables.suggestions((if (fromForecast) buying.forecastSuggestions(loc, session.today, minutesNow()) else buying.suggestions(loc, lines, session.today, minutesNow())).groups, locations.firstOrNull { it.id == loc }?.name ?: "", session.today))
                                 }
                             }
                         }
