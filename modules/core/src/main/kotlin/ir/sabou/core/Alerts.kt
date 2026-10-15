@@ -12,7 +12,7 @@ import ir.sabou.platform.Permission
  * only if it comes back.
  */
 data class Alert(val key: String, val kind: Kind, val title: String, val text: String) {
-    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH, EXPIRY, COUNT_DUE, STAFF_DOCUMENT, TRANSFER_IN, STOCK_REQUEST, BILL_DUE, RECEIVABLE_LATE }
+    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH, EXPIRY, COUNT_DUE, STAFF_DOCUMENT, TRANSFER_IN, STOCK_REQUEST, BILL_DUE, RECEIVABLE_LATE, CASH_LOW }
 }
 
 /**
@@ -87,6 +87,18 @@ class Alerts internal constructor(private val core: SabouCore) {
                                 "${if (late) "سررسید گذشته" else "سررسید نزدیک"}: فاکتور ${r.supplier}",
                                 "${Fa.rial(r.outstanding)} ریال · سررسید ${Fa.date(r.invoice.dueDate)}" + if (!r.invoice.approved) " · هنوز تأیید نشده" else ""))
                         }
+                }
+                if (actor.role.allows(Permission.LEDGER_VIEW)) {
+                    // Cash forecast (ADR-0051): the base case ends a week below zero within the next weeks. Only once
+                    // there are sales to forecast from: without them the forecast sees the bills but none of the
+                    // income, and the bills have their own alert (BILL_DUE).
+                    core.branches.all().filter { actor.canAccess(Scope.Branch(it.id)) }.forEach { b ->
+                        safe { listOf(core.cashFlows.forecast(Scope.Branch(b.id), today, weeks = CashFlows.ALERT_WEEKS)) }.firstOrNull()
+                            ?.takeIf { it.assumptions.liquidBp != null }?.firstShortWeek?.let { w ->
+                            add(Alert("CASH:${b.id.value}:${w.from.epochDay}", Alert.Kind.CASH_LOW, "کمبود نقدینگی در هفته‌ی ${Fa.number(w.index.toLong())}",
+                                "${b.name}: مانده‌ی پیش‌بینی‌شده تا ${Fa.date(w.to)} به ${Fa.rial(w.closing)} ریال می‌رسد؛ «پیش‌بینی نقدینگی» را ببینید."))
+                        }
+                    }
                 }
                 if (actor.role.allows(Permission.RECEIVABLE_COLLECT)) {
                     safe { core.overview.openReceivables() }.filter { it.receivable.dueDate < today }.forEach { r ->

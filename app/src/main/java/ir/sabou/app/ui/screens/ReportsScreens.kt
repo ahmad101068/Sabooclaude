@@ -68,6 +68,8 @@ object ReportsScreens {
                 if (session.can(Permission.LEDGER_VIEW)) {
                     SectionTitle("مالی")
                     NavRow(R.drawable.ic_calendar, "پیش‌بینی فروش", "دو هفته‌ی آینده، با روزهای تعطیل و مناسبت", onClick = { nav.go(Route.SalesForecast) })
+                    NavRow(R.drawable.ic_finance, "پیش‌بینی نقدینگی", "۱۳ هفته‌ی آینده: طلب، چک، فاکتور، حقوق و فروش؛ با سناریو", onClick = { nav.go(Route.CashForecast) })
+                    NavRow(R.drawable.ic_sales, "مشتریان نسیه", "سهم از فروش، مانده، سررسیدگذشته و تأخیر معمول", onClick = { nav.go(Route.CreditCustomers) })
                     NavRow(R.drawable.ic_finance, "سود و زیان امروز در برابر بودجه", "با برآورد حقوق و اجاره‌ی روزانه؛ و ماه تا امروز", onClick = { nav.go(Route.DailyPnl) })
                     NavRow(R.drawable.ic_finance, "سود و زیان", "روزانه، به تفکیک شعبه، درصد بهای غذا و نیروی کار", onClick = { nav.go(Route.ProfitLoss) })
                     NavRow(R.drawable.ic_finance, "تراز آزمایشی", "مانده‌ی همه‌ی حساب‌ها", onClick = { nav.go(Route.TrialBalance) })
@@ -319,7 +321,7 @@ object ReportsScreens {
                                     Fa.rialShort(c.net.rial) + (c.perTransaction?.let { " · هر فاکتور ${Fa.rialShort(it.rial)}" } ?: ""))
                             }
                         }
-                        Text(COST_BASIS_NOTE, style = SabouType.caption, color = Sabou.colors.muted)
+                        Text(MIX_COST_NOTE, style = SabouType.caption, color = Sabou.colors.muted)
                         if (m.rows.isEmpty()) EmptyState("در این بازه فروش ثبت نهایی نشده است.")
                         m.rows.forEach { r ->
                             SCard {
@@ -337,6 +339,15 @@ object ReportsScreens {
                                     } ?: "بهای مواد معلوم نیست (رسپی یا قیمت خرید ندارد)",
                                     style = SabouType.caption, color = if (r.unitCost == null) Sabou.colors.danger else Sabou.colors.muted,
                                 )
+                                r.actualUnitCost?.let { c ->
+                                    val basis = if (r.fullyCosted) "" else " · بر پایه‌ی ${Fa.quantity(r.costedPortions)} از ${Fa.quantity(r.portions)} پرس"
+                                    Text(
+                                        "بهای واقعی هنگام فروش ${Fa.rial(c)} · حاشیه ${r.actualUnitMargin?.let { Fa.rial(it) } ?: "—"} · بهای غذا ${r.actualCostBp?.let { Fa.percent(it) } ?: "—"}$basis",
+                                        style = SabouType.caption, color = Sabou.colors.ink,
+                                    )
+                                    if (r.actualCostShort) Text("بخشی از مواد هنگام فروش در موجودی دفتری نبود؛ این بها تا تعیین تکلیف کسری کمتر از واقع است.",
+                                        style = SabouType.caption, color = Sabou.colors.danger)
+                                }
                             }
                         }
                     }
@@ -386,6 +397,100 @@ object ReportsScreens {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /** Cash forecast (ADR-0051): 13 weeks from what is in the till, with the dated documents and the sales pattern. */
+    @Composable
+    fun CashForecast(nav: Nav) {
+        val session = LocalSession.current
+        var preset by rememberSaveable { mutableStateOf(0) }
+        var expanded by rememberSaveable { mutableStateOf<Int?>(null) }
+        val presets = ir.sabou.core.CashScenario.PRESETS
+        Column(Modifier.fillMaxSize()) {
+            Header("پیش‌بینی نقدینگی", "۱۳ هفته‌ی آینده", onBack = nav.back) { BranchSwitcher() }
+            WithBranch { branch ->
+                val scenario = presets[preset]
+                val data by load(session, branch, preset) { cashFlows.forecast(branch, session.today, scenario) }
+                Page {
+                    ir.sabou.app.ui.components.Segmented(presets.map { it.name }, preset, { preset = it })
+                    Text(when (preset) { 1 -> "فروش ۱۵٪ کمتر و همه‌ی مشتریان ۳۰ روز دیرتر"; 2 -> "فروش ۱۰٪ بیشتر"; else -> "فروش مثل پیش‌بینی و وصول مثل سابقه‌ی هر مشتری" },
+                        style = SabouType.caption, color = Sabou.colors.muted)
+                    Loaded(data) { f ->
+                        SCard {
+                            KeyValue("نقد و بانک امروز (ریال)", Fa.rial(f.opening), strong = true)
+                            f.lowest?.let { KeyValue("کمترین مانده (هفته‌ی ${Fa.number(it.index.toLong())})", Fa.rial(it.closing), if (it.closing < 0) Sabou.colors.danger else Sabou.colors.ink) }
+                            KeyValue("مانده‌ی پایان هفته‌ی ${Fa.number(f.weeks.size.toLong())}", Fa.rial(f.weeks.last().closing))
+                        }
+                        f.firstShortWeek?.let { w -> Banner("در هفته‌ی ${Fa.number(w.index.toLong())} (تا ${Fa.date(w.to)}) مانده به ${Fa.rial(w.closing)} ریال می‌رسد.") }
+                        Text(ReportTables.cashAssumptions(f.assumptions), style = SabouType.caption, color = Sabou.colors.muted)
+                        SCard {
+                            f.weeks.forEach { w ->
+                                Row(Modifier.fillMaxWidth().clickable { expanded = if (expanded == w.index) null else w.index }.padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("هفته‌ی ${Fa.number(w.index.toLong())} · ${Fa.date(w.from)}", style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                                        Text("ورودی ${Fa.rialShort(w.inflow)} · خروجی ${Fa.rialShort(w.outflow)}", style = SabouType.caption, color = Sabou.colors.muted)
+                                    }
+                                    Text(Fa.rialShort(w.closing), style = SabouType.bodyStrong, color = if (w.closing < 0) Sabou.colors.danger else Sabou.colors.ink)
+                                }
+                                if (expanded == w.index) {
+                                    ir.sabou.core.CashItem.Kind.entries.forEach { k ->
+                                        val v = w.byKind[k] ?: 0L
+                                        if (v != 0L) KeyValue(ReportTables.cashKindName(k), Fa.rial(v), if (v < 0) Sabou.colors.danger else Sabou.colors.ink)
+                                    }
+                                    f.items.filter { it.date >= w.from && it.date <= w.to && !it.estimated }.forEach { i ->
+                                        Text("${Fa.date(i.date)} · ${i.text} · ${Fa.rial(i.amount)}", style = SabouType.caption, color = Sabou.colors.muted)
+                                    }
+                                }
+                                Divider()
+                            }
+                        }
+                        if (f.unscheduled.isNotEmpty()) SCard {
+                            Text("بدون تاریخ (در جدول نیامده)", style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                            f.unscheduled.forEach { u -> KeyValue(u.title, Fa.rial(u.amount)) }
+                        }
+                        Text(ReportTables.CASH_BASIS, style = SabouType.caption, color = Sabou.colors.muted)
+                    }
+                    ExportButtons("پیش‌بینی-نقدینگی") { ReportTables.cashForecast(cashFlows.forecast(branch, session.today, scenario)) }
+                }
+            }
+        }
+    }
+
+    /** Credit customers (ADR-0051): how much of the sales each one is, what they owe and how late they usually pay. */
+    @Composable
+    fun CreditCustomers(nav: Nav) {
+        val session = LocalSession.current
+        Column(Modifier.fillMaxSize()) {
+            Header("مشتریان نسیه", "۹۰ روز گذشته", onBack = nav.back) { BranchSwitcher() }
+            WithBranch { branch ->
+                val data by load(session, branch) { cashFlows.customers(branch, session.today) }
+                Page {
+                    Loaded(data) { r ->
+                        SCard {
+                            KeyValue("فروش شعبه (ریال)", Fa.rial(r.totalSales), strong = true)
+                            KeyValue("سهم فروش نسیه", r.creditShareBp?.let(Fa::percent) ?: "—")
+                            KeyValue("سهم بزرگ‌ترین مشتری", r.topShareBp?.let(Fa::percent) ?: "—")
+                            KeyValue("سهم سه مشتری بزرگ", r.topThreeShareBp?.let(Fa::percent) ?: "—")
+                        }
+                        if (r.rows.isEmpty()) EmptyState("در این بازه فروش نسیه یا طلبی نیست.")
+                        r.rows.forEach { c ->
+                            SCard {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(c.customer.name, style = SabouType.bodyStrong, color = Sabou.colors.ink, modifier = Modifier.weight(1f))
+                                    Text(c.shareBp?.let(Fa::percent) ?: "—", style = SabouType.bodyStrong, color = Sabou.colors.primary)
+                                }
+                                Text("فروش نسیه ${Fa.rial(c.sales)} · مانده ${Fa.rial(c.outstanding)}", style = SabouType.caption, color = Sabou.colors.muted)
+                                if (c.overdue > 0) Text("سررسیدگذشته ${Fa.rial(c.overdue)} ریال", style = SabouType.caption, color = Sabou.colors.danger)
+                                Text(c.delayDays?.let { "معمولاً ${Fa.number(it.toLong())} روز پس از سررسید می‌پردازد · وصول ${Fa.number((c.collectionDays ?: 0).toLong())} روز پس از فروش" }
+                                    ?: "هنوز طلبی از او کامل وصول نشده", style = SabouType.caption, color = Sabou.colors.muted)
+                            }
+                        }
+                    }
+                    ExportButtons("مشتریان-نسیه") { listOf(ReportTables.customers(cashFlows.customers(branch, session.today))) }
                 }
             }
         }
@@ -641,3 +746,6 @@ object ReportsScreens {
 /** Product mix and menu engineering use today's ingredient costs; the period's profit is the P&L (from the books). */
 internal const val COST_BASIS_NOTE =
     "بهای مواد در این صفحه با قیمت امروز مواد حساب می‌شود (برای تصمیم قیمت و منو). سود واقعی این بازه را «سود و زیان» از دفاتر نشان می‌دهد."
+
+internal const val MIX_COST_NOTE =
+    "«بهای مواد هر پرس» با قیمت امروز مواد است (برای تصمیم قیمت و منو). «بهای واقعی هنگام فروش» همان است که هر فروش هنگام ثبت از انبار برداشت؛ سود کل این بازه را «سود و زیان» از دفاتر نشان می‌دهد."
