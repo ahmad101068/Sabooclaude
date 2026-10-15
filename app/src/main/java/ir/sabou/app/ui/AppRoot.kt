@@ -585,6 +585,7 @@ private fun Pages(route: Route, nav: Nav) {
         Route.MenuEngineering -> ReportsScreens.MenuEngineering(nav)
         Route.DailyPnl -> ReportsScreens.DailyPnl(nav)
         Route.SalesForecast -> ReportsScreens.SalesForecast(nav)
+        Route.ProfitBridge -> ReportsScreens.ProfitBridge(nav)
         Route.CashForecast -> ReportsScreens.CashForecast(nav)
         Route.CreditCustomers -> ReportsScreens.CreditCustomers(nav)
         Route.Usage -> ReportsScreens.Usage(nav)
