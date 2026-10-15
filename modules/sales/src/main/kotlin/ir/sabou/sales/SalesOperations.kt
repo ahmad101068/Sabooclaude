@@ -64,9 +64,15 @@ data class SaveSaleDraft(
     val saleId: GlobalId? = null,
     /** Why the discount was given; required with a discount, which needs [Permission.SALES_DISCOUNT]. */
     val discountReason: String = "",
+    /**
+     * Channels of the sale (ADR-0052) as proportions: one channel with any amount for a whole sale, or the POS's
+     * split. Recorded scaled exactly to the sale's net food sales. Empty: not recorded.
+     */
+    val channels: List<ChannelShare> = emptyList(),
 ) : Command {
     override val requiredPermission = Permission.SALES_RECORD
     override fun fingerprint() = "$saleId|$scope|${date.epochDay}|$kitchenLocationId|${discount.rial}|$discountReason|${serviceCharge.rial}|${tax.rial}|$guests|$transactions|" +
+        channels.joinToString(";") { "${it.channel}:${it.amount.rial}:${it.transactions}" } + "|" +
         lines.joinToString(";") { "${it.menuItemId}:${it.portions.micros}:${it.unitPrice?.rial}:${it.overrideReason}" } + "|" +
         settlements.joinToString(";") { s -> when (s) {
             is Settlement.Liquid -> "L:${s.treasuryAccountId}:${s.amount.rial}:${s.cheque?.fingerprint()}"
@@ -344,9 +350,21 @@ class SalesOperations(
             ensure((account.kind == ir.sabou.treasury.TreasuryKind.RECEIVED_CHEQUES) == (s.cheque != null)) { DomainError.InvalidInput("cheque", "مشخصات چک فقط و حتماً برای صندوق چک لازم است.") }
             s.cheque?.validate()
         }
-        sales.saveSale(sale)
+        val recorded = sale.copy(channels = channelsOf(cmd.channels, sale.netFood))
+        sales.saveSale(recorded)
         ctx.audit(AuditDraft("SALE_DRAFT_SAVE", "DAILY_SALE", sale.id.value, "payable=${sale.payable.rial};settled=${sale.settled.rial}"))
-        return sale
+        return recorded
+    }
+
+    /** [shares] as proportions, scaled exactly to [net] (ADR-0052); one entry per channel, in channel order. */
+    private fun channelsOf(shares: List<ChannelShare>, net: Money): List<ChannelShare> {
+        if (shares.isEmpty()) return emptyList()
+        ensure(shares.map { it.channel }.distinct().size == shares.size) { DomainError.InvalidInput("channels", "هر کانال فروش فقط یک‌بار بیاید.") }
+        ensure(shares.all { it.transactions in 0..100_000 }) { DomainError.InvalidInput("channels", "تعداد فاکتور کانال معتبر نیست.") }
+        ensure(shares.any { !it.amount.isZero }) { DomainError.InvalidInput("channels", "سهم کانال‌ها صفر است.") }
+        val sorted = shares.sortedBy { it.channel.ordinal }
+        val amounts = Ratio.allocate(net.rial, sorted.map { it.amount.rial })
+        return sorted.mapIndexed { i, c -> c.copy(amount = Money.of(amounts[i])) }
     }
 
     fun discardDraft(c: DiscardSaleDraft): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->

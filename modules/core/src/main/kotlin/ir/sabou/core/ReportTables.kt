@@ -138,6 +138,26 @@ object ReportTables {
 
     const val CASH_BASIS = "مانده‌ی اول: صندوق، بانک، کارتخوان و تنخواه شعبه. اقلام سنددار (طلب، چک، فاکتور خرید، حقوق تأییدشده) در سررسیدشان؛ فروش، خرید آینده، حقوق ماه‌های بعد و هزینه‌های جاری برآوردی‌اند."
 
+    /** ADR-0052: net food sales of the period by channel. */
+    fun channels(m: ProductMix) = ReportTable(
+        "فروش به تفکیک کانال", "${m.branch} · ${period(m.from, m.to)}",
+        listOf("کانال", "خالص فروش", "سهم", "تعداد فاکتور", "میانگین هر فاکتور"),
+        m.channels.map { listOf(Cell.of(channelName(it.channel)), Cell.Amount(it.net.rial), Cell.Percent(it.shareBp), Cell.of(Fa.number(it.transactions.toLong())), amount(it.perTransaction?.rial)) },
+        footer = listOf(Cell.of("جمع"), Cell.Amount(m.channels.sumOf { it.net.rial }), Cell.Percent(if (m.channels.isEmpty()) 0 else 10_000),
+            Cell.of(Fa.number(m.channels.sumOf { it.transactions }.toLong())), Cell.EMPTY),
+        notes = listOf(RIAL, "خالص فروش: پس از تخفیف، پیش از سرویس و مالیات. کانال هر فروش هنگام ثبت انتخاب می‌شود یا از «نوع فروش» فاکتورهای صندوق می‌آید."),
+    )
+
+    fun channelName(c: ir.sabou.sales.SalesChannel?) = when (c) {
+        ir.sabou.sales.SalesChannel.DINE_IN -> "حضوری (سالن)"
+        ir.sabou.sales.SalesChannel.TAKEAWAY -> "بیرون‌بر"
+        ir.sabou.sales.SalesChannel.DELIVERY -> "ارسال با پیک"
+        ir.sabou.sales.SalesChannel.ONLINE -> "سفارش اینترنتی"
+        ir.sabou.sales.SalesChannel.CORPORATE -> "شرکتی و قراردادی"
+        ir.sabou.sales.SalesChannel.OTHER -> "سایر"
+        null -> "نامشخص"
+    }
+
     fun dayFlash(f: DayFlash): ReportTable {
         val rows = buildList {
             fun kv(k: String, v: Cell) = add(listOf(Cell.of(k), v))

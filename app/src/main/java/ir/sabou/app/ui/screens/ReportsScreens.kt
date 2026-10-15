@@ -314,6 +314,13 @@ object ReportsScreens {
                     PeriodPicker(from, to) { f, t -> from = f; to = t }
                     Loaded(data) { m ->
                         SCard { KeyValue("فروش ناخالص (ریال)", Fa.rial(m.gross), strong = true); KeyValue("روزهای فروش", Fa.number(m.days.toLong())) }
+                        if (m.channels.isNotEmpty()) SCard {
+                            Text("خالص فروش به تفکیک کانال", style = SabouType.bodyStrong, color = Sabou.colors.ink)
+                            m.channels.forEach { c ->
+                                KeyValue("${ReportTables.channelName(c.channel)} · ${Fa.percent(c.shareBp)}",
+                                    Fa.rialShort(c.net.rial) + (c.perTransaction?.let { " · هر فاکتور ${Fa.rialShort(it.rial)}" } ?: ""))
+                            }
+                        }
                         Text(MIX_COST_NOTE, style = SabouType.caption, color = Sabou.colors.muted)
                         if (m.rows.isEmpty()) EmptyState("در این بازه فروش ثبت نهایی نشده است.")
                         m.rows.forEach { r ->
@@ -344,7 +351,7 @@ object ReportsScreens {
                             }
                         }
                     }
-                    ExportButtons("اقلام-پرفروش") { listOf(ReportTables.productMix(reports.productMix(branch, from, to))) }
+                    ExportButtons("اقلام-پرفروش") { reports.productMix(branch, from, to).let { m -> listOfNotNull(ReportTables.productMix(m), m.channels.takeIf { it.isNotEmpty() }?.let { ReportTables.channels(m) }) } }
                 }
             }
         }
