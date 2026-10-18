@@ -64,6 +64,14 @@ class TenantIsolationTest {
     private fun refused(db: PostgresSqlDatabase, sql: String): String =
         runCatching { db.query(sql) }.exceptionOrNull()?.message ?: error("not refused: $sql")
 
+    /** CI's `postgres` job asks for PostgreSQL through the environment: the suite must not quietly run on SQLite. */
+    @Test fun theRequestedDatabaseIsTheOneInUse() {
+        if (System.getenv("SABOU_DB") == "postgres") {
+            assertTrue(DevDatabases.onPostgres, "SABOU_DB=postgres but the tests run on SQLite")
+            DevDatabases.memory().use { assertEquals(ir.sabou.persistence.SqlDialect.POSTGRES, it.dialect) }
+        }
+    }
+
     @Test fun aTenantSeesAndReachesNothingOfAnother() {
         org.junit.Assume.assumeTrue("PostgreSQL only", DevDatabases.onPostgres)
         val a = tenant("a"); val b = tenant("b")
