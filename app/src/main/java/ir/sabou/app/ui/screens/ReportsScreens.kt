@@ -67,6 +67,7 @@ object ReportsScreens {
             Page {
                 if (session.can(Permission.LEDGER_VIEW)) {
                     SectionTitle("مالی")
+                    NavRow(R.drawable.ic_finance, "کارنامه و عارضه‌یابی", "۲۰ بُعد با امتیاز و کیفیت داده؛ عارضه‌ها با شواهد، مبلغ در معرض و اقدام پیشنهادی", onClick = { nav.go(Route.Assessment) })
                     NavRow(R.drawable.ic_calendar, "پیش‌بینی فروش", "دو هفته‌ی آینده، با روزهای تعطیل و مناسبت", onClick = { nav.go(Route.SalesForecast) })
                     NavRow(R.drawable.ic_finance, "پیش‌بینی نقدینگی", "۱۳ هفته‌ی آینده: طلب، چک، فاکتور، حقوق و فروش؛ با سناریو", onClick = { nav.go(Route.CashForecast) })
                     NavRow(R.drawable.ic_sales, "مشتریان نسیه", "سهم از فروش، مانده، سررسیدگذشته و تأخیر معمول", onClick = { nav.go(Route.CreditCustomers) })

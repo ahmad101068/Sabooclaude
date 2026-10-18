@@ -88,6 +88,40 @@ object ReportTables {
             "عامل‌ها دقیقاً با تغییر سود در دفاتر برابرند. تعداد، ترکیب، قیمت و بهای مواد از ردیف‌های فروش و بهای واقعی‌شان (ADR-0050) است؛ بقیه از حساب‌های سود و زیان."),
     )
 
+    /** ADR-0061: the scorecard, every indicator with its evidence, the findings and actions, and the data still missing. */
+    fun assessment(a: Assessment): List<ReportTable> {
+        val sub = "${a.branchName} · ${period(a.from, a.to)} در برابر ${period(a.baseFrom, a.baseTo)} · قواعد نسخه‌ی ${Fa.number(a.rulesVersion.toLong())}"
+        fun score(s: Int?) = Cell.of(s?.let { Fa.number(it.toLong()) } ?: "داده‌ی کافی نیست")
+        val card = ReportTable("کارنامه‌ی ۳۶۰ درجه", sub, listOf("حوزه یا بُعد", "وزن", "امتیاز از ۱۰۰"),
+            listOf(listOf(Cell.of("امتیاز کل"), Cell.of("پوشش ${Fa.percent(a.coverageBp)}"), score(a.score))) +
+                a.areas.flatMap { ar ->
+                    listOf(listOf(Cell.of(ar.area.title), Cell.of(Fa.number(ar.area.weight)), score(ar.score))) +
+                        ar.dimensions.map { d -> listOf(Cell.of("   ${d.dimension.code} ${d.dimension.title}"), Cell.EMPTY, score(d.score)) }
+                },
+            notes = listOfNotNull(
+                a.critical.takeIf { it.isNotEmpty() }?.joinToString("؛ ", "بحرانی، جدا از امتیاز: ") { it.title },
+                a.dataQualityBp?.let { "کیفیت داده ${Fa.percent(it)}: " + a.quality.joinToString("؛ ") { q -> "${q.title} ${Fa.percent(q.bp)}" } },
+                "امتیاز هر شاخص ۱۰۰ در هدف و صفر در حد بد است؛ امتیاز کل میانگین وزنی ابعادی است که داده دارند. شاخص بی‌داده «نامعلوم» است، نه صفر.",
+            ))
+        val kpis = ReportTable("شاخص‌ها", sub, listOf("کد", "بُعد", "شاخص", "مقدار", "هدف", "امتیاز", "کیفیت داده", "منبع", "توضیح"),
+            a.kpis.map { k -> listOf(Cell.of(k.id), Cell.of(k.dimension.title), Cell.of(k.title), Cell.of(Assessments.valueText(k)), Cell.of(Assessments.targetText(k)),
+                Cell.of(k.score?.let { Fa.number(it.toLong()) } ?: "—"), Cell.of(Assessments.qualityName(k.quality)), Cell.of(k.source), Cell.of(k.note)) })
+        val findings = ReportTable("عارضه‌ها و اقدام پیشنهادی", sub, listOf("شدت", "بُعد", "عارضه", "شواهد", "مبلغ در معرض (ریال)", "علت‌های محتمل", "اقدام پیشنهادی", "اطمینان"),
+            a.findings.map { f -> listOf(Cell.of(f.severity.title), Cell.of(f.dimension.title), Cell.of(f.title), Cell.of(f.evidence.joinToString("؛ ")),
+                Cell.of(exposure(f)), Cell.of(f.causes.joinToString("؛ ")), Cell.of(f.action), Cell.of(f.confidence.title)) },
+            notes = listOf("اقدام‌ها پیشنهادند و تصمیم با شماست؛ گزارش هیچ سندی ثبت یا تغییر نمی‌دهد. علت‌ها از ارقام برمی‌آیند و حکم قطعی نیستند."))
+        val requests = ReportTable("داده‌ی لازم برای سنجش کامل", sub, listOf("بُعد", "آنچه لازم است"),
+            a.dataRequests.map { listOf(Cell.of(it.dimension.title), Cell.of(it.text)) })
+        return listOf(card, kpis, findings, requests)
+    }
+
+    fun exposure(f: Finding): String = when {
+        f.exposureHigh == null -> "—"
+        f.exposureLow == null -> "تا ${Fa.rial(f.exposureHigh)}"
+        f.exposureLow == f.exposureHigh -> Fa.rial(f.exposureHigh)
+        else -> "${Fa.rial(f.exposureLow)} تا ${Fa.rial(f.exposureHigh)}"
+    }
+
     /** ADR-0051: the weeks, then every item with its date and whether it is estimated. */
     fun cashForecast(f: CashForecast): List<ReportTable> {
         val kinds = CashItem.Kind.entries.filter { k -> f.weeks.any { (it.byKind[k] ?: 0L) != 0L } }
