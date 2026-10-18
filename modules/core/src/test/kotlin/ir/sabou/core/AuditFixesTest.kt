@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.ApproveStockCount
 import ir.sabou.inventory.CountEntry
 import ir.sabou.inventory.CreateItem
@@ -24,7 +27,6 @@ import ir.sabou.kernel.Scope
 import ir.sabou.payroll.SetClockPin
 import ir.sabou.payroll.StatutoryPolicy
 import ir.sabou.payroll.TaxBracket
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.Role
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.treasury.Direction
@@ -56,7 +58,7 @@ class AuditFixesTest {
 
     private fun run(block: (SabouCore, Scope.Branch, GlobalId) -> Unit) {
         val dir = Files.createTempDirectory("audit")
-        val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("x.db")}"))
+        val db = DevDatabases.open(dir.resolve("x.db"))
         try {
             val c = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_700_000_000_000L })
             c.bootstrap("شعبه", "مالک", "owner", "123456".toCharArray())

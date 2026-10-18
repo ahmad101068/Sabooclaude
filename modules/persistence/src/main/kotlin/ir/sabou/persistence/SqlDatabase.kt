@@ -9,6 +9,9 @@ import ir.sabou.platform.UnitOfWork
  * SupportSQLiteDatabase; in JVM tests it wraps sqlite-jdbc. Arguments are String, Long, Int, ByteArray or null.
  */
 interface SqlDatabase {
+    /** Which SQL the connection speaks; stores are written for SQLite and translated for PostgreSQL (ADR-0060). */
+    val dialect: SqlDialect get() = SqlDialect.SQLITE
+
     fun execute(sql: String, vararg args: Any?)
     fun query(sql: String, vararg args: Any?): List<SqlRow>
     fun begin()
@@ -17,6 +20,23 @@ interface SqlDatabase {
 
     /** Rows changed by the last statement on this connection. */
     fun changes(): Long = query("SELECT changes() AS n").single().long("n")
+}
+
+enum class SqlDialect { SQLITE, POSTGRES }
+
+/** A database the caller closes (JVM adapters). */
+interface ClosableSqlDatabase : SqlDatabase, AutoCloseable
+
+/** The tables of the database, by name (catalogue queries differ between SQLite and PostgreSQL). */
+fun SqlDatabase.tableNames(): List<String> = when (dialect) {
+    SqlDialect.SQLITE -> query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").map { it.str("name") }
+    SqlDialect.POSTGRES -> query(PostgresDialect.TABLES).map { it.str("name") }
+}
+
+/** The columns of [table] with their primary-key position (0: not part of it). */
+fun SqlDatabase.columnsOf(table: String): List<Pair<String, Int>> = when (dialect) {
+    SqlDialect.SQLITE -> query("PRAGMA table_info($table)").map { it.str("name") to it.long("pk").toInt() }
+    SqlDialect.POSTGRES -> query(PostgresDialect.columns(table)).map { it.str("name") to it.long("pk").toInt() }
 }
 
 class SqlRow(private val values: Map<String, Any?>) {

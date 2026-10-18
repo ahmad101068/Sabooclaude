@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.StockUnit
 import ir.sabou.kernel.Clock
@@ -8,7 +11,6 @@ import ir.sabou.kernel.JalaliCalendar
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.Role
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.purchasing.InvoiceLine
@@ -26,7 +28,7 @@ import kotlin.test.assertTrue
 /** One search box: names in any spelling, invoice and document numbers, amounts; only what the role may see (ADR-0040). */
 class SearchTest {
     private val dir = Files.createTempDirectory("search")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("s.db")}"))
+    private val db = DevDatabases.open(dir.resolve("s.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_790_000_000_000L })
     private val day = JalaliCalendar.date(1405, 7, 20)
     private fun id() = GlobalId.new()

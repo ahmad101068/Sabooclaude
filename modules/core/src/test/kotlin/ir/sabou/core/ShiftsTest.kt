@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.Clock
 import ir.sabou.kernel.DomainException
@@ -16,7 +19,6 @@ import ir.sabou.payroll.CopyWeek
 import ir.sabou.payroll.RegisterEmployee
 import ir.sabou.payroll.SaveShift
 import ir.sabou.payroll.SetClockPin
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import java.nio.file.Files
 import java.sql.DriverManager
@@ -29,7 +31,7 @@ import kotlin.test.assertTrue
 /** Shifts, labour cost against budget, the PIN clock and confirming a day into attendance (ADR-0038). */
 class ShiftsTest {
     private val dir = Files.createTempDirectory("shifts")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("s.db")}"))
+    private val db = DevDatabases.open(dir.resolve("s.db"))
     private val day = JalaliCalendar.date(1405, 7, 20)
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { day.epochDay * 86_400_000L + 9 * 3_600_000L })
     private fun id() = GlobalId.new()

@@ -8,4 +8,5 @@ dependencies {
     api(project(":modules:payroll"))
     api(project(":modules:assets"))
     testImplementation("org.xerial:sqlite-jdbc:3.46.1.3")
+    testRuntimeOnly("org.postgresql:postgresql:42.7.4")
 }

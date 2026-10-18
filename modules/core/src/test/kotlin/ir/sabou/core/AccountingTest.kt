@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.Clock
 import ir.sabou.kernel.DomainException
@@ -11,7 +14,6 @@ import ir.sabou.ledger.AccountCode
 import ir.sabou.ledger.DefineAccount
 import ir.sabou.ledger.StandardAccounts
 import ir.sabou.ledger.UpdateAccount
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.purchasing.PaySupplierInvoice
 import ir.sabou.purchasing.RecordSupplierOpeningBalance
@@ -36,7 +38,7 @@ import kotlin.test.assertTrue
 /** Review of the other modules, stage 2 (ADR-0045): own accounts, opening balances, accounting reports. */
 class AccountingTest {
     private val dir = Files.createTempDirectory("acct")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("a.db")}"))
+    private val db = DevDatabases.open(dir.resolve("a.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_790_000_000_000L }, emptyList(), null)
     private val day = JalaliCalendar.date(1405, 7, 1)
     private fun id() = GlobalId.new()

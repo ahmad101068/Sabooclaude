@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.DefineMenuItem
 import ir.sabou.inventory.PublishPrepRecipe
@@ -14,7 +17,6 @@ import ir.sabou.kernel.JalaliCalendar
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.purchasing.InvoiceLine
 import ir.sabou.purchasing.PostPurchaseInvoice
@@ -32,7 +34,7 @@ import kotlin.test.assertEquals
 /** The kitchen's day: forecast from past weekdays, prep tasks in order, allergens through sub-recipes (ADR-0033). */
 class PrepTest {
     private val dir = Files.createTempDirectory("prep")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("p.db")}"))
+    private val db = DevDatabases.open(dir.resolve("p.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_790_000_000_000L })
     private val day = JalaliCalendar.date(1405, 7, 20)
     private fun kg(v: Long) = Quantity.units(v)

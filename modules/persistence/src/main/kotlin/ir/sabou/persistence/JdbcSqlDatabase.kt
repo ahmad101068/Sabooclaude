@@ -8,7 +8,7 @@ import java.sql.PreparedStatement
  * Android app uses its own SQLCipher adapter with the same contract. One connection, one thread
  * at a time (the unit of work is synchronized).
  */
-class JdbcSqlDatabase(private val connection: Connection) : SqlDatabase, AutoCloseable {
+class JdbcSqlDatabase(private val connection: Connection) : ClosableSqlDatabase {
     private var lastChanges = 0L
 
     init {

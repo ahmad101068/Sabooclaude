@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.DefineMenuItem
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.Clock
@@ -11,7 +14,6 @@ import ir.sabou.kernel.Scope
 import ir.sabou.ledger.BudgetPeriod
 import ir.sabou.ledger.SetBudget
 import ir.sabou.ledger.StandardAccounts
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.Role
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.purchasing.InvoiceLine
@@ -39,7 +41,7 @@ import kotlin.test.assertTrue
 /** ADR-0051: the 13-week cash forecast and the customers behind it. */
 class CashFlowTest {
     private val dir = Files.createTempDirectory("sabou-cash")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("c.db")}"))
+    private val db = DevDatabases.open(dir.resolve("c.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_700_000_000_000L }, emptyList(), null)
     private val today = BusinessDate(20_100)
     private fun id() = GlobalId.new()

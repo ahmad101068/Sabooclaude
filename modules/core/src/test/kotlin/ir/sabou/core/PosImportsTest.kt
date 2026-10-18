@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.DefineMenuItem
 import ir.sabou.inventory.PublishRecipe
@@ -14,7 +17,6 @@ import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
 import ir.sabou.ledger.StandardAccounts
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.posimport.FileCurrency
 import ir.sabou.posimport.Text
@@ -36,7 +38,7 @@ import kotlin.test.assertTrue
 /** A POS day imported end to end on a real SQLite file (ADR-0026). */
 class PosImportsTest {
     private val dir = Files.createTempDirectory("pos")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("p.db")}"))
+    private val db = DevDatabases.open(dir.resolve("p.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_790_000_000_000L })
     private val day = JalaliCalendar.date(1405, 7, 18)
     private lateinit var branch: Scope.Branch

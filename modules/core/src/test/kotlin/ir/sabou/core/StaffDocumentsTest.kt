@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.kernel.Clock
 import ir.sabou.kernel.DomainException
 import ir.sabou.kernel.GlobalId
@@ -11,7 +14,6 @@ import ir.sabou.payroll.CorrectStaffDocument
 import ir.sabou.payroll.RemoveStaffDocument
 import ir.sabou.payroll.RegisterEmployee
 import ir.sabou.payroll.StaffDocument
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.AttachmentInput
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import java.nio.file.Files
@@ -25,7 +27,7 @@ import kotlin.test.assertTrue
 /** Health cards and contracts: missing, expiring, renewed (ADR-0039). */
 class StaffDocumentsTest {
     private val dir = Files.createTempDirectory("staffdocs")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("s.db")}"))
+    private val db = DevDatabases.open(dir.resolve("s.db"))
     private val day = JalaliCalendar.date(1405, 7, 20)
     private var now = day.epochDay * 86_400_000L
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { now })

@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CountEntry
 import ir.sabou.inventory.CountFrequency
 import ir.sabou.inventory.CreateItem
@@ -10,7 +13,6 @@ import ir.sabou.kernel.Clock
 import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.JalaliCalendar
 import ir.sabou.kernel.Quantity
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import java.nio.file.Files
 import java.sql.DriverManager
@@ -22,7 +24,7 @@ import kotlin.test.assertTrue
 /** A count plan kept in the database, its sheet, its due alert, cleared by its count (ADR-0031). */
 class CountPlanTest {
     private val dir = Files.createTempDirectory("plan")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("c.db")}"))
+    private val db = DevDatabases.open(dir.resolve("c.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_790_000_000_000L })
     private val day = JalaliCalendar.date(1405, 7, 20)
 

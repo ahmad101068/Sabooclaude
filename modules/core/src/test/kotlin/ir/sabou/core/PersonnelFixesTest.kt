@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.Clock
 import ir.sabou.kernel.DomainException
@@ -26,7 +29,6 @@ import ir.sabou.payroll.SetClockPin
 import ir.sabou.payroll.StatutoryPolicy
 import ir.sabou.payroll.TaxBracket
 import ir.sabou.payroll.VoidPunch
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.Role
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import java.nio.file.Files
@@ -42,7 +44,7 @@ import kotlin.test.assertTrue
 class PersonnelFixesTest {
     private val dir = Files.createTempDirectory("personnel")
     private val file = dir.resolve("p.db")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:$file"))
+    private val db = DevDatabases.open(file)
     private val day = JalaliCalendar.date(1405, 7, 20)
     private var now = day.epochDay * 86_400_000L + 9 * 3_600_000L
     private val mehr = JalaliCalendar.date(1405, 7, 1) to JalaliCalendar.date(1405, 7, 30)

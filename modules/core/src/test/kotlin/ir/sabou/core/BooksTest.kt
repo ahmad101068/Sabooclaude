@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.assets.AcquireAsset
 import ir.sabou.assets.DepreciationMethod
 import ir.sabou.assets.Funding
@@ -18,7 +21,6 @@ import ir.sabou.kernel.Scope
 import ir.sabou.ledger.BudgetPeriod
 import ir.sabou.ledger.SetBudget
 import ir.sabou.ledger.StandardAccounts
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.Role
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.purchasing.ApproveInvoice
@@ -57,9 +59,9 @@ class BooksTest {
     private val dir = Files.createTempDirectory("sabou-books")
     private val file = dir.resolve("b.db")
     private val anchors = InMemoryAnchorStore()
-    private val open = mutableListOf<JdbcSqlDatabase>()
+    private val open = mutableListOf<ClosableSqlDatabase>()
     private fun boot(): SabouCore {
-        val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:$file")).also { open += it }
+        val db = DevDatabases.open(file).also { open += it }
         return SabouCore.open(db, anchors, Clock { 1_700_000_000_000L }, emptyList(), null)
     }
     private val day = BusinessDate(20_000)

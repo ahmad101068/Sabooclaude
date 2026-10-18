@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.Clock
 import ir.sabou.kernel.DomainException
@@ -27,7 +30,6 @@ import ir.sabou.payroll.SetClockPin
 import ir.sabou.payroll.StatutoryPolicy
 import ir.sabou.payroll.TaxBracket
 import ir.sabou.payroll.UpdateEmployeeProfile
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import java.nio.file.Files
 import java.sql.DriverManager
@@ -40,7 +42,7 @@ import kotlin.test.assertTrue
 /** Pay elements, bonuses, leave, night and holiday premiums, eidi, severance and leave paid on leaving. */
 class PersonnelPayTest {
     private val dir = Files.createTempDirectory("pay")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("p.db")}"))
+    private val db = DevDatabases.open(dir.resolve("p.db"))
     private val day = JalaliCalendar.date(1405, 7, 10)
     private var now = day.epochDay * 86_400_000L + 9 * 3_600_000L
     private fun month(m: Int) = JalaliCalendar.date(1405, m, 1) to JalaliCalendar.date(1405, m, JalaliCalendar.monthLength(1405, m))

@@ -168,10 +168,9 @@ class SqlItemStore(db: SqlDatabase) : SqlTable(db), ItemStore {
 
     /** Whether any record other than the item itself names it (documents, recipes, prices, plans, balances). */
     fun isReferenced(id: GlobalId): Boolean {
-        val tables = db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").map { it.str("name") }
-            .filter { it != "items" && it != "sync_changes" && it != "audit_log" }
+        val tables = db.tableNames().filter { it != "items" && it != "sync_changes" && it != "audit_log" && it != "schema_version" }
         return tables.any { t ->
-            val cols = db.query("PRAGMA table_info($t)").map { it.str("name") }.filter { it == "doc" || it == "item_id" }
+            val cols = db.columnsOf(t).map { it.first }.filter { it == "doc" || it == "item_id" }
             cols.any { c -> db.query("SELECT 1 AS x FROM $t WHERE $c LIKE ? LIMIT 1", "%${id.value}%").isNotEmpty() }
         }
     }

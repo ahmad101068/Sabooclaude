@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.DefineMenuItem
 import ir.sabou.inventory.PublishRecipe
@@ -12,7 +15,6 @@ import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.purchasing.CreatePurchaseOrder
 import ir.sabou.purchasing.InvoiceLine
@@ -35,7 +37,7 @@ import kotlin.test.assertTrue
 /** ADR-0054: purchase suggestions and run-outs from the sales forecast. */
 class ForecastBuyingTest {
     private val dir = Files.createTempDirectory("sabou-fbuy")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("f.db")}"))
+    private val db = DevDatabases.open(dir.resolve("f.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_700_000_000_000L }, emptyList(), null)
     private val today = generateSequence(BusinessDate(20_100)) { it.plusDays(1) }.first { Weekdays.index(it) == 0 }   // a Saturday
     private fun id() = GlobalId.new()

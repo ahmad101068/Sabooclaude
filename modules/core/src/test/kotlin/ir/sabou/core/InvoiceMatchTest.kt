@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.StockUnit
 import ir.sabou.kernel.Clock
@@ -8,7 +11,6 @@ import ir.sabou.kernel.JalaliCalendar
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.purchasing.CreatePurchaseOrder
 import ir.sabou.purchasing.Discrepancy
@@ -27,7 +29,7 @@ import kotlin.test.assertTrue
 /** Order ↔ invoice differences survive the database and reach the owner's alerts (ADR-0029). */
 class InvoiceMatchTest {
     private val dir = Files.createTempDirectory("match")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("m.db")}"))
+    private val db = DevDatabases.open(dir.resolve("m.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_790_000_000_000L })
     private val day = JalaliCalendar.date(1405, 7, 18)
 
