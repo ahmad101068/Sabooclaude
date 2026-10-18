@@ -99,11 +99,16 @@ object Ratio {
     /**
      * Splits [total] across [weights] proportionally. The result always sums exactly to [total];
      * the rounding remainder goes to the last non-zero weight so allocation is deterministic.
+     * Nothing to split by (every weight zero) splits only zero: a positive [total] fails closed instead of
+     * silently vanishing (audit P1-03), and the command that asked rolls back.
      */
     fun allocate(total: Long, weights: List<Long>): List<Long> {
         require(total >= 0 && weights.isNotEmpty() && weights.all { it >= 0 }) { "allocation_invalid" }
         val weightSum = weights.fold(0L) { a, b -> Math.addExact(a, b) }
-        if (weightSum == 0L) return weights.map { 0L }
+        if (weightSum == 0L) {
+            if (total != 0L) throw DomainException(DomainError.InvalidState("ALLOCATION", "ZERO_WEIGHTS"))
+            return weights.map { 0L }
+        }
         val last = weights.indexOfLast { it > 0 }
         var allocated = 0L
         return weights.mapIndexed { index, weight ->
