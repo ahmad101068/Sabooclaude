@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.kernel.Clock
 import ir.sabou.kernel.DomainException
 import ir.sabou.kernel.GlobalId
@@ -28,7 +31,6 @@ import ir.sabou.payroll.StatutoryPolicy
 import ir.sabou.payroll.TaxBracket
 import ir.sabou.payroll.TransferEmployee
 import ir.sabou.payroll.UpdateEmployeeProfile
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.AttachmentInput
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.treasury.OpenTreasuryAccount
@@ -47,7 +49,7 @@ import kotlin.test.assertTrue
 /** Advances and loans, daily and hourly pay, the employee file, moving branches, clock photos. */
 class PersonnelRecordsTest {
     private val dir = Files.createTempDirectory("records")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("r.db")}"))
+    private val db = DevDatabases.open(dir.resolve("r.db"))
     private val day = JalaliCalendar.date(1405, 7, 10)
     private var now = day.epochDay * 86_400_000L + 9 * 3_600_000L
     private fun month(m: Int) = JalaliCalendar.date(1405, m, 1) to JalaliCalendar.date(1405, m, JalaliCalendar.monthLength(1405, m))

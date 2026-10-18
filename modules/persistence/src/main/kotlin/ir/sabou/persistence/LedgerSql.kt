@@ -97,21 +97,24 @@ class SqlJournalStore(db: SqlDatabase) : SqlTable(db), JournalStore {
     ).map { ir.sabou.ledger.DailyAccountTotal(AccountCode.of(it.str("account")), Codec.scopeOf(it.str("scope")), Codec.date(it.long("date")), it.long("d"), it.long("c")) }
 
     override fun entriesTouching(account: AccountCode, scope: Scope?, from: BusinessDate, to: BusinessDate): List<JournalEntry> {
+        // Optional filters are added only when given: an untyped NULL parameter has no type in PostgreSQL (ADR-0060).
         val s = scope?.let(Codec::scope)
         return entries(
-            "WHERE id IN (SELECT entry_id FROM journal_lines WHERE account = ? AND date BETWEEN ? AND ? AND (? IS NULL OR scope = ?)) ORDER BY date, number",
-            account.value, from.epochDay, to.epochDay, s, s,
+            "WHERE id IN (SELECT entry_id FROM journal_lines WHERE account = ? AND date BETWEEN ? AND ?${if (s != null) " AND scope = ?" else ""}) ORDER BY date, number",
+            *listOfNotNull(account.value, from.epochDay, to.epochDay, s).toTypedArray(),
         )
     }
 
     override fun entriesBetween(from: BusinessDate, to: BusinessDate, scope: Scope?): List<JournalEntry> {
         val s = scope?.let(Codec::scope)
-        return entries("WHERE date BETWEEN ? AND ? AND (? IS NULL OR scope = ?) ORDER BY date, number", from.epochDay, to.epochDay, s, s)
+        return entries("WHERE date BETWEEN ? AND ?${if (s != null) " AND scope = ?" else ""} ORDER BY date, number",
+            *listOfNotNull<Any>(from.epochDay, to.epochDay, s).toTypedArray())
     }
 
     override fun balancesUpTo(upTo: BusinessDate?): List<Triple<AccountCode, Scope, Long>> {
         val d = upTo?.epochDay
-        return db.query("SELECT account, scope, SUM(debit - credit) AS n FROM journal_lines WHERE (? IS NULL OR date <= ?) GROUP BY account, scope", d, d)
+        return db.query("SELECT account, scope, SUM(debit - credit) AS n FROM journal_lines${if (d != null) " WHERE date <= ?" else ""} GROUP BY account, scope",
+            *listOfNotNull<Any>(d).toTypedArray())
             .map { Triple(AccountCode.of(it.str("account")), Codec.scopeOf(it.str("scope")), it.long("n")) }
     }
 
@@ -120,8 +123,9 @@ class SqlJournalStore(db: SqlDatabase) : SqlTable(db), JournalStore {
         val s = scope?.let(Codec::scope)
         val d = upTo?.epochDay
         return db.query(
-            "SELECT COALESCE(SUM(debit - credit), 0) AS n FROM journal_lines WHERE account = ? AND (? IS NULL OR scope = ?) AND (? IS NULL OR date <= ?)",
-            account.value, s, s, d, d,
+            "SELECT COALESCE(SUM(debit - credit), 0) AS n FROM journal_lines WHERE account = ?" +
+                (if (s != null) " AND scope = ?" else "") + (if (d != null) " AND date <= ?" else ""),
+            *listOfNotNull<Any>(account.value, s, d).toTypedArray(),
         ).single().long("n")
     }
 }

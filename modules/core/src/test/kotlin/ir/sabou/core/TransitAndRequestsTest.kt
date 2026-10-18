@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CloseStockRequest
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.CreateLocation
@@ -23,7 +26,6 @@ import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
 import ir.sabou.ledger.StandardAccounts
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.Role
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import java.nio.file.Files
@@ -37,7 +39,7 @@ import kotlin.test.assertTrue
 /** Inventory review, stage 2 (ADR-0044): transfers between branches in transit, and requests for goods. */
 class TransitAndRequestsTest {
     private val dir = Files.createTempDirectory("transit")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("t.db")}"))
+    private val db = DevDatabases.open(dir.resolve("t.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_790_000_000_000L })
     private val day = JalaliCalendar.date(1405, 7, 18)
     private fun id() = GlobalId.new()

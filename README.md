@@ -54,4 +54,5 @@ Gradle checks the SHA-256 of every downloaded artifact against `gradle/verificat
 - ADR-0053: why profit changed between two periods — volume, mix, prices, ingredient costs, discounts, losses, labour, other costs and income, adding up to the books to the Rial, with a plain Persian summary.
 - ADR-0054: purchase suggestions from the dish forecast and the supplier's delivery days; a run-out alert when expected sales finish an ingredient before its next delivery.
 - ADR-0055: the sales forecast's back-test also reports weighted error (WAPE) and bias.
+- ADR-0060: the same stores run on PostgreSQL (schema and login role per tenant, serialized writes); CI runs the suite on both databases.
 - Before production: a round of hands-on testing on the restaurant's own devices; the four signing secrets added to the repository (key delivered separately); the 1405 payroll values and the depreciation classes confirmed by a tax/insurance advisor; the cheque positions calibrated with a test print per bank; the first electronic invoice checked in the taxpayer's کارپوشه (the protocol follows the published client libraries, not yet a live submission).

@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.CreateLocation
 import ir.sabou.inventory.DefineMenuItem
@@ -23,7 +26,6 @@ import ir.sabou.payroll.RecordAttendance
 import ir.sabou.payroll.RegisterEmployee
 import ir.sabou.payroll.StatutoryPolicy
 import ir.sabou.payroll.TaxBracket
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.Role
 import ir.sabou.platform.StartupVerdict
 import ir.sabou.platform.memory.InMemoryAnchorStore
@@ -64,7 +66,7 @@ class SabouCoreTest {
     private var now = 1_700_000_000_000L
     private val clock = Clock { now }
     private val day = BusinessDate(20_000)
-    private val open = mutableListOf<JdbcSqlDatabase>()
+    private val open = mutableListOf<ClosableSqlDatabase>()
     private val policy = StatutoryPolicy(
         version = "TEST", from = BusinessDate(19_000), to = BusinessDate(21_000), standardMonthlyMinutes = 11_520,
         overtimeMultiplierPercent = 140, employeeInsuranceBp = 700, employerInsuranceBp = 2_000, unemploymentInsuranceBp = 300,
@@ -73,7 +75,7 @@ class SabouCoreTest {
     )
 
     private fun boot(path: Path = file, newEpoch: String? = null): SabouCore {
-        val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:$path")).also { open += it }
+        val db = DevDatabases.open(path).also { open += it }
         return SabouCore.open(db, anchors, clock, emptyList(), newEpoch)
     }
 
@@ -189,6 +191,8 @@ class SabouCoreTest {
     }
 
     @Test fun tamperingAndRollbackAreDetectedAtStartup() {
+        // Copies and swaps the phone's database file; a server database is restored by its own tooling (ADR-0060).
+        org.junit.Assume.assumeFalse("works on the SQLite file", DevDatabases.onPostgres)
         val core = boot()
         val w = setUp(core)
         assertEquals(StartupVerdict.Healthy, core.verifyStartup())
@@ -405,12 +409,12 @@ class SabouCoreTest {
         setUp(core)
         assertEquals(StartupVerdict.Healthy, core.verifyStartup())
         // Same database, anchor file gone (InMemoryAnchorStore() = empty store): refused, not "first start".
-        val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:$file")).also { open += it }
+        val db = DevDatabases.open(file).also { open += it }
         val verdict = SabouCore.open(db, InMemoryAnchorStore(), clock).verifyStartup()
         assertIs<StartupVerdict.RollbackDetected>(verdict)
         assertEquals("ANCHOR_MISSING", verdict.detail)
         // A brand-new database with no anchor is a genuine first start.
-        assertEquals(StartupVerdict.Healthy, SabouCore.open(JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("new.db")}")).also { open += it },
+        assertEquals(StartupVerdict.Healthy, SabouCore.open(DevDatabases.open(dir.resolve("new.db")).also { open += it },
             InMemoryAnchorStore(), clock).verifyStartup())
     }
 

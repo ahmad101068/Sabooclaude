@@ -31,7 +31,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class PersistenceTest {
-    private fun memoryDb() = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite::memory:"))
+    private fun memoryDb() = DevDatabases.memory()
 
     @Test fun jsonRoundTripsPersianTextEscapesAndNesting() {
         val value = mapOf(

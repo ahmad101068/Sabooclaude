@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.DefineMenuItem
 import ir.sabou.inventory.PublishRecipe
@@ -12,7 +15,6 @@ import ir.sabou.kernel.JalaliCalendar
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.sales.PostDailySale
 import ir.sabou.sales.SaleLineInput
@@ -30,7 +32,7 @@ import kotlin.test.assertTrue
 /** Weekday pattern of recent weeks, special days, trend and back-tested error (ADR-0041). */
 class ForecastTest {
     private val dir = Files.createTempDirectory("forecast")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("f.db")}"))
+    private val db = DevDatabases.open(dir.resolve("f.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_790_000_000_000L })
     private val from = JalaliCalendar.date(1405, 7, 20)
     private fun id() = GlobalId.new()

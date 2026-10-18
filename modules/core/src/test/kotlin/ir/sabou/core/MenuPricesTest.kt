@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateLocation
 import ir.sabou.inventory.DefineMenuItem
 import ir.sabou.kernel.Clock
@@ -8,7 +11,6 @@ import ir.sabou.kernel.JalaliCalendar
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.sales.SaleLineInput
 import ir.sabou.sales.SaveSaleDraft
@@ -25,12 +27,12 @@ import kotlin.test.assertTrue
 class MenuPricesTest {
     private val dir = Files.createTempDirectory("prices")
     private val file = dir.resolve("m.db")
-    private val open = mutableListOf<JdbcSqlDatabase>()
+    private val open = mutableListOf<ClosableSqlDatabase>()
     private val anchors = InMemoryAnchorStore()
     private val clock = Clock { 1_790_000_000_000L }
     private val day = JalaliCalendar.date(1405, 7, 18)
 
-    private fun boot(): SabouCore = SabouCore.open(JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:$file")).also { open += it }, anchors, clock)
+    private fun boot(): SabouCore = SabouCore.open(DevDatabases.open(file).also { open += it }, anchors, clock)
 
     @AfterTest fun close() { open.forEach { it.close() }; dir.toFile().deleteRecursively() }
 

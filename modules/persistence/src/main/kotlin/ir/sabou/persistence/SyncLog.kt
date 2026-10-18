@@ -37,8 +37,12 @@ object SyncLog {
 
     fun keyColumns(columns: List<Column>): List<String> = columns.filter { it.pkOrder > 0 }.sortedBy { it.pkOrder }.map { it.name }
 
-    /** Creates the three logging triggers of every replicated table that does not have them yet. */
+    /**
+     * Creates the three logging triggers of every replicated table that does not have them yet. Phones only: a
+     * server database (PostgreSQL) has no LAN second phone to replicate to (ADR-0060).
+     */
     fun ensureTriggers(db: SqlDatabase) {
+        if (db.dialect != SqlDialect.SQLITE) return
         tables(db).forEach { t ->
             val key = keyColumns(columns(db, t))
             check(key.isNotEmpty()) { "SYNC_TABLE_WITHOUT_PRIMARY_KEY:$t" }

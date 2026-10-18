@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.StockUnit
 import ir.sabou.kernel.BusinessDate
@@ -10,7 +13,6 @@ import ir.sabou.kernel.JalaliCalendar
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.persistence.Schema
 import ir.sabou.platform.Command
 import ir.sabou.platform.DocumentSeries
@@ -42,11 +44,11 @@ import kotlin.test.assertTrue
 class DocumentNumbersTest {
     private val dir = Files.createTempDirectory("numbers")
     private val file = dir.resolve("n.db")
-    private val open = mutableListOf<JdbcSqlDatabase>()
+    private val open = mutableListOf<ClosableSqlDatabase>()
     private val clock = Clock { 1_790_000_000_000L }
     private val day = JalaliCalendar.date(1405, 7, 18)
 
-    private fun boot(): SabouCore = SabouCore.open(JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:$file")).also { open += it }, InMemoryAnchorStore(), clock)
+    private fun boot(): SabouCore = SabouCore.open(DevDatabases.open(file).also { open += it }, InMemoryAnchorStore(), clock)
 
     @AfterTest fun close() { open.forEach { it.close() }; dir.toFile().deleteRecursively() }
 
@@ -139,7 +141,7 @@ class DocumentNumbersTest {
     }
 
     @Test fun migrationSevenGivesExistingJournalsTheirLegalNumbers() {
-        val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:$file")).also { open += it }
+        val db = DevDatabases.open(file).also { open += it }
         Schema.migrate(db, 6)
         // Three journals of a database written before numbering: two in 1405, one in 1406.
         listOf(1L to JalaliCalendar.date(1405, 5, 1), 2L to JalaliCalendar.date(1405, 12, 29), 3L to JalaliCalendar.date(1406, 1, 1)).forEach { (n, d) ->

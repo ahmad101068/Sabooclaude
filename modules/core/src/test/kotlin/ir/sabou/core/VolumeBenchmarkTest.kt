@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.DefineMenuItem
 import ir.sabou.inventory.PublishRecipe
@@ -11,7 +14,6 @@ import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.purchasing.InvoiceLine
 import ir.sabou.purchasing.PostPurchaseInvoice
@@ -33,7 +35,7 @@ class VolumeBenchmarkTest {
     @Test fun aYearOfDataStaysFast() {
         val days = System.getenv("SABOU_BENCH")?.toIntOrNull() ?: return
         val dir = Files.createTempDirectory("bench")
-        val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("b.db")}"))
+        val db = DevDatabases.open(dir.resolve("b.db"))
         val start = BusinessDate(20_000)
         var now = 1_700_000_000_000L
         val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { now })

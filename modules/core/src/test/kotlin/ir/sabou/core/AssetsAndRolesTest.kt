@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.assets.AcquireAsset
 import ir.sabou.assets.DepreciationMethod
 import ir.sabou.assets.Funding
@@ -23,7 +26,6 @@ import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
 import ir.sabou.ledger.StandardAccounts
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.Role
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.treasury.PaymentPurpose
@@ -41,7 +43,7 @@ import kotlin.test.assertTrue
 /** Review of the other modules, stage 4 (ADR-0045): assets on credit, moved and renamed; the kitchen role. */
 class AssetsAndRolesTest {
     private val dir = Files.createTempDirectory("assetsroles")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("a.db")}"))
+    private val db = DevDatabases.open(dir.resolve("a.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_700_000_000_000L }, emptyList(), null)
     private val day = BusinessDate(20_000)
     private fun id() = GlobalId.new()

@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.DefineMenuItem
 import ir.sabou.inventory.PublishRecipe
@@ -15,7 +18,6 @@ import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
 import ir.sabou.ledger.ClosePeriod
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.persistence.SyncLog
 import ir.sabou.platform.Command
 import ir.sabou.platform.CommandForwarder
@@ -64,10 +66,10 @@ class SyncTest {
     private var now = 1_700_000_000_000L
     private val clock = Clock { now }
     private val day = BusinessDate(20_000)
-    private val open = mutableListOf<JdbcSqlDatabase>()
+    private val open = mutableListOf<ClosableSqlDatabase>()
 
-    private fun boot(name: String): Pair<SabouCore, JdbcSqlDatabase> {
-        val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve(name)}")).also { open += it }
+    private fun boot(name: String): Pair<SabouCore, ClosableSqlDatabase> {
+        val db = DevDatabases.open(dir.resolve(name)).also { open += it }
         return SabouCore.open(db, InMemoryAnchorStore(), clock) to db
     }
 
@@ -83,14 +85,18 @@ class SyncTest {
     }
 
     /** The main phone, a full copy taken from it, and the second phone wired to it in-process. */
+    /** The second phone starts from a copy of the main phone's SQLite file (VACUUM INTO): phones only (ADR-0060). */
+    private fun phonesOnly() = org.junit.Assume.assumeFalse("phone sync copies an SQLite file", DevDatabases.onPostgres)
+
     private inner class Pair2 {
         val hub: SabouCore
-        val hubDb: JdbcSqlDatabase
+        val hubDb: ClosableSqlDatabase
         val replica: SabouCore
-        val replicaDb: JdbcSqlDatabase
+        val replicaDb: ClosableSqlDatabase
         var token: GlobalId? = null
 
         init {
+            phonesOnly()
             val (h, hd) = boot("hub.db")
             hub = h; hubDb = hd
             hub.bootstrap("شعبه ونک", "مالک", "owner", "123456".toCharArray())
@@ -129,7 +135,7 @@ class SyncTest {
     }
 
     /** Every replicated table, row by row, in a comparable form. */
-    private fun dump(db: JdbcSqlDatabase): Map<String, List<String>> = SyncLog.tables(db).associateWith { t ->
+    private fun dump(db: ClosableSqlDatabase): Map<String, List<String>> = SyncLog.tables(db).associateWith { t ->
         db.query("SELECT * FROM $t").map { row ->
             SyncLog.columns(db, t).joinToString("|") { c -> row.raw(c.name).let { if (it is ByteArray) it.joinToString(",") else it.toString() } }
         }.sorted()

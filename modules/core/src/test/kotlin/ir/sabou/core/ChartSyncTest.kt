@@ -1,8 +1,10 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.kernel.Clock
 import ir.sabou.ledger.StandardAccounts
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.ModuleId
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import java.nio.file.Files
@@ -15,10 +17,10 @@ import kotlin.test.assertEquals
 class ChartSyncTest {
     private val dir = Files.createTempDirectory("chart")
     private val file = dir.resolve("c.db")
-    private val open = mutableListOf<JdbcSqlDatabase>()
+    private val open = mutableListOf<ClosableSqlDatabase>()
     private val anchors = InMemoryAnchorStore()
 
-    private fun boot() = SabouCore.open(JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:$file")).also { open += it }, anchors, Clock { 1_790_000_000_000L })
+    private fun boot() = SabouCore.open(DevDatabases.open(file).also { open += it }, anchors, Clock { 1_790_000_000_000L })
 
     @AfterTest fun close() { open.forEach { it.close() }; dir.toFile().deleteRecursively() }
 

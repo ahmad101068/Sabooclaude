@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.DefineMenuItem
 import ir.sabou.inventory.PublishRecipe
@@ -13,7 +16,6 @@ import ir.sabou.kernel.JalaliCalendar
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.purchasing.InvoiceLine
 import ir.sabou.purchasing.PostPurchaseInvoice
@@ -38,7 +40,7 @@ import kotlin.test.assertTrue
 /** The month-end checklist blocks a close until sales days and the review queue are done; then the month is locked (ADR-0036). */
 class ClosingTest {
     private val dir = Files.createTempDirectory("close")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("c.db")}"))
+    private val db = DevDatabases.open(dir.resolve("c.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_790_000_000_000L })
     private fun d(day: Int) = JalaliCalendar.date(1405, 6, day)
     private fun id() = GlobalId.new()

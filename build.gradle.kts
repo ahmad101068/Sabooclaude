@@ -26,6 +26,9 @@ subprojects {
         }
         tasks.withType<Test>().configureEach {
             useJUnit()
+            // The same tests on PostgreSQL (ADR-0060): SABOU_DB=postgres SABOU_PG_URL=jdbc:postgresql://… ./gradlew domainBuild
+            System.getenv("SABOU_DB")?.let { systemProperty("sabou.db", it) }
+            System.getenv("SABOU_PG_URL")?.let { systemProperty("sabou.pg.url", it) }
             testLogging { events("failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
         }
     }

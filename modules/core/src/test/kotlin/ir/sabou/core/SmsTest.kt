@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.StockUnit
 import ir.sabou.kernel.Clock
@@ -10,7 +13,6 @@ import ir.sabou.kernel.Mobile
 import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.purchasing.CreatePurchaseOrder
 import ir.sabou.purchasing.OrderLine
@@ -28,7 +30,7 @@ import kotlin.test.assertTrue
 /** SMS texts, alert planning and the services' requests (ADR-0046). */
 class SmsTest {
     private val dir = Files.createTempDirectory("sms")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("s.db")}"))
+    private val db = DevDatabases.open(dir.resolve("s.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_790_000_000_000L })
     private val day = JalaliCalendar.date(1405, 7, 18)
 

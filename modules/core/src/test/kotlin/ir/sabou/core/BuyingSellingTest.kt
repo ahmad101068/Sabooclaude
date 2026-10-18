@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.StockUnit
 import ir.sabou.kernel.BusinessDate
@@ -10,7 +13,6 @@ import ir.sabou.kernel.Money
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Scope
 import ir.sabou.ledger.StandardAccounts
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.purchasing.ApplySupplierAdvance
 import ir.sabou.purchasing.CreatePurchaseOrder
@@ -47,7 +49,7 @@ import kotlin.test.assertFailsWith
 /** Review of the other modules, stage 3 (ADR-0045): purchasing and sales additions. */
 class BuyingSellingTest {
     private val dir = Files.createTempDirectory("buysell")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("b.db")}"))
+    private val db = DevDatabases.open(dir.resolve("b.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_700_000_000_000L }, emptyList(), null)
     private val day = BusinessDate(20_000)
     private fun id() = GlobalId.new()

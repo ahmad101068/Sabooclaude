@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.DefineMenuItem
 import ir.sabou.inventory.PublishRecipe
@@ -15,7 +18,6 @@ import ir.sabou.kernel.Scope
 import ir.sabou.ledger.BudgetPeriod
 import ir.sabou.ledger.SetBudget
 import ir.sabou.ledger.StandardAccounts
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import ir.sabou.purchasing.InvoiceLine
 import ir.sabou.purchasing.PostPurchaseInvoice
@@ -35,7 +37,7 @@ import kotlin.test.assertTrue
 /** A day's P&L with accruals for monthly costs, against budget (ADR-0034). */
 class DailyPnlTest {
     private val dir = Files.createTempDirectory("dpnl")
-    private val db = JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:${dir.resolve("d.db")}"))
+    private val db = DevDatabases.open(dir.resolve("d.db"))
     private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { 1_790_000_000_000L })
     private val day = JalaliCalendar.date(1405, 7, 10)            // Mehr has 30 days
     private fun id() = GlobalId.new()

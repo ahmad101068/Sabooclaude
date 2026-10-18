@@ -1,5 +1,8 @@
 package ir.sabou.core
 
+import ir.sabou.persistence.DevDatabases
+import ir.sabou.persistence.ClosableSqlDatabase
+
 import ir.sabou.inventory.CreateItem
 import ir.sabou.inventory.EntryUnit
 import ir.sabou.inventory.PackUnit
@@ -10,7 +13,6 @@ import ir.sabou.kernel.Clock
 import ir.sabou.kernel.DomainException
 import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Quantity
-import ir.sabou.persistence.JdbcSqlDatabase
 import ir.sabou.platform.memory.InMemoryAnchorStore
 import java.nio.file.Files
 import java.sql.DriverManager
@@ -23,11 +25,11 @@ import kotlin.test.assertFailsWith
 class ItemPacksTest {
     private val dir = Files.createTempDirectory("packs")
     private val file = dir.resolve("p.db")
-    private val open = mutableListOf<JdbcSqlDatabase>()
+    private val open = mutableListOf<ClosableSqlDatabase>()
     private val anchors = InMemoryAnchorStore()
     private val clock = Clock { 1_790_000_000_000L }
 
-    private fun boot(): SabouCore = SabouCore.open(JdbcSqlDatabase(DriverManager.getConnection("jdbc:sqlite:$file")).also { open += it }, anchors, clock)
+    private fun boot(): SabouCore = SabouCore.open(DevDatabases.open(file).also { open += it }, anchors, clock)
 
     @AfterTest fun close() { open.forEach { it.close() }; dir.toFile().deleteRecursively() }
 
