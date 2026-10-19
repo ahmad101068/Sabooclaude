@@ -94,6 +94,17 @@ object AutoBackup {
             password.fill(' ')
         }
         prune(c, folder)
+        // Saturdays: last week's scorecard as a PDF beside the backups (ADR-0062), once a day at most.
+        val today = ir.sabou.kernel.BusinessDate(java.time.LocalDate.now().toEpochDay())
+        if (ir.sabou.purchasing.Weekdays.index(today) == 0 && p.getLong("weeklyDay", 0) != today.epochDay) runCatching {
+            val tables = core.assessments.weeklyTables(user, today)
+            if (tables.isNotEmpty()) {
+                val pdf = DocumentsContract.createDocument(c.contentResolver, tree, "application/pdf", "sabou-weekly-${fileStamp().substringBefore('_')}.pdf")
+                    ?: error("REPORT_TARGET_UNAVAILABLE")
+                c.contentResolver.openOutputStream(pdf, "w")?.use { ir.sabou.app.export.PdfReport.write(c, tables, it) } ?: error("REPORT_TARGET_UNAVAILABLE")
+            }
+            p.edit().putLong("weeklyDay", today.epochDay).apply()
+        }
         name
     }.also { r ->
         prefs(c).edit().apply {

@@ -87,6 +87,33 @@ class VolumeBenchmarkTest {
         timed("invoices list", 800) { core.overview.invoices() }
         timed("alerts", 1500) { core.alerts.forUser(owner, today) }
         timed("product mix month", 1500) { core.reports.productMix(branch, today.plusDays(-30), today) }
+        if (System.getenv("SABOU_PROFILE") != null) {
+            val f = today.plusDays(-27)
+            fun p(name: String, block: () -> Any?) { block(); val t = System.nanoTime(); block(); println("PROF $name ${(System.nanoTime() - t) / 1_000_000} ms") }
+            p("pnl") { core.reports.profitAndLoss(f, today, branch) }
+            p("bridge") { core.profitBridges.of(branch, f, today, f.plusDays(-28), f.plusDays(-1)) }
+            p("mix") { core.reports.productMix(branch, f, today) }
+            p("engineering") { core.reports.menuEngineering(branch, f, today) }
+            p("usage") { core.reports.actualVsTheoretical(branch, null, f, today) }
+            p("customers") { core.cashFlows.customers(branch, today) }
+            p("cash") { core.cashFlows.forecast(branch, today) }
+            p("forecast") { core.forecasts.sales(branch, today.plusDays(1), 1) }
+            p("prices") { core.buying.priceChanges(f, today, 1_000) }
+            p("foodCosts") { core.reports.foodCosts(branch, today) }
+            p("trial") { core.overview.trialBalance() }
+            p("salesOn") { (0L..27L).map { core.sales.salesOn(branch, f.plusDays(it)) } }
+            p("closedDays") { (0L..27L).map { core.sales.day(branch, f.plusDays(it)) } }
+            p("orders") { core.purchases.orders() }
+            p("invoices") { core.purchases.invoices() }
+            p("overviewInvoices") { core.overview.invoices() }
+            p("lots") { core.overview.lots(branch, today) }
+            p("attendance") { core.reports.attendance(branch, f, today) }
+            p("backup") { core.backupHistory() }
+        }
+        // ADR-0061/0062: the scorecard (also worked out for the hourly alerts) and the price what-if.
+        timed("scorecard 4 weeks", 1500) { core.assessments.of(branch, today.plusDays(-27), today) }
+        timed("scorecard month", 1500) { core.assessments.of(branch, today.plusDays(-29), today) }
+        timed("what-if 4 weeks", 1500) { core.whatIfs.prices(branch, today.plusDays(-27), today, mapOf(items.first() to 1_500L)) }
         db.close(); dir.toFile().deleteRecursively()
     }
 
