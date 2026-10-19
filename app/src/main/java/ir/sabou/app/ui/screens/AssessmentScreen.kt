@@ -72,6 +72,8 @@ object AssessmentScreen {
         var editing by rememberSaveable { mutableStateOf<String?>(null) }
         var weights by rememberSaveable { mutableStateOf(false) }
         val manage = session.can(Permission.BUDGET_MANAGE)
+        // Targets and weights are organization-wide: only who may change organization data sets them.
+        val settle = manage && session.can(Permission.ORGANIZATION_DATA)
         Column(Modifier.fillMaxSize()) {
             Header("کارنامه و عارضه‌یابی", onBack = nav.back) { BranchSwitcher() }
             WithBranch { branch ->
@@ -97,7 +99,7 @@ object AssessmentScreen {
                             }
                             Divider()
                             a.areas.forEach { ar -> ScoreBar("${ar.area.title} (وزن ${Fa.number(a.settings.weight(ar.area))})", ar.score) }
-                            if (manage) Text(if (weights) "بستن وزن‌ها" else "تغییر وزن حوزه‌ها", style = SabouType.label, color = Sabou.colors.primary,
+                            if (settle) Text(if (weights) "بستن" else "تغییر وزن حوزه‌ها و هزینه‌ی کانال‌ها", style = SabouType.label, color = Sabou.colors.primary,
                                 modifier = Modifier.padding(top = 4.dp).clickable { weights = !weights })
                             if (weights) WeightsForm(a) { weights = false }
                             if (a.quality.isNotEmpty()) {
@@ -160,7 +162,7 @@ object AssessmentScreen {
                                             k.source.takeIf { it.isNotBlank() },
                                         ).joinToString(" · "), style = SabouType.caption, color = Sabou.colors.muted)
                                         if (k.note.isNotBlank()) Text(k.note, style = SabouType.caption, color = Sabou.colors.muted)
-                                        if (manage && k.target != null && k.id in Assessments.DIRECTIONS) {
+                                        if (settle && k.target != null && k.id in Assessments.DIRECTIONS) {
                                             if (editing == k.id) TargetForm(a, k) { editing = null }
                                             else Text("تغییر هدف", style = SabouType.label, color = Sabou.colors.primary,
                                                 modifier = Modifier.clickable { editing = k.id })
@@ -289,6 +291,7 @@ object AssessmentScreen {
 
     private fun overrides(a: Assessment): Map<String, List<Long>> = a.settings.targets.mapValues { listOf(it.value.good, it.value.bad) }
     private fun weightMap(a: Assessment): Map<String, Long> = a.settings.weights.mapKeys { it.key.name }
+    private fun channelMap(a: Assessment): Map<String, Long> = a.settings.channelCosts.mapKeys { it.key.name }
 
     @Composable
     private fun TargetForm(a: Assessment, k: Kpi, onDone: () -> Unit) {
@@ -304,10 +307,10 @@ object AssessmentScreen {
             val g = parse(good, k.unit); val b = parse(bad, k.unit)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SecondaryButton("ذخیره", {
-                    action.run({ assessments.setSettings(ir.sabou.core.SetAssessmentSettings(GlobalId.new(), overrides(a) + (k.id to listOf(g!!, b!!)), weightMap(a))) }) { onDone() }
+                    action.run({ assessments.setSettings(ir.sabou.core.SetAssessmentSettings(GlobalId.new(), overrides(a) + (k.id to listOf(g!!, b!!)), weightMap(a), channelMap(a))) }) { onDone() }
                 }, Modifier.weight(1f), enabled = g != null && b != null && !action.busy)
                 if (k.id in a.settings.targets) SecondaryButton("پیش‌فرض", {
-                    action.run({ assessments.setSettings(ir.sabou.core.SetAssessmentSettings(GlobalId.new(), overrides(a) - k.id, weightMap(a))) }) { onDone() }
+                    action.run({ assessments.setSettings(ir.sabou.core.SetAssessmentSettings(GlobalId.new(), overrides(a) - k.id, weightMap(a), channelMap(a))) }) { onDone() }
                 }, Modifier.weight(1f), enabled = !action.busy)
             }
         }
@@ -317,16 +320,24 @@ object AssessmentScreen {
     private fun WeightsForm(a: Assessment, onDone: () -> Unit) {
         val action = rememberAction()
         val texts = AssessmentArea.entries.map { area -> rememberSaveable(area.name) { mutableStateOf(a.settings.weight(area).toString()) } }
+        val channels = ir.sabou.sales.SalesChannel.entries.filter { it != ir.sabou.sales.SalesChannel.DINE_IN }
+        val costs = channels.map { ch -> rememberSaveable("ch" + ch.name) { mutableStateOf(a.settings.channelCosts[ch]?.let { shown(it, KpiUnit.PERCENT) } ?: "") } }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             AssessmentArea.entries.forEachIndexed { i, area ->
                 TextInput("${area.title} (پیش‌فرض ${Fa.number(area.weight)})", texts[i].value, { texts[i].value = it }, keyboard = KeyboardType.Number)
             }
+            Text("هزینه‌ی هر کانال فروش (کمیسیون سامانه‌ی سفارش، پیک)، درصد فروش آن کانال؛ خالی یعنی ندارد", style = SabouType.caption, color = Sabou.colors.muted)
+            channels.forEachIndexed { i, ch ->
+                TextInput(ReportTables.channelName(ch), costs[i].value, { costs[i].value = it }, keyboard = KeyboardType.Decimal)
+            }
             action.error?.let { Banner(it) }
             val values = texts.map { Fa.latinDigits(it.value.trim()).toLongOrNull() }
-            SecondaryButton("ذخیره‌ی وزن‌ها", {
+            val channelValues = costs.map { if (it.value.isBlank()) 0L else parse(it.value, KpiUnit.PERCENT) }
+            SecondaryButton("ذخیره", {
                 val map = AssessmentArea.entries.zip(values).filter { (area, v) -> v != area.weight }.associate { (area, v) -> area.name to v!! }
-                action.run({ assessments.setSettings(ir.sabou.core.SetAssessmentSettings(GlobalId.new(), overrides(a), map)) }) { onDone() }
-            }, Modifier.fillMaxWidth(), enabled = values.all { it != null } && !action.busy)
+                val ch = channels.zip(channelValues).filter { (_, v) -> v != null && v > 0 }.associate { (c, v) -> c.name to v!! }
+                action.run({ assessments.setSettings(ir.sabou.core.SetAssessmentSettings(GlobalId.new(), overrides(a), map, ch)) }) { onDone() }
+            }, Modifier.fillMaxWidth(), enabled = values.all { it != null } && channelValues.all { it != null } && !action.busy)
         }
     }
 

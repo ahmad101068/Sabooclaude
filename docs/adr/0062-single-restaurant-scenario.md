@@ -45,3 +45,17 @@ Records and actions live in two new tables (migration 27, replicated to the seco
 - Five dimensions that were Unknown can now be measured, by data entered in under a minute.
 - Every write here is a command through the bus: permissions, idempotency and the audit chain apply; none touches
   the books.
+
+## Hardening (after the first release)
+
+- **Speed.** On 90 days of a busy restaurant (`VolumeBenchmarkTest`, run in CI) the card took 16 s: the late-bills
+  count read the whole invoice list once per invoice. Now one read; actual-vs-theoretical usage is read only when the
+  period has an approved count, the profit bridge only when the books show a drop, and the audit trail has an index
+  on its action for the backup history (migration 28). The card takes about 0.45 s; its budget in CI is 1.5 s.
+- **Actions** are measured only on days that happened: from opening to closing, against as many days before.
+- **Settings** of an indicator or area a later rules version drops are ignored, never a broken report; targets and
+  weights are shown for editing only to who may change organization data.
+- **Channel costs (D05).** The owner sets what each sales channel costs (commission, courier) as a share of its
+  sales; the card estimates the total and flags a channel costing a fifth or more of its sales.
+- **Saturday PDF.** The nightly backup writes last week's card as a PDF beside its files, as the person who switched
+  the backup on would see it, when the week had sales.

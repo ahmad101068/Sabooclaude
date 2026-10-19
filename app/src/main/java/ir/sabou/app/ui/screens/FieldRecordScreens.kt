@@ -33,6 +33,7 @@ import ir.sabou.app.ui.components.Segmented
 import ir.sabou.app.ui.components.SectionTitle
 import ir.sabou.app.ui.components.TextInput
 import ir.sabou.app.ui.load
+import ir.sabou.app.ui.orNull
 import ir.sabou.app.ui.rememberAction
 import ir.sabou.app.ui.rememberCommandId
 import ir.sabou.app.ui.theme.Sabou
@@ -63,8 +64,10 @@ object FieldRecordScreens {
                     if (kinds.isEmpty()) { Banner("نقش شما ثبتی در این بخش ندارد.", ChipKind.ACCENT); return@Page }
                     Picker("چه چیزی ثبت می‌کنید؟", kinds.map { Choice(it, it.title) }, kind, { kind = it })
                     Text(help(kind), style = SabouType.caption, color = Sabou.colors.muted)
-                    Form(branch, kind)
                     val data by load(session, branch, kind) { assessments.records(branch, kind).sortedByDescending { it.date.epochDay }.take(30) }
+                    // The names used before, one tap away: the same fridge stays one fridge.
+                    val known = data.orNull().orEmpty().filter { !it.voided && it.subject.isNotBlank() }.map { it.subject }.distinct().take(6)
+                    Form(branch, kind, known)
                     SectionTitle("ثبت‌های اخیر")
                     Loaded(data) { list ->
                         if (list.isEmpty()) Text("هنوز چیزی ثبت نشده.", style = SabouType.body, color = Sabou.colors.muted)
@@ -91,7 +94,7 @@ object FieldRecordScreens {
         ?.movePointRight(1)?.setScale(0, java.math.RoundingMode.HALF_UP)?.toLong()
 
     @Composable
-    private fun Form(branch: Scope.Branch, kind: FieldRecord.Kind) {
+    private fun Form(branch: Scope.Branch, kind: FieldRecord.Kind, known: List<String>) {
         val session = LocalSession.current
         val action = rememberAction()
         val id = rememberCommandId(kind)
@@ -106,6 +109,9 @@ object FieldRecordScreens {
         SCard {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 DateInput(if (kind == FieldRecord.Kind.CAMPAIGN) "شروع" else "تاریخ", date, { date = it }, session.today)
+                if (known.isNotEmpty() && kind != FieldRecord.Kind.FEEDBACK) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    known.forEach { k -> Text(k, style = SabouType.label, color = Sabou.colors.primary, modifier = Modifier.clickable { subject = k }) }
+                }
                 val command: RecordField? = when (kind) {
                     FieldRecord.Kind.TEMPERATURE -> {
                         Segmented(listOf("یخچال", "فریزر"), freezer, { freezer = it })
@@ -144,7 +150,11 @@ object FieldRecordScreens {
                 TextInput("توضیح (اختیاری)", note, { note = it }, singleLine = kind != FieldRecord.Kind.FEEDBACK)
                 action.error?.let { Banner(it) }
                 PrimaryButton("ثبت", {
-                    command?.let { c -> action.run({ assessments.record(c) }) { subject = ""; a = ""; b = ""; note = ""; id.value = GlobalId.new() } }
+                    command?.let { c -> action.run({ assessments.record(c) }) {
+                        // Temperatures and portions are taken of the same things every day: keep the name.
+                        if (kind != FieldRecord.Kind.TEMPERATURE && kind != FieldRecord.Kind.PORTION) subject = ""
+                        a = ""; b = ""; note = ""; id.value = GlobalId.new()
+                    } }
                 }, Modifier.fillMaxWidth(), enabled = command != null && !action.busy, busy = action.busy)
             }
         }

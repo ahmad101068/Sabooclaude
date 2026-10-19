@@ -116,6 +116,61 @@ class ScenarioPhasesTest {
         assertEquals(before.score, assess().score)
     }
 
+    @Test fun phase1_settingsOfARetiredIndicatorDoNotBreakTheReport() {
+        twoWeeks()
+        ir.sabou.persistence.DatabaseMeta(db).put(Assessments.SETTINGS_KEY,
+            """{"targets":{"D99.GONE":[1,2],"D03.WASTE":[200,500]},"weights":{"GONE_AREA":5,"FINANCE":20},"revision":4}""")
+        val s = core.assessments.settings()
+        assertEquals(setOf("D03.WASTE"), s.targets.keys)
+        assertEquals(mapOf(AssessmentArea.FINANCE to 20L), s.weights)
+        assertEquals(83, assess().kpi("D03.WASTE").score)
+    }
+
+    @Test fun phase3_anActionClosedEarlyIsMeasuredOnlyOnDaysThatHappened() {
+        twoWeeks()
+        // Opened and closed on the day of week 2's waste: one day after (2 m on 80 m sold that day), one day before.
+        val action = core.assessments.openAction(OpenAssessmentAction(id(), branch, "FOOD_COST", "D03.WASTE", "ضایعات", "ثبت روزانه", "سرآشپز", week2, 0, week2)).resultId
+        assertTrue(code { core.assessments.closeAction(CloseAssessmentAction(id(), branch, action, AssessmentAction.Status.DONE, "", week2.plusDays(-1))) }.startsWith("INVALID_INPUT"))
+        core.assessments.closeAction(CloseAssessmentAction(id(), branch, action, AssessmentAction.Status.DONE, "", week2))
+        val closed = core.assessments.actions(branch).single()
+        assertEquals(250L, closed.after)
+        assertNull(closed.before)                                                        // the day before had no sales: unknown, not zero
+    }
+
+    @Test fun channelCostsAreTheOwnersRatesOnEachChannelsSales() {
+        twoWeeks()
+        val pizza = core.overview.menu().first { it.item.name == "پیتزا" }.item.id
+        // A delivery-app day in week 2: 10 pizzas, 50 m, all through the app.
+        val s = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, week2.plusDays(1), kitchen, listOf(SaleLineInput(pizza, Quantity.units(10), rial(5_000_000))),
+            rial(0), rial(0), rial(0), listOf(Settlement.Liquid(cash, rial(50_000_000))),
+            channels = listOf(ir.sabou.sales.ChannelShare(ir.sabou.sales.SalesChannel.ONLINE, rial(50_000_000), 10)))).resultId
+        core.salesOps.post(PostDailySale(id(), branch, s))
+        assertTrue(assess().dataRequests.any { it.dimension == Dimension.D05 && it.text.contains("کمیسیون") })
+        core.assessments.setSettings(SetAssessmentSettings(id(), emptyMap(), emptyMap(), mapOf("ONLINE" to 2_500L)))
+        val a = assess()
+        assertEquals(12_500_000, a.kpi("D05.COMMISSION").numerator)                      // 25 % of 50 m
+        val f = a.findings.single { it.key == "CHANNEL_COST:ONLINE" }
+        assertEquals(12_500_000, f.exposureHigh)
+        assertTrue(code { core.assessments.setSettings(SetAssessmentSettings(id(), emptyMap(), emptyMap(), mapOf("ONLINE" to 9_500L))) }.startsWith("INVALID_INPUT"))
+        // Saving targets alone with the channel costs passed back keeps them.
+        core.assessments.setSettings(SetAssessmentSettings(id(), mapOf("D03.WASTE" to listOf(200L, 500L)), emptyMap(), mapOf("ONLINE" to 2_500L)))
+        assertEquals(2_500L, core.assessments.settings().channelCosts[ir.sabou.sales.SalesChannel.ONLINE])
+    }
+
+    @Test fun theWeeklyPdfIsLastWeeksCardAsTheBackupOwnerSeesIt() {
+        twoWeeks()
+        val owner = core.overview.me().userId
+        core.identity.logout()
+        val saturday = generateSequence(end) { it.plusDays(1) }.first { ir.sabou.purchasing.Weekdays.index(it) == 0 }
+        // The week before that Saturday must hold week 2's sales for the card; take the Saturday right after week 2.
+        val tables = core.assessments.weeklyTables(owner, week2.plusDays(7))
+        assertEquals(4, tables.size)
+        assertTrue(tables.first().subtitle.contains("شعبه ونک"))
+        assertNull(core.session.currentActor())                                           // nobody signed in afterwards either
+        assertTrue(core.assessments.weeklyTables(owner, saturday.plusDays(70)).isEmpty())   // a week without sales: no PDF
+        assertTrue(core.assessments.weeklyTables(GlobalId.new(), saturday).isEmpty())
+    }
+
     // ------------------------------------------------------------------ phase 2: alerts
 
     @Test fun phase2_highFindingsAreAlertedOnceWithAStableKey() {

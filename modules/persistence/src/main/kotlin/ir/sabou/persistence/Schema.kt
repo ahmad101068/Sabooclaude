@@ -360,6 +360,13 @@ object Schema {
                 "CREATE INDEX field_records_day ON field_records(scope, kind, date)",
             ),
         ),
+        Migration(
+            28,
+            listOf(
+                // The scorecard asks for the latest backup events of the audit trail (ADR-0062).
+                "CREATE INDEX audit_events_action ON audit_events(action, position)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

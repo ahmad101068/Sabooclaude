@@ -154,6 +154,8 @@ data class AssessmentSettings(
     val targets: Map<String, KpiTarget> = emptyMap(),
     val weights: Map<AssessmentArea, Long> = emptyMap(),
     val revision: Int = 0,
+    /** What each sales channel costs, basis points of its net sales: delivery apps' commission, couriers (D05). */
+    val channelCosts: Map<ir.sabou.sales.SalesChannel, Long> = emptyMap(),
 ) {
     fun weight(area: AssessmentArea): Long = weights[area] ?: area.weight
 }
@@ -167,11 +169,14 @@ data class SetAssessmentSettings(
     override val commandId: GlobalId,
     val targets: Map<String, List<Long>>,
     val weights: Map<String, Long>,
+    /** Channel name → basis points of its net sales (commission, courier). */
+    val channelCosts: Map<String, Long> = emptyMap(),
 ) : Command {
     override val requiredPermission = Permission.BUDGET_MANAGE
     override val scope: Scope = Scope.Organization
     override fun fingerprint() = targets.toSortedMap().entries.joinToString(";") { "${it.key}=${it.value}" } + "|" +
-        weights.toSortedMap().entries.joinToString(";") { "${it.key}=${it.value}" }
+        weights.toSortedMap().entries.joinToString(";") { "${it.key}=${it.value}" } + "|" +
+        channelCosts.toSortedMap().entries.joinToString(";") { "${it.key}=${it.value}" }
 }
 
 /** Data the report needs and does not have, and what to record to get it. */
@@ -238,14 +243,15 @@ class Assessments internal constructor(private val core: SabouCore) {
     }
 
     /**
-     * Closes an action and measures it: the finding's indicator from the day the action was opened to today,
-     * against the same number of days (at least a week) just before it was opened.
+     * Closes an action and measures it: the finding's indicator from the day the action was opened to the day it is
+     * closed, against as many days just before it was opened. Never a day after the close (no data yet).
      */
     fun closeAction(c: CloseAssessmentAction): CommandOutcome = core.bus.execute(ModuleId.PLATFORM, c) { cmd, ctx ->
         val action = store.action(cmd.actionId)?.takeIf { it.scope == cmd.scope } ?: throw DomainException(DomainError.NotFound("ACTION"))
         if (action.status != AssessmentAction.Status.OPEN) throw DomainException(DomainError.InvalidState("ACTION", "CLOSED"))
         AssessmentStore.check(cmd.status == AssessmentAction.Status.DONE || cmd.status == AssessmentAction.Status.DROPPED, "status", "انجام شد یا کنار گذاشته شد.")
-        val days = maxOf(7L, cmd.today.epochDay - action.opened.epochDay + 1)
+        AssessmentStore.check(cmd.today >= action.opened, "today", "بستن پیش از باز شدن اقدام نیست.")
+        val days = cmd.today.epochDay - action.opened.epochDay + 1
         fun value(from: BusinessDate, to: BusinessDate) = action.kpiId?.let { id ->
             try { of(cmd.scope, from, to).kpis.firstOrNull { it.id == id }?.value } catch (e: DomainException) { null }
         }
@@ -322,9 +328,12 @@ class Assessments internal constructor(private val core: SabouCore) {
         val raw = meta.get(SETTINGS_KEY) ?: return AssessmentSettings()
         @Suppress("UNCHECKED_CAST")
         val m = ir.sabou.persistence.Json.decode(raw) as Map<String, Any?>
-        val targets = (m["targets"] as Map<String, List<Long>>).mapValues { (id, gb) -> KpiTarget(better(id), gb[0], gb[1]) }
-        val weights = (m["weights"] as Map<String, Long>).mapKeys { AssessmentArea.valueOf(it.key) }
-        return AssessmentSettings(targets, weights, (m["revision"] as Long).toInt())
+        // An indicator or area a later rules version dropped is ignored, never a broken report.
+        val targets = (m["targets"] as Map<String, List<Long>>).filterKeys { it in DIRECTIONS }
+            .mapNotNull { (id, gb) -> runCatching { id to KpiTarget(better(id), gb[0], gb[1]) }.getOrNull() }.toMap()
+        val weights = (m["weights"] as Map<String, Long>).mapNotNull { (k, v) -> AssessmentArea.entries.firstOrNull { it.name == k }?.let { it to v } }.toMap()
+        val channels = (m["channels"] as Map<String, Long>?).orEmpty().mapNotNull { (k, v) -> ir.sabou.sales.SalesChannel.entries.firstOrNull { it.name == k }?.let { it to v } }.toMap()
+        return AssessmentSettings(targets, weights, (m["revision"] as Long).toInt(), channels)
     }
 
     fun setSettings(c: SetAssessmentSettings): CommandOutcome = core.bus.execute(ModuleId.PLATFORM, c) { cmd, ctx ->
@@ -339,11 +348,32 @@ class Assessments internal constructor(private val core: SabouCore) {
             if (AssessmentArea.entries.none { it.name == area }) throw DomainException(DomainError.InvalidInput("weight", "حوزه‌ی «$area» نیست."))
             if (w !in 0..100) throw DomainException(DomainError.InvalidInput("weight", "وزن هر حوزه بین ۰ و ۱۰۰ است."))
         }
+        cmd.channelCosts.forEach { (channel, bp) ->
+            if (ir.sabou.sales.SalesChannel.entries.none { it.name == channel }) throw DomainException(DomainError.InvalidInput("channel", "کانال «$channel» نیست."))
+            if (bp !in 0..9_000) throw DomainException(DomainError.InvalidInput("channel", "هزینه‌ی کانال بین ۰ و ۹۰ درصد فروش آن است."))
+        }
         if (AssessmentArea.entries.sumOf { a -> cmd.weights[a.name] ?: a.weight } <= 0) throw DomainException(DomainError.InvalidInput("weight", "دست‌کم یک حوزه وزن می‌خواهد."))
         val revision = settings().revision + 1
-        meta.put(SETTINGS_KEY, ir.sabou.persistence.Json.encode(mapOf("targets" to cmd.targets.toSortedMap(), "weights" to cmd.weights.toSortedMap(), "revision" to revision.toLong())))
+        meta.put(SETTINGS_KEY, ir.sabou.persistence.Json.encode(mapOf("targets" to cmd.targets.toSortedMap(), "weights" to cmd.weights.toSortedMap(), "revision" to revision.toLong(),
+            "channels" to cmd.channelCosts.filterValues { it > 0 }.toSortedMap())))
         ctx.audit(AuditDraft("ASSESSMENT_SETTINGS", "ASSESSMENT", "settings", "revision=$revision;targets=${cmd.targets.size};weights=${cmd.weights.size}"))
         GlobalId.new()
+    }
+
+    /**
+     * Last week's card of every branch [userId] may see, as that person would see it, for the Saturday PDF the nightly
+     * backup writes beside its files (ADR-0062). Empty when the person may not read the books or no branch sold.
+     */
+    fun weeklyTables(userId: GlobalId, today: BusinessDate): List<ReportTable> {
+        val user = core.users.byId(userId)?.takeIf { it.isActive } ?: return emptyList()
+        val actor = user.toActor()
+        if (!actor.role.allows(Permission.LEDGER_VIEW)) return emptyList()
+        return core.session.readAs(actor) {
+            core.branches.all().filter { actor.canAccess(Scope.Branch(it.id)) }.flatMap { b ->
+                val a = of(Scope.Branch(b.id), today.plusDays(-7), today.plusDays(-1))
+                if (a.kpis.any { it.id == "D18.DAYS" && it.value != null }) ReportTables.assessment(a) else emptyList()
+            }
+        }
     }
 
     /** A read this role may not do yields null: the indicator is then Unknown, the report still complete. */
@@ -401,7 +431,12 @@ class Assessments internal constructor(private val core: SabouCore) {
         val foodGood = settings.targets["D03.FOOD"]?.good ?: target ?: DEFAULT_FOOD_COST_BP
         val mix by lazy { safe { core.reports.productMix(branch, from, to) } }
         val engineering by lazy { safe { core.reports.menuEngineering(branch, from, to) } }
-        val usage by lazy { safe { core.reports.actualVsTheoretical(branch, null, from, to) } }
+        /** Approved counts of the branch in the period: without one, usage is not measured and not worth reading. */
+        val counted by lazy {
+            val places = core.locations.all().filter { it.scope == branch }.map { it.id }.toSet()
+            core.stockCounts.all().any { it.status == ir.sabou.inventory.CountStatus.POSTED && it.date in from..to && it.locationId in places }
+        }
+        val usage by lazy { if (!counted) null else safe { core.reports.actualVsTheoretical(branch, null, from, to) } }
         val customers by lazy { safe { core.cashFlows.customers(branch, to) } }
         val cash by lazy { safe { core.cashFlows.forecast(branch, to) } }
         val bridge by lazy { safe { core.profitBridges.of(branch, from, to, baseFrom, baseTo) } }
@@ -415,6 +450,8 @@ class Assessments internal constructor(private val core: SabouCore) {
             // The first day the branch recorded a sale: the days before it are not «missing».
             generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }.firstOrNull { d -> salesByDay[d]?.any { it.status == SaleStatus.POSTED } == true }
         }
+
+        fun channelCost(rows: List<ChannelRow>) = rows.sumOf { r -> settings.channelCosts[r.channel]?.let { Ratio.mulDiv(r.net.rial, it, 10_000) } ?: 0L }
 
         fun account(code: ir.sabou.ledger.AccountCode, p: ProfitAndLoss = pnl) = (p.costOfSales + p.expenses).filter { it.account.code == code }.sumOf { it.amount }
 
@@ -470,8 +507,8 @@ class Assessments internal constructor(private val core: SabouCore) {
                 add(Kpi("D03.WASTE", Dimension.D03, "ضایعات به فروش", bp(waste, sales), KpiUnit.PERCENT, KpiTarget.lower(100, 400), KpiQuality.OK, "حساب ضایعات ÷ فروش غذا", waste, sales))
                 val u = usage
                 add(when {
-                    u == null -> unknown("D03.VARIANCE", Dimension.D03, "مصرف بی‌توضیح به فروش", KpiUnit.PERCENT, "مصرف واقعی در برابر تئوریک", "")
-                    !u.measuredByCount -> unknown("D03.VARIANCE", Dimension.D03, "مصرف بی‌توضیح به فروش", KpiUnit.PERCENT, "مصرف واقعی در برابر تئوریک",
+                    u == null && counted -> unknown("D03.VARIANCE", Dimension.D03, "مصرف بی‌توضیح به فروش", KpiUnit.PERCENT, "مصرف واقعی در برابر تئوریک", "")
+                    u == null || !u.measuredByCount -> unknown("D03.VARIANCE", Dimension.D03, "مصرف بی‌توضیح به فروش", KpiUnit.PERCENT, "مصرف واقعی در برابر تئوریک",
                         "در این دوره انبارگردانی تأییدشده‌ای نیست؛ بدون شمارش، مصرف واقعی سنجیده نمی‌شود.")
                     else -> Kpi("D03.VARIANCE", Dimension.D03, "مصرف بی‌توضیح به فروش", bp(u.unexplainedValue, sales), KpiUnit.PERCENT, KpiTarget.lower(50, 300),
                         if (u.countedRows < u.rows.size) KpiQuality.PARTIAL else KpiQuality.OK, "کسری شمارش‌های تأییدشده ÷ فروش غذا", u.unexplainedValue, sales,
@@ -509,6 +546,19 @@ class Assessments internal constructor(private val core: SabouCore) {
                     "کانال فروش (حضوری، بیرون‌بر، پیک، شرکتی) در فروش‌ها ثبت نشده است؛ با ورود فروش از سپند ثبت می‌شود.")
                 else Kpi("D05.TOP", Dimension.D05, "سهم بزرگ‌ترین کانال: ${channelName(channels.first().channel)}", channels.first().shareBp, KpiUnit.PERCENT, null,
                     KpiQuality.OK, "فروش خالص غذا به تفکیک کانال", channels.first().net.rial, channels.sumOf { it.net.rial }))
+            // What the channels cost (commission, couriers), at the rates the owner set.
+            val paid = channels.filter { it.channel != null && it.channel != ir.sabou.sales.SalesChannel.DINE_IN }
+            if (paid.isNotEmpty()) {
+                val net = channels.sumOf { it.net.rial }
+                val unset = paid.filter { settings.channelCosts[it.channel] == null }
+                add(if (unset.size == paid.size) unknown("D05.COMMISSION", Dimension.D05, "هزینه‌ی کانال‌ها به فروش", KpiUnit.PERCENT, "تنظیمات کارنامه",
+                        "درصد کمیسیون و هزینه‌ی پیک کانال‌های ${unset.joinToString("، ") { channelName(it.channel) }} را در «کارنامه ← تغییر وزن حوزه‌ها» وارد کنید.")
+                    else channelCost(paid).let { cost ->
+                        Kpi("D05.COMMISSION", Dimension.D05, "هزینه‌ی کانال‌ها (کمیسیون، پیک) به فروش", bp(cost, net), KpiUnit.PERCENT, KpiTarget.lower(300, 1_500),
+                            if (unset.isEmpty()) KpiQuality.OK else KpiQuality.PARTIAL, "فروش هر کانال × درصد هزینه‌ی آن (برآورد)", cost, net,
+                            if (unset.isEmpty()) "" else "برای ${unset.joinToString("، ") { channelName(it.channel) }} درصدی وارد نشده")
+                    })
+            }
 
             // ---- D06 menu engineering
             val me = engineering
@@ -838,7 +888,9 @@ class Assessments internal constructor(private val core: SabouCore) {
         /** What is late, by kind, for D17. */
         fun backlog(): List<Pair<String, Int>> {
             val approvals = safe { core.books.pendingApprovals() }?.count { it.invoice.invoice.scope == branch } ?: 0
-            val bills = invoices.count { it.dueDate < to && (safe { core.overview.invoices() }?.firstOrNull { r -> r.invoice.id == it.id }?.outstanding?.isZero == false) }
+            // One read of what is still owed on each invoice (not one per invoice).
+            val owed = safe { core.overview.invoices() }?.filter { !it.outstanding.isZero }?.map { it.invoice.id }?.toSet().orEmpty()
+            val bills = invoices.count { it.dueDate < to && it.id in owed }
             val cheques = core.cheques.all().count { c ->
                 c.scope == branch && c.dueDate < to &&
                     ((c.direction == ChequeDirection.RECEIVED && c.status == ChequeStatus.IN_HAND) || (c.direction == ChequeDirection.ISSUED && c.status == ChequeStatus.ISSUED))
@@ -859,6 +911,7 @@ class Assessments internal constructor(private val core: SabouCore) {
                 add(QualityPart("رسپی و بهای غذاها", bp(rows.filter { it.unitCost != null }.sumOf { it.portions.micros }, portions), "سهم پرس‌های دارای رسپی"))
                 add(QualityPart("بهای واقعی هنگام فروش", bp(rows.sumOf { it.costedPortions.micros }, portions), "سهم پرس‌هایی که بهای واقعی دارند"))
             }
+            if (!counted && (mix?.rows?.isNotEmpty() == true)) add(QualityPart("انبارگردانی", 0, "شمارشی در دوره نیست"))
             usage?.takeIf { it.rows.isNotEmpty() }?.let { u ->
                 add(QualityPart("انبارگردانی", bp(u.countedRows.toLong(), u.rows.size.toLong()), if (u.measuredByCount) "${Fa.number(u.countedRows.toLong())} از ${Fa.number(u.rows.size.toLong())} قلم شمرده شده" else "شمارشی در دوره نیست"))
             }
@@ -884,7 +937,10 @@ class Assessments internal constructor(private val core: SabouCore) {
             }
 
             // Profit fell: the bridge names the causes, each to the Rial.
-            val b = bridge
+            // The profit bridge is read only when the books show a drop worth explaining (same profit figures).
+            val drop = basePnl.totals.profit > 0 && pnl.totals.profit < basePnl.totals.profit &&
+                Ratio.mulDiv(basePnl.totals.profit - pnl.totals.profit, 10_000, basePnl.totals.profit) >= PROFIT_DROP_BP
+            val b = if (drop) bridge else null
             if (b != null && b.base.profit > 0 && b.change < 0 && Ratio.mulDiv(-b.change, 10_000, b.base.profit) >= PROFIT_DROP_BP) {
                 val losses = b.steps.filter { it.amount < 0 && it.kind != BridgeStep.Kind.ROUNDING }.sortedBy { it.amount }
                 val sure = !b.provisional && (b.current.costedBp ?: 0) >= 9_000
@@ -965,6 +1021,16 @@ class Assessments internal constructor(private val core: SabouCore) {
                     rows.joinToString("؛ ") { "«${it.mix.name}»: ${menuDecision(it.menuClass!!)}" }, Finding.Confidence.MEDIUM))
             }
 
+            // A channel that costs a fifth of what it sells (ADR-0062).
+            mix?.channels.orEmpty().filter { r -> r.channel != null && (settings.channelCosts[r.channel] ?: 0) >= CHANNEL_COST_BP && r.net.rial > 0 }.forEach { r ->
+                val cost = channelCost(listOf(r))
+                add(Finding("CHANNEL_COST:${r.channel!!.name}", Finding.Severity.MEDIUM, Dimension.D05,
+                    "${channelName(r.channel)}: ${Fa.percent(settings.channelCosts.getValue(r.channel))} فروشش هزینه دارد",
+                    listOf("فروش این کانال ${Fa.rial(r.net)} ریال (${Fa.percent(r.shareBp)} فروش)؛ هزینه‌ی برآوردی ${Fa.rial(cost)} ریال"), cost, cost,
+                    listOf("کمیسیون سامانه‌ی سفارش", "هزینه‌ی پیک"), "قیمت منوی این کانال را جدا ببینید یا کمیسیون را دوباره مذاکره کنید؛ سفارش مستقیم را تشویق کنید.",
+                    Finding.Confidence.MEDIUM))
+            }
+
             // Suppliers raised prices.
             priceChanges?.takeIf { it.isNotEmpty() }?.let { rises ->
                 val worst = rises.groupBy { it.item.id }.values.map { l -> l.maxBy { it.changeBp ?: 0 } }.sortedByDescending { it.changeBp ?: 0 }
@@ -1019,7 +1085,7 @@ class Assessments internal constructor(private val core: SabouCore) {
                 .associateWith { KpiTarget.Better.HIGHER } +
             listOf("D01.TRIAL", "D01.OPEN", "D01.BANK", "D03.FOOD", "D03.PRIME", "D03.WASTE", "D03.VARIANCE", "D04.OVERDUE", "D04.DSO", "D06.DOGS", "D06.OVER",
                 "D09.PRICES", "D09.MATCH", "D10.SHORT", "D10.COUNTS", "D10.EXPIRED", "D13.LABOR", "D16.TAX", "D16.CONTRACTS", "D17.BACKLOG", "D18.FORECAST",
-                "D19.CUSTOMER", "D19.SUPPLIER", "D08.COMPLAINTS", "D14.TEMP_BAD", "D15.BREAKDOWNS", "D16.PERMITS", "D17.ACTIONS", "D18.BACKUP", "D19.RESTORE").associateWith { KpiTarget.Better.LOWER })
+                "D19.CUSTOMER", "D19.SUPPLIER", "D08.COMPLAINTS", "D14.TEMP_BAD", "D15.BREAKDOWNS", "D16.PERMITS", "D17.ACTIONS", "D18.BACKUP", "D19.RESTORE", "D05.COMMISSION").associateWith { KpiTarget.Better.LOWER })
 
         fun better(id: String): KpiTarget.Better = DIRECTIONS[id] ?: throw DomainException(DomainError.InvalidInput("target", id))
         /** No overall score below half of the weight measured: the card says «داده‌ی کافی نیست» instead. */
@@ -1039,6 +1105,7 @@ class Assessments internal constructor(private val core: SabouCore) {
         const val PERMIT_WARN_DAYS = 30L
         const val PERMIT_URGENT_DAYS = 14L
         const val BACKUP_LATE_DAYS = 7L
+        const val CHANNEL_COST_BP = 2_000L
 
         /** The indicator by which an action on a finding is measured. */
         val FINDING_KPI = mapOf(
