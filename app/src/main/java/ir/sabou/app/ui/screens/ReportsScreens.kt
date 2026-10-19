@@ -68,6 +68,7 @@ object ReportsScreens {
                 if (session.can(Permission.LEDGER_VIEW)) {
                     SectionTitle("مالی")
                     NavRow(R.drawable.ic_finance, "کارنامه و عارضه‌یابی", "۲۰ بُعد با امتیاز و کیفیت داده؛ عارضه‌ها با شواهد، مبلغ در معرض و اقدام پیشنهادی", onClick = { nav.go(Route.Assessment) })
+                    NavRow(R.drawable.ic_finance, "اگر قیمت‌ها تغییر کند", "گرانی یک کالا یا تغییر قیمت منو: اثر بر سود و قیمت لازم هر غذا", onClick = { nav.go(Route.WhatIf) })
                     NavRow(R.drawable.ic_calendar, "پیش‌بینی فروش", "دو هفته‌ی آینده، با روزهای تعطیل و مناسبت", onClick = { nav.go(Route.SalesForecast) })
                     NavRow(R.drawable.ic_finance, "پیش‌بینی نقدینگی", "۱۳ هفته‌ی آینده: طلب، چک، فاکتور، حقوق و فروش؛ با سناریو", onClick = { nav.go(Route.CashForecast) })
                     NavRow(R.drawable.ic_sales, "مشتریان نسیه", "سهم از فروش، مانده، سررسیدگذشته و تأخیر معمول", onClick = { nav.go(Route.CreditCustomers) })
@@ -76,6 +77,10 @@ object ReportsScreens {
                     NavRow(R.drawable.ic_finance, "چرا سود تغییر کرد", "تعداد، ترکیب، قیمت، بهای مواد، تخفیف و هزینه‌ها؛ در برابر دوره‌ی قبل", onClick = { nav.go(Route.ProfitBridge) })
                     NavRow(R.drawable.ic_finance, "تراز آزمایشی", "مانده‌ی همه‌ی حساب‌ها", onClick = { nav.go(Route.TrialBalance) })
                     NavRow(R.drawable.ic_finance, "بودجه در برابر عملکرد", "ماهانه یا سالانه، به تفکیک حساب", onClick = { nav.go(Route.BudgetReport) })
+                }
+                if (ir.sabou.core.FieldRecord.Kind.entries.any { session.can(it.permission) }) {
+                    SectionTitle("ثبت برای کارنامه")
+                    NavRow(R.drawable.ic_calendar, "ثبت‌های روزانه", "دمای یخچال، نظر مشتری، کمپین، خرابی، وزن پرس، مجوزها", onClick = { nav.go(Route.FieldRecords) })
                 }
                 if (session.can(Permission.SALES_VIEW)) {
                     SectionTitle("فروش")

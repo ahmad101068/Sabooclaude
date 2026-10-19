@@ -626,6 +626,28 @@ class Reports internal constructor(private val core: SabouCore) {
     // ------------------------------------------------------------ Costs
 
     /** Average cost of ingredients in one branch: stock value ÷ quantity, else the last purchase price. */
+    /**
+     * One portion of each dish broken down to its raw ingredients (prepared items through their prep recipes), in
+     * Rial at the costs [UnitCosts] uses (ADR-0062, the price what-if). Null for a dish with any unknown cost.
+     */
+    internal fun portionBreakdown(branch: Scope.Branch, date: BusinessDate, menuItemIds: Collection<GlobalId>): Map<GlobalId, Map<GlobalId, Long>?> {
+        val costs = UnitCosts(branch, date)
+        val book = RecipeBook(core.recipes)
+        fun expand(itemId: GlobalId, micros: Long, out: HashMap<GlobalId, Long>, seen: Set<GlobalId>): Boolean {
+            val prep = if (core.items.byId(itemId)?.prepared == true && itemId !in seen)
+                runCatching { book.prepRequirements(itemId, date, Quantity.of(micros)) }.getOrNull()?.takeIf { it.isNotEmpty() } else null
+            if (prep != null) return prep.all { expand(it.itemId, it.quantity.micros, out, seen + itemId) }
+            val unit = costs.perUnit(itemId) ?: return false
+            out.merge(itemId, Ratio.mulDiv(unit, micros, Quantity.SCALE), Long::plus)
+            return true
+        }
+        return menuItemIds.associateWith { id ->
+            val lines = runCatching { book.requirements(id, date, Quantity.units(1)) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@associateWith null
+            val out = HashMap<GlobalId, Long>()
+            if (lines.all { expand(it.itemId, it.quantity.micros, out, emptySet()) }) out else null
+        }
+    }
+
     private inner class UnitCosts(private val branch: Scope.Branch, private val date: BusinessDate) {
         private val book = RecipeBook(core.recipes)
         private val cache = HashMap<GlobalId, Long?>()     // rial per unit (SCALE micro-units)

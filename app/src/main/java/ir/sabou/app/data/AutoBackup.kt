@@ -24,6 +24,7 @@ object AutoBackup {
     private const val JOB = 4201
     private const val SEALED = "auto-backup.pw"
     const val KEEP = 7
+    private const val TEST_EVERY_MS = 7 * 24 * 60 * 60_000L
 
     data class Status(val enabled: Boolean, val folder: Uri?, val lastSuccess: Long?, val lastError: String?, val lastFile: String?)
 
@@ -79,6 +80,13 @@ object AutoBackup {
         val target = DocumentsContract.createDocument(c.contentResolver, tree, "application/octet-stream", name) ?: error("BACKUP_TARGET_UNAVAILABLE")
         try {
             container.backup(core, password, target) { core.authorizeScheduledBackup(user) }
+            // Once a week the file just written is opened as a restore would and its audit chain verified, and
+            // the result goes into the audit trail for the scorecard (ADR-0062).
+            if (System.currentTimeMillis() - p.getLong("lastTest", 0) >= TEST_EVERY_MS) {
+                val test = runCatching { container.testRestore(password, target) }
+                runCatching { core.recordBackupCheck(user, test.isSuccess, test.exceptionOrNull()?.let { it.message ?: it::class.java.simpleName }.orEmpty()) }
+                if (test.isSuccess) p.edit().putLong("lastTest", System.currentTimeMillis()).apply()
+            }
         } catch (e: Throwable) {
             runCatching { DocumentsContract.deleteDocument(c.contentResolver, target) }   // never leave half a file
             throw e

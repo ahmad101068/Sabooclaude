@@ -139,6 +139,10 @@ sealed interface Route : java.io.Serializable {
     data object ProfitBridge : Route
     /** The 360° scorecard and diagnosis (ADR-0061). */
     data object Assessment : Route
+    /** Temperatures, feedback, campaigns, breakdowns, portion weights, permits (ADR-0062). */
+    data object FieldRecords : Route
+    /** «What if» on ingredient and menu prices (ADR-0062). */
+    data object WhatIf : Route
     /** 13-week cash forecast with what-ifs (ADR-0051). */
     data object CashForecast : Route
     /** Credit customers: share of sales and how they pay (ADR-0051). */

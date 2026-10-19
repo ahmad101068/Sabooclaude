@@ -12,7 +12,11 @@ import ir.sabou.platform.Permission
  * only if it comes back.
  */
 data class Alert(val key: String, val kind: Kind, val title: String, val text: String) {
-    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH, EXPIRY, COUNT_DUE, STAFF_DOCUMENT, TRANSFER_IN, STOCK_REQUEST, BILL_DUE, RECEIVABLE_LATE, CASH_LOW, RUN_OUT }
+    enum class Kind { LOW_STOCK, PRICE_CHANGE, CHEQUE_DUE, SHORTAGE, APPROVAL, FOOD_COST, INVOICE_MATCH, EXPIRY, COUNT_DUE, STAFF_DOCUMENT, TRANSFER_IN, STOCK_REQUEST, BILL_DUE, RECEIVABLE_LATE, CASH_LOW, RUN_OUT,
+        /** A critical or high finding of the scorecard (ADR-0062). */
+        FINDING,
+        /** Saturday: last week's scorecard in one line. */
+        WEEKLY_REPORT }
 }
 
 /**
@@ -100,6 +104,23 @@ class Alerts internal constructor(private val core: SabouCore) {
                         }
                     }
                 }
+                if (actor.role.allows(Permission.LEDGER_VIEW)) {
+                    // ADR-0062: the scorecard's critical and high findings over the last four weeks, those no other
+                    // alert announces already; and on Saturdays, last week's card in one line.
+                    core.branches.all().filter { actor.canAccess(Scope.Branch(it.id)) }.forEach { b ->
+                        val branch = Scope.Branch(b.id)
+                        findings(user.id, branch, today).forEach { add(it) }
+                        if (ir.sabou.purchasing.Weekdays.index(today) == 0) {
+                            safe { listOf(core.assessments.of(branch, today.plusDays(-7), today.plusDays(-1))) }.firstOrNull()
+                                ?.takeIf { a -> a.kpis.any { it.id == "D18.DAYS" && it.value != null } }?.let { a ->   // a week with sales
+                                add(Alert("WEEKLY:${b.id.value}:${today.epochDay}", Alert.Kind.WEEKLY_REPORT, "کارنامه‌ی هفته‌ی گذشته: ${b.name}",
+                                    (a.score?.let { "امتیاز ${Fa.number(it.toLong())} از ۱۰۰" } ?: "داده‌ی کافی برای امتیاز نیست") +
+                                        " · ${Fa.number(a.findings.size.toLong())} عارضه" + (a.findings.firstOrNull()?.let { "؛ مهم‌ترین: ${it.title}" } ?: "") +
+                                        ". «کارنامه و عارضه‌یابی» را ببینید."))
+                            }
+                        }
+                    }
+                }
                 if (actor.role.allows(Permission.PURCHASE_ORDER) || actor.role.allows(Permission.PURCHASE_RECORD)) {
                     // ADR-0054: what the expected dishes use up before the next delivery.
                     core.branches.all().filter { actor.canAccess(Scope.Branch(it.id)) }.forEach { b ->
@@ -160,6 +181,25 @@ class Alerts internal constructor(private val core: SabouCore) {
         }
     }
 
+    /**
+     * The scorecard's findings as alerts. The card reads every report, so it is worked out at most once per
+     * [FINDINGS_EVERY_MS] for a user, branch and day; the alert check runs hourly and after each save.
+     */
+    private val findingCache = HashMap<Triple<GlobalId, ir.sabou.kernel.BranchId, Long>, Pair<Long, List<Alert>>>()
+
+    private fun findings(userId: GlobalId, branch: Scope.Branch, today: BusinessDate): List<Alert> {
+        val key = Triple(userId, branch.branchId, today.epochDay)
+        val now = System.nanoTime() / 1_000_000
+        synchronized(findingCache) { findingCache[key]?.takeIf { now - it.first < FINDINGS_EVERY_MS }?.let { return it.second } }
+        val a = try { core.assessments.of(branch, today.plusDays(-27), today) } catch (e: DomainException) { return emptyList() }
+        val alerts = a.findings.filter { (it.severity == Finding.Severity.CRITICAL || it.severity == Finding.Severity.HIGH) && it.key !in ANNOUNCED_ELSEWHERE }.map { f ->
+            Alert("FINDING:${branch.branchId.value.value}:${f.key}", Alert.Kind.FINDING, "${f.severity.title}: ${f.title}",
+                f.action + (f.exposureHigh?.let { " · مبلغ در معرض ${Fa.rial(it)} ریال" } ?: ""))
+        }
+        synchronized(findingCache) { findingCache.keys.removeAll { it.third != today.epochDay }; findingCache[key] = now to alerts }
+        return alerts
+    }
+
     /** A read this role may not do (or a branch it cannot see) simply yields nothing. */
     private fun <T> safe(block: () -> List<T>): List<T> = try { block() } catch (e: DomainException) { emptyList() }
 
@@ -172,6 +212,10 @@ class Alerts internal constructor(private val core: SabouCore) {
         const val EXPIRY_DAYS = 1L
         /** Staff documents are alerted two weeks ahead (renewing a health card takes days). */
         const val STAFF_DOC_DAYS = 14L
+        const val FINDINGS_EVERY_MS = 30 * 60_000L
+
+        /** Findings that have an alert of their own (health cards, cash, receivables, expiry, shortages). */
+        val ANNOUNCED_ELSEWHERE = setOf("HEALTH_CARDS", "CASH_SHORT", "RECEIVABLES_LATE", "EXPIRED_STOCK", "SHORTAGES")
 
         fun staffDocName(kind: ir.sabou.payroll.StaffDocument.Kind) = when (kind) {
             ir.sabou.payroll.StaffDocument.Kind.HEALTH_CARD -> "کارت بهداشت"

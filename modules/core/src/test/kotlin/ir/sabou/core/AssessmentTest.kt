@@ -120,7 +120,7 @@ class AssessmentTest {
         fun w(d: Dimension) = d.area.weight * 1_000 / Dimension.entries.count { it.area == d.area }
         val applicable = a.dimensions.filter { it.applicable }
         val scored = applicable.filter { it.score != null }
-        val expected = scored.sumOf { w(it.dimension) * it.score!! } / scored.sumOf { w(it.dimension) }
+        val expected = ir.sabou.kernel.Ratio.mulDiv(scored.sumOf { w(it.dimension) * it.score!! }, 1, scored.sumOf { w(it.dimension) })
         assertEquals(expected.toInt(), a.score)
         assertEquals(scored.sumOf { w(it.dimension) } * 10_000 / applicable.sumOf { w(it.dimension) }, a.coverageBp)
         assertTrue(a.coverageBp in Assessments.MIN_COVERAGE_BP..9_999)

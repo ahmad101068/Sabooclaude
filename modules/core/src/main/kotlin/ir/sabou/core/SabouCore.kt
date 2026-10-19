@@ -197,6 +197,7 @@ class SabouCore private constructor(
     val profitBridges = ProfitBridges(this)
     val cashFlows = CashFlows(this)
     val assessments = Assessments(this)
+    val whatIfs = WhatIfs(this)
     val books = Books(this)
     /** Two phones, one set of books (ADR-0042). */
     val sync = Sync(this)
@@ -320,6 +321,27 @@ class SabouCore private constructor(
         if (full is StartupVerdict.RollbackDetected) throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.IntegrityViolation(full.detail))
     }
 
+    /**
+     * ADR-0062: the result of opening a backup file and verifying its whole audit chain, as the nightly backup does
+     * once a week on behalf of [enabledBy] ("BACKUP_VERIFIED", detail «ok» or the reason it failed).
+     */
+    fun recordBackupCheck(enabledBy: ir.sabou.kernel.GlobalId, ok: Boolean, detail: String) = unitOfWork.transaction {
+        val user = users.byId(enabledBy)?.takeIf { it.isActive } ?: throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.AuthenticationRequired)
+        AuditTrail(auditStore).append(
+            ir.sabou.platform.AuditDraft("BACKUP_VERIFIED", "DATABASE", epoch, if (ok) "ok" else "failed:${detail.take(200)}"), user.toActor(), ModuleId.PLATFORM, "ORG",
+            ir.sabou.kernel.GlobalId.new().value, clock.nowEpochMillis(), epoch,
+        )
+    }
+
+    /** When the last backup was taken and when one was last verified (ADR-0062), from the audit trail. */
+    internal fun backupHistory(): BackupHistory {
+        fun last(where: String) = db.query("SELECT occurred_at, detail FROM audit_events WHERE $where ORDER BY position DESC LIMIT 1").firstOrNull()
+        val taken = last("action IN ('BACKUP_CREATE', 'BACKUP_SCHEDULED')")?.long("occurred_at")
+        val check = last("action = 'BACKUP_VERIFIED'")
+        val verified = last("action = 'BACKUP_VERIFIED' AND detail = 'ok'")?.long("occurred_at")
+        return BackupHistory(taken, verified, check?.str("detail")?.takeIf { it != "ok" }?.removePrefix("failed:"), clock.nowEpochMillis())
+    }
+
     private fun administrative(permission: ir.sabou.platform.Permission, action: String, detail: String) = unitOfWork.transaction {
         val actor = session.currentActor() ?: throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.AuthenticationRequired)
         if (!actor.role.allows(permission)) throw ir.sabou.kernel.DomainException(ir.sabou.kernel.DomainError.PermissionDenied(permission.name))
@@ -379,4 +401,9 @@ class SabouCore private constructor(
         const val LOCAL_EVENT_DAYS = 90L
         const val SYNCED_EVENT_DAYS = 30L
     }
+}
+
+/** [lastFailure]: the reason the most recent verification failed, null if it passed (or none was made). */
+internal data class BackupHistory(val lastTaken: Long?, val lastVerified: Long?, val lastFailure: String?, val now: Long) {
+    fun daysSince(at: Long?): Long? = at?.let { (now - it).coerceAtLeast(0) / 86_400_000L }
 }

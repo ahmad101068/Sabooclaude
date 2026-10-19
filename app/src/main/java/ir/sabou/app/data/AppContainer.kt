@@ -301,6 +301,35 @@ class AppContainer(private val context: Context) {
     }
 
     /**
+     * ADR-0062: opens a backup file the way a restore would — decrypt, open, verify the whole audit chain — without
+     * touching the current database, and throws if any step fails. The temporary copy is always deleted.
+     */
+    @Synchronized
+    fun testRestore(password: CharArray, source: Uri) {
+        context.deleteDatabase(RESTORE_TEST)
+        val file = context.getDatabasePath(RESTORE_TEST).also { it.parentFile?.mkdirs() }
+        try {
+            var key = ""
+            val input = context.contentResolver.openInputStream(source) ?: error("BACKUP_SOURCE_UNAVAILABLE")
+            input.use { i ->
+                val splitter = PayloadSplitter(file.outputStream())
+                splitter.use { o -> StreamingBackupCodec.decrypt(password, i, o, MAX_RESTORE_BYTES) }
+                key = splitter.key
+            }
+            val helper = openHelper(file.name, key.toByteArray(Charsets.US_ASCII))
+            try {
+                val candidate = SabouCore.open(AndroidSqlDatabase(helper.writableDatabase), InMemoryAnchorStore())
+                val verdict = candidate.verifyAuditFull()
+                check(verdict == StartupVerdict.Healthy) { "BACKUP_INTEGRITY:${(verdict as StartupVerdict.RollbackDetected).detail}" }
+            } finally {
+                helper.close()
+            }
+        } finally {
+            context.deleteDatabase(RESTORE_TEST)
+        }
+    }
+
+    /**
      * Restores a backup: decrypt → verify the candidate on its own (schema, full audit chain) → copy it into a
      * new database encrypted with this device's key → announce + seal → quarantine the current database →
      * atomic rename → open. Nothing of the current database is touched until the candidate has passed every
@@ -564,6 +593,7 @@ class AppContainer(private val context: Context) {
         private const val KEY_CHARS = 64
         private const val DRAFT_VERSION = "app_version"
         private const val RESTORE_CANDIDATE = "restore-candidate.db"
+        private const val RESTORE_TEST = "restore-test.db"
         private const val RESTORE_STAGED = "sabou-restore.db"
         private const val SYNC_CANDIDATE = "sync-candidate.db"
         private const val MAX_RESTORE_BYTES = 2L * 1024 * 1024 * 1024

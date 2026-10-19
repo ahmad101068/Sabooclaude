@@ -350,6 +350,16 @@ object Schema {
                 "CREATE INDEX tax_invoices_sale ON tax_invoices(sale_id)",
             ),
         ),
+        Migration(
+            27,
+            listOf(
+                // The scorecard's actions and the facts recorded by hand for it (ADR-0062).
+                "CREATE TABLE assessment_actions (id TEXT PRIMARY KEY, scope TEXT NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX assessment_actions_scope ON assessment_actions(scope)",
+                "CREATE TABLE field_records (id TEXT PRIMARY KEY, scope TEXT NOT NULL, kind TEXT NOT NULL, date INTEGER NOT NULL, doc TEXT NOT NULL)",
+                "CREATE INDEX field_records_day ON field_records(scope, kind, date)",
+            ),
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

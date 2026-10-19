@@ -3,10 +3,16 @@ package ir.sabou.core
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
+import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Ratio
 import ir.sabou.kernel.Scope
 import ir.sabou.ledger.StandardAccounts
 import ir.sabou.platform.Actor
+import ir.sabou.platform.AuditDraft
+import ir.sabou.platform.Command
+import ir.sabou.platform.CommandOutcome
+import ir.sabou.platform.ModuleId
+import ir.sabou.platform.NoDocument
 import ir.sabou.platform.Permission
 import ir.sabou.purchasing.InvoiceStatus
 import ir.sabou.sales.SaleStatus
@@ -54,7 +60,7 @@ enum class Dimension(val code: String, val title: String, val area: AssessmentAr
     D20("D20", "رشد", AssessmentArea.FINANCE),
 }
 
-enum class KpiUnit { PERCENT, RIAL, DAYS, WEEKS, COUNT, RIAL_PER_HOUR }
+enum class KpiUnit { PERCENT, RIAL, DAYS, WEEKS, COUNT, RIAL_PER_HOUR, /** ×100: 420 = 4.2 of 5 */ RATING }
 
 /**
  * How an indicator is scored: 100 at [good] or better, 0 at [bad] or worse, straight in between. Basis points for
@@ -131,10 +137,41 @@ data class Finding(
     val causes: List<String>,
     val action: String,
     val confidence: Confidence,
+    /** The indicator an action on this finding is measured by (ADR-0062). */
+    val kpiId: String? = null,
 ) {
     /** [CRITICAL] is shown before the score, whatever the score (food safety, books out of balance). */
     enum class Severity(val title: String) { CRITICAL("بحرانی"), HIGH("زیاد"), MEDIUM("متوسط"), LOW("کم") }
     enum class Confidence(val title: String) { HIGH("زیاد"), MEDIUM("متوسط"), LOW("کم") }
+}
+
+/**
+ * The owner's choices (ADR-0062): a target per indicator id (100 at [KpiTarget.good], 0 at [KpiTarget.bad]) and a
+ * weight per area. What is not set keeps the rules' default. [revision] counts the changes and is printed on every
+ * report beside the rules version, so two reports with different settings never look alike.
+ */
+data class AssessmentSettings(
+    val targets: Map<String, KpiTarget> = emptyMap(),
+    val weights: Map<AssessmentArea, Long> = emptyMap(),
+    val revision: Int = 0,
+) {
+    fun weight(area: AssessmentArea): Long = weights[area] ?: area.weight
+}
+
+/**
+ * Sets every target and weight at once (what is left out goes back to the default). [targets]: indicator id →
+ * [good, bad]; [weights]: area name → 0..100.
+ */
+@NoDocument
+data class SetAssessmentSettings(
+    override val commandId: GlobalId,
+    val targets: Map<String, List<Long>>,
+    val weights: Map<String, Long>,
+) : Command {
+    override val requiredPermission = Permission.BUDGET_MANAGE
+    override val scope: Scope = Scope.Organization
+    override fun fingerprint() = targets.toSortedMap().entries.joinToString(";") { "${it.key}=${it.value}" } + "|" +
+        weights.toSortedMap().entries.joinToString(";") { "${it.key}=${it.value}" }
 }
 
 /** Data the report needs and does not have, and what to record to get it. */
@@ -157,6 +194,11 @@ data class Assessment(
     val findings: List<Finding>,
     val dataRequests: List<DataRequest>,
     val rulesVersion: Int = Assessments.RULES_VERSION,
+    val settings: AssessmentSettings = AssessmentSettings(),
+    /** Open actions, and those closed in the last [Assessments.ACTION_DAYS] days (ADR-0062). */
+    val actions: List<AssessmentAction> = emptyList(),
+    /** Findings kept quiet because someone marked them a false alarm. */
+    val silenced: List<String> = emptyList(),
 ) {
     val kpis: List<Kpi> get() = dimensions.flatMap { it.kpis }
     val critical: List<Finding> get() = findings.filter { it.severity == Finding.Severity.CRITICAL }
@@ -172,6 +214,138 @@ class Assessments internal constructor(private val core: SabouCore) {
         return a
     }
 
+    private val meta = ir.sabou.persistence.DatabaseMeta(core.db)
+    private val store = AssessmentStore(core.db)
+
+    // ------------------------------------------------------------ actions (ADR-0062)
+
+    fun actions(branch: Scope.Branch): List<AssessmentAction> {
+        val a = actor(); if (!a.canAccess(branch)) throw DomainException(DomainError.PermissionDenied("BRANCH"))
+        return store.actions(branch)
+    }
+
+    fun openAction(c: OpenAssessmentAction): CommandOutcome = core.bus.execute(ModuleId.PLATFORM, c) { cmd, ctx ->
+        AssessmentStore.check(cmd.title.isNotBlank() && cmd.action.isNotBlank(), "action", "عارضه و اقدام را بنویسید.")
+        AssessmentStore.check(cmd.owner.isNotBlank(), "owner", "مسئول اقدام را بنویسید.")
+        AssessmentStore.check(cmd.due >= cmd.today, "due", "مهلت نمی‌تواند پیش از امروز باشد.")
+        AssessmentStore.check(cmd.cost >= 0, "cost", "هزینه منفی نمی‌شود.")
+        AssessmentStore.check(cmd.kpiId == null || cmd.kpiId in DIRECTIONS, "kpi", "شاخص ناشناخته است.")
+        val action = AssessmentAction(GlobalId.new(), cmd.scope, cmd.findingKey, cmd.kpiId, cmd.title.trim(), cmd.action.trim(), cmd.owner.trim(), cmd.due, cmd.cost,
+            cmd.today, AssessmentAction.Status.OPEN)
+        store.save(action)
+        ctx.audit(AuditDraft("ACTION_OPENED", "ASSESSMENT_ACTION", action.id.value, "finding=${cmd.findingKey};due=${cmd.due.epochDay};cost=${cmd.cost}"))
+        action.id
+    }
+
+    /**
+     * Closes an action and measures it: the finding's indicator from the day the action was opened to today,
+     * against the same number of days (at least a week) just before it was opened.
+     */
+    fun closeAction(c: CloseAssessmentAction): CommandOutcome = core.bus.execute(ModuleId.PLATFORM, c) { cmd, ctx ->
+        val action = store.action(cmd.actionId)?.takeIf { it.scope == cmd.scope } ?: throw DomainException(DomainError.NotFound("ACTION"))
+        if (action.status != AssessmentAction.Status.OPEN) throw DomainException(DomainError.InvalidState("ACTION", "CLOSED"))
+        AssessmentStore.check(cmd.status == AssessmentAction.Status.DONE || cmd.status == AssessmentAction.Status.DROPPED, "status", "انجام شد یا کنار گذاشته شد.")
+        val days = maxOf(7L, cmd.today.epochDay - action.opened.epochDay + 1)
+        fun value(from: BusinessDate, to: BusinessDate) = action.kpiId?.let { id ->
+            try { of(cmd.scope, from, to).kpis.firstOrNull { it.id == id }?.value } catch (e: DomainException) { null }
+        }
+        val before = value(action.opened.plusDays(-days), action.opened.plusDays(-1))
+        val after = value(action.opened, action.opened.plusDays(days - 1))
+        store.save(action.copy(status = cmd.status, closed = cmd.today, note = cmd.note.trim(), before = before, after = after))
+        ctx.audit(AuditDraft("ACTION_CLOSED", "ASSESSMENT_ACTION", action.id.value, "status=${cmd.status};before=$before;after=$after"))
+        action.id
+    }
+
+    fun markFalseAlarm(c: MarkFalseAlarm): CommandOutcome = core.bus.execute(ModuleId.PLATFORM, c) { cmd, ctx ->
+        AssessmentStore.check(cmd.note.isNotBlank(), "note", "بنویسید چرا این هشدار اشتباه است.")
+        val action = AssessmentAction(GlobalId.new(), cmd.scope, cmd.findingKey, FINDING_KPI[cmd.findingKey], cmd.title, "هشدار اشتباه", ctx.actor.displayName,
+            cmd.today, 0, cmd.today, AssessmentAction.Status.FALSE_ALARM, cmd.today, cmd.note.trim())
+        store.save(action)
+        ctx.audit(AuditDraft("FINDING_FALSE_ALARM", "ASSESSMENT_ACTION", action.id.value, "finding=${cmd.findingKey}"))
+        action.id
+    }
+
+    // ------------------------------------------------------------ field records (ADR-0062)
+
+    fun records(branch: Scope.Branch, kind: FieldRecord.Kind): List<FieldRecord> {
+        val a = core.session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
+        if (!a.role.allows(kind.permission) && !a.role.allows(Permission.LEDGER_VIEW)) throw DomainException(DomainError.PermissionDenied(kind.permission.name))
+        if (!a.canAccess(branch)) throw DomainException(DomainError.PermissionDenied("BRANCH"))
+        return store.records(branch, kind)
+    }
+
+    fun record(c: RecordField): CommandOutcome = core.bus.execute(ModuleId.PLATFORM, c) { cmd, ctx ->
+        val subject = cmd.subject.trim()
+        fun need(ok: Boolean, field: String, message: String) = AssessmentStore.check(ok, field, message)
+        when (cmd.kind) {
+            FieldRecord.Kind.TEMPERATURE -> {
+                need(subject.isNotEmpty(), "subject", "نام یخچال یا فریزر را بنویسید.")
+                need(cmd.value != null && cmd.value in -400..300, "value", "دما بین ۴۰- و ۳۰ درجه است.")
+                need(cmd.value2 == null || cmd.value2 in 0..1, "value2", "یخچال یا فریزر.")
+            }
+            FieldRecord.Kind.FEEDBACK -> need(cmd.value != null && cmd.value in 1..5, "value", "امتیاز مشتری از ۱ تا ۵ است.")
+            FieldRecord.Kind.CAMPAIGN -> {
+                need(subject.isNotEmpty(), "subject", "نام کمپین را بنویسید.")
+                need(cmd.endDate != null && cmd.endDate >= cmd.date, "endDate", "پایان کمپین پیش از شروع آن نیست.")
+                need((cmd.value ?: 0) >= 0, "value", "هزینه منفی نمی‌شود.")
+            }
+            FieldRecord.Kind.BREAKDOWN -> {
+                need(subject.isNotEmpty(), "subject", "نام دستگاه را بنویسید.")
+                need((cmd.value ?: 0) >= 0 && (cmd.value2 ?: 0) >= 0, "value", "هزینه و زمان منفی نمی‌شوند.")
+            }
+            FieldRecord.Kind.PORTION -> {
+                need(subject.isNotEmpty(), "subject", "بنویسید چه چیزی وزن شد.")
+                need((cmd.value ?: 0) > 0 && (cmd.value2 ?: 0) > 0, "value", "وزن رسپی و وزن واقعی را به گرم بنویسید.")
+            }
+            FieldRecord.Kind.PERMIT -> {
+                need(subject.isNotEmpty(), "subject", "نام مجوز را بنویسید.")
+                need(cmd.endDate != null, "endDate", "تاریخ اعتبار مجوز را بنویسید.")
+            }
+        }
+        val r = FieldRecord(GlobalId.new(), cmd.scope, cmd.kind, cmd.date, subject, cmd.value, cmd.value2, cmd.endDate, cmd.note.trim(), ctx.actor.displayName)
+        store.save(r)
+        ctx.audit(AuditDraft("FIELD_RECORD", "FIELD_RECORD", r.id.value, "kind=${cmd.kind};date=${cmd.date.epochDay}"))
+        r.id
+    }
+
+    fun voidRecord(c: VoidFieldRecord): CommandOutcome = core.bus.execute(ModuleId.PLATFORM, c) { cmd, ctx ->
+        val r = store.record(cmd.recordId)?.takeIf { it.scope == cmd.scope && it.kind == cmd.kind } ?: throw DomainException(DomainError.NotFound("FIELD_RECORD"))
+        if (r.voided) throw DomainException(DomainError.InvalidState("FIELD_RECORD", "VOIDED"))
+        AssessmentStore.check(cmd.reason.isNotBlank(), "reason", "دلیل باطل کردن را بنویسید.")
+        store.save(r.copy(voided = true, note = (r.note + " · باطل: " + cmd.reason.trim()).trim(' ', '·')))
+        ctx.audit(AuditDraft("FIELD_RECORD_VOID", "FIELD_RECORD", r.id.value, cmd.reason.trim()))
+        r.id
+    }
+
+    /** The owner's targets and weights (ADR-0062); defaults where none was set. */
+    fun settings(): AssessmentSettings {
+        val raw = meta.get(SETTINGS_KEY) ?: return AssessmentSettings()
+        @Suppress("UNCHECKED_CAST")
+        val m = ir.sabou.persistence.Json.decode(raw) as Map<String, Any?>
+        val targets = (m["targets"] as Map<String, List<Long>>).mapValues { (id, gb) -> KpiTarget(better(id), gb[0], gb[1]) }
+        val weights = (m["weights"] as Map<String, Long>).mapKeys { AssessmentArea.valueOf(it.key) }
+        return AssessmentSettings(targets, weights, (m["revision"] as Long).toInt())
+    }
+
+    fun setSettings(c: SetAssessmentSettings): CommandOutcome = core.bus.execute(ModuleId.PLATFORM, c) { cmd, ctx ->
+        cmd.targets.forEach { (id, gb) ->
+            if (id !in DIRECTIONS) throw DomainException(DomainError.InvalidInput("target", "شاخص «$id» هدف‌پذیر نیست."))
+            if (gb.size != 2) throw DomainException(DomainError.InvalidInput("target", "هر هدف دو عدد دارد: خوب و بد."))
+            val ok = if (better(id) == KpiTarget.Better.LOWER) gb[1] > gb[0] else gb[0] > gb[1]
+            if (!ok) throw DomainException(DomainError.InvalidInput("target", "در «$id» حد بد باید " +
+                (if (better(id) == KpiTarget.Better.LOWER) "بیشتر" else "کمتر") + " از هدف باشد."))
+        }
+        cmd.weights.forEach { (area, w) ->
+            if (AssessmentArea.entries.none { it.name == area }) throw DomainException(DomainError.InvalidInput("weight", "حوزه‌ی «$area» نیست."))
+            if (w !in 0..100) throw DomainException(DomainError.InvalidInput("weight", "وزن هر حوزه بین ۰ و ۱۰۰ است."))
+        }
+        if (AssessmentArea.entries.sumOf { a -> cmd.weights[a.name] ?: a.weight } <= 0) throw DomainException(DomainError.InvalidInput("weight", "دست‌کم یک حوزه وزن می‌خواهد."))
+        val revision = settings().revision + 1
+        meta.put(SETTINGS_KEY, ir.sabou.persistence.Json.encode(mapOf("targets" to cmd.targets.toSortedMap(), "weights" to cmd.weights.toSortedMap(), "revision" to revision.toLong())))
+        ctx.audit(AuditDraft("ASSESSMENT_SETTINGS", "ASSESSMENT", "settings", "revision=$revision;targets=${cmd.targets.size};weights=${cmd.weights.size}"))
+        GlobalId.new()
+    }
+
     /** A read this role may not do yields null: the indicator is then Unknown, the report still complete. */
     private fun <T> safe(block: () -> T): T? = try { block() } catch (e: DomainException) { null }
 
@@ -181,9 +355,11 @@ class Assessments internal constructor(private val core: SabouCore) {
         if (to < from) throw DomainException(DomainError.InvalidState("PERIOD", "TO_BEFORE_FROM"))
         val branchName = core.branches.all().firstOrNull { it.id == branch.branchId }?.name ?: ""
         val (baseFrom, baseTo) = core.profitBridges.previous(from, to)
-        val r = Reader(branch, from, to, baseFrom, baseTo)
+        val settings = settings()
+        val r = Reader(branch, from, to, baseFrom, baseTo, settings)
 
-        val kpis = r.kpis()
+        // The owner's target replaces the rule's default (ADR-0062); an indicator shown for information stays so.
+        val kpis = r.kpis().map { k -> settings.targets[k.id]?.takeIf { k.target != null }?.let { k.copy(target = it) } ?: k }
         val dimensions = Dimension.entries.map { d -> DimensionResult(d, kpis.filter { it.dimension == d }) }
         val areas = AssessmentArea.entries.map { area -> dimensions.filter { it.dimension.area == area }.let { ds ->
             val scored = ds.mapNotNull { it.score }
@@ -191,7 +367,7 @@ class Assessments internal constructor(private val core: SabouCore) {
         } }
 
         // Each area's weight is shared equally by its dimensions; weights are kept ×1,000 to stay whole.
-        fun weight(d: DimensionResult) = d.dimension.area.weight * 1_000 / Dimension.entries.count { it.area == d.dimension.area }
+        fun weight(d: DimensionResult) = settings.weight(d.dimension.area) * 1_000 / Dimension.entries.count { it.area == d.dimension.area }
         val applicable = dimensions.filter { it.applicable }
         val total = applicable.sumOf { weight(it) }
         val scored = applicable.filter { it.score != null }
@@ -200,22 +376,29 @@ class Assessments internal constructor(private val core: SabouCore) {
         val score = if (scoredWeight == 0L || coverageBp < MIN_COVERAGE_BP) null
             else Ratio.mulDiv(scored.sumOf { weight(it) * it.score!! }, 1, scoredWeight).toInt()
 
-        val findings = r.findings(kpis).sortedWith(compareBy<Finding> { it.severity.ordinal }.thenByDescending { it.exposureHigh ?: -1 })
+        val actions = store.actions(branch)
+        val quiet = actions.filter { it.status == AssessmentAction.Status.FALSE_ALARM && to.epochDay - it.opened.epochDay in 0 until FALSE_ALARM_DAYS }.map { it.findingKey }.toSet()
+        val all = r.findings(kpis).map { it.copy(kpiId = FINDING_KPI[it.key]) }
+        val findings = all.filter { it.key !in quiet }.sortedWith(compareBy<Finding> { it.severity.ordinal }.thenByDescending { it.exposureHigh ?: -1L })
+        val measured = kpis.filter { it.value != null }.map { it.dimension }.toSet()
         val requests = kpis.filter { it.quality == KpiQuality.UNKNOWN && it.note.isNotBlank() }.map { DataRequest(it.dimension, it.note) } +
-            NOT_RECORDED.map { (d, text) -> DataRequest(d, text) }
-        return Assessment(branch, branchName, from, to, baseFrom, baseTo, dimensions, areas, score, coverageBp, r.quality(), findings, requests.distinct())
+            NOT_RECORDED.filter { it.first !in measured }.map { (d, text) -> DataRequest(d, text) }
+        val shown = actions.filter { it.status == AssessmentAction.Status.OPEN || (it.closed != null && to.epochDay - it.closed.epochDay in 0 until ACTION_DAYS) }
+        return Assessment(branch, branchName, from, to, baseFrom, baseTo, dimensions, areas, score, coverageBp, r.quality(), findings, requests.distinct(), settings = settings,
+            actions = shown, silenced = all.filter { it.key in quiet }.map { it.title })
     }
 
     /** One report's reads, each done once. */
     private inner class Reader(
         val branch: Scope.Branch, val from: BusinessDate, val to: BusinessDate, val baseFrom: BusinessDate, val baseTo: BusinessDate,
+        val settings: AssessmentSettings,
     ) {
         val days = (from.epochDay..to.epochDay).map { BusinessDate(it) }
         val pnl = core.reports.profitAndLoss(from, to, branch)
         val basePnl = core.reports.profitAndLoss(baseFrom, baseTo, branch)
         val sales get() = pnl.ratios.sales
         val target = core.salesOps.foodCostTarget()
-        val foodGood = target ?: DEFAULT_FOOD_COST_BP
+        val foodGood = settings.targets["D03.FOOD"]?.good ?: target ?: DEFAULT_FOOD_COST_BP
         val mix by lazy { safe { core.reports.productMix(branch, from, to) } }
         val engineering by lazy { safe { core.reports.menuEngineering(branch, from, to) } }
         val usage by lazy { safe { core.reports.actualVsTheoretical(branch, null, from, to) } }
@@ -235,7 +418,9 @@ class Assessments internal constructor(private val core: SabouCore) {
 
         fun account(code: ir.sabou.ledger.AccountCode, p: ProfitAndLoss = pnl) = (p.costOfSales + p.expenses).filter { it.account.code == code }.sumOf { it.amount }
 
-        fun kpis(): List<Kpi> = buildList {
+        fun kpis(): List<Kpi> = (baseKpis() + recordKpis()).sortedBy { it.dimension.ordinal }
+
+        fun baseKpis(): List<Kpi> = buildList {
             // ---- D01 accounting
             val trial = safe { core.overview.trialBalance() }
             add(if (trial == null) unknown("D01.TRIAL", Dimension.D01, "تراز آزمایشی", KpiUnit.RIAL, "تراز آزمایشی", "")
@@ -277,7 +462,7 @@ class Assessments internal constructor(private val core: SabouCore) {
                 val r = pnl.ratios
                 add(Kpi("D03.FOOD", Dimension.D03, "بهای غذا به فروش (food cost)", r.foodBp, KpiUnit.PERCENT, KpiTarget.lower(foodGood, foodGood + 1_000),
                     if (pnl.provisional) KpiQuality.PARTIAL else KpiQuality.OK, "بهای فروش، ضایعات، پذیرایی و مغایرت انبار ÷ فروش غذا", r.foodCost, r.sales,
-                    (if (target == null) "هدف تعیین نشده؛ ${Fa.percent(DEFAULT_FOOD_COST_BP)} فرض شد" else "") + if (pnl.provisional) "؛ کسری انبار باز هست" else ""))
+                    (if (target == null && settings.targets["D03.FOOD"] == null) "هدف تعیین نشده؛ ${Fa.percent(DEFAULT_FOOD_COST_BP)} فرض شد" else "") + if (pnl.provisional) "؛ کسری انبار باز هست" else ""))
                 add(Kpi("D03.PRIME", Dimension.D03, "بهای اصلی (غذا + نیروی کار) به فروش", r.primeBp, KpiUnit.PERCENT, KpiTarget.lower(6_000, 7_000),
                     if (r.labor == 0L) KpiQuality.PARTIAL else KpiQuality.OK, "بهای غذا و حقوق و بیمه ÷ فروش غذا", r.prime, r.sales,
                     if (r.labor == 0L) "حقوق این دوره هنوز ثبت نشده" else ""))
@@ -357,6 +542,23 @@ class Assessments internal constructor(private val core: SabouCore) {
             val matches = safe { core.books.matchReviews() }?.count { it.invoice.scope == branch }
             add(if (matches == null) unknown("D09.MATCH", Dimension.D09, "فاکتور ناهمخوان با سفارش", KpiUnit.COUNT, "تطبیق فاکتور", "")
                 else Kpi("D09.MATCH", Dimension.D09, "فاکتور ناهمخوان با سفارش، بررسی‌نشده", matches.toLong(), KpiUnit.COUNT, KpiTarget.lower(0, 3), KpiQuality.OK, "تطبیق سفارش، رسید و فاکتور"))
+
+            // Orders received in the period (ADR-0062): on time = invoiced by the expected date; complete = the
+            // invoice found no quantity short or item missing against the order.
+            val received = core.purchases.orders().filter { it.scope == branch && it.status == ir.sabou.purchasing.OrderStatus.RECEIVED }
+                .mapNotNull { o -> o.invoiceIds.mapNotNull { core.purchases.invoice(it) }.minByOrNull { it.date }?.let { o to it } }
+                .filter { (_, inv) -> inv.date in from..to }
+            if (received.isEmpty()) {
+                add(unknown("D09.ONTIME", Dimension.D09, "سفارش‌های رسیده سر موعد", KpiUnit.PERCENT, "سفارش‌های خرید",
+                    "سفارش خرید ثبت‌شده‌ای در این دوره نرسیده؛ با ثبت سفارش و فاکتورِ متصل به آن، تحویل تأمین‌کنندگان سنجیده می‌شود."))
+            } else {
+                val onTime = received.count { (o, inv) -> inv.date <= o.expectedDate }.toLong()
+                add(Kpi("D09.ONTIME", Dimension.D09, "سفارش‌های رسیده سر موعد", bp(onTime, received.size.toLong()), KpiUnit.PERCENT, KpiTarget.higher(9_500, 7_000),
+                    KpiQuality.OK, "تاریخ فاکتور در برابر تاریخ مورد انتظار سفارش", onTime, received.size.toLong()))
+                val complete = received.count { (_, inv) -> inv.discrepancies.none { it.kind == ir.sabou.purchasing.Discrepancy.Kind.QUANTITY || it.kind == ir.sabou.purchasing.Discrepancy.Kind.NOT_DELIVERED } }.toLong()
+                add(Kpi("D09.FULL", Dimension.D09, "سفارش‌های رسیده‌ی کامل", bp(complete, received.size.toLong()), KpiUnit.PERCENT, KpiTarget.higher(9_500, 8_000),
+                    KpiQuality.OK, "مقدار فاکتور در برابر مقدار سفارش", complete, received.size.toLong()))
+            }
 
             // ---- D10 inventory
             val shortages = safe { core.overview.openShortages(branch) }
@@ -474,6 +676,163 @@ class Assessments internal constructor(private val core: SabouCore) {
                     "برای سنجش رشد، فروش دوره‌ی قبل (${Fa.date(baseFrom)} تا ${Fa.date(baseTo)}) لازم است.")
                 else Kpi("D20.GROWTH", Dimension.D20, "رشد فروش نسبت به دوره‌ی قبل", Ratio.changeBp(baseSales, sales), KpiUnit.PERCENT, KpiTarget.higher(500, -1_000), KpiQuality.OK,
                     "فروش غذا در برابر ${Fa.date(baseFrom)} تا ${Fa.date(baseTo)}", sales, baseSales))
+            // The same weeks a year earlier (364 days: the same weekdays), when the books go back that far.
+            val lastYear = core.reports.profitAndLoss(from.plusDays(-364), to.plusDays(-364), branch).ratios.sales
+            add(if (lastYear <= 0 || sales <= 0) unknown("D20.YOY", Dimension.D20, "رشد فروش نسبت به سال قبل", KpiUnit.PERCENT, "سود و زیان",
+                    "فروش همین روزهای سال قبل در برنامه نیست؛ پس از یک سال کار با برنامه سنجیده می‌شود.")
+                else Kpi("D20.YOY", Dimension.D20, "رشد فروش نسبت به همین روزهای سال قبل", Ratio.changeBp(lastYear, sales), KpiUnit.PERCENT, KpiTarget.higher(1_000, -1_000),
+                    KpiQuality.OK, "فروش غذا در برابر ${Fa.date(from.plusDays(-364))} تا ${Fa.date(to.plusDays(-364))}", sales, lastYear))
+        }
+
+        val records by lazy { store.records(branch).filter { !it.voided } }
+        fun recs(kind: FieldRecord.Kind) = records.filter { it.kind == kind }
+        fun recordsIn(kind: FieldRecord.Kind) = recs(kind).filter { it.date in from..to }
+
+        /** Indicators from the facts recorded by hand (ADR-0062). */
+        fun recordKpis(): List<Kpi> = buildList {
+            // D07: the last campaign that ended in the period, its daily sales against as many days just before it.
+            val campaign = recs(FieldRecord.Kind.CAMPAIGN).filter { it.endDate != null && it.endDate in from..to }.maxByOrNull { it.endDate!! }
+            add(if (campaign == null) unknown("D07.LIFT", Dimension.D07, "رشد فروش روزهای کمپین", KpiUnit.PERCENT, "کمپین‌ها",
+                    "کمپینی که در این دوره تمام شده باشد ثبت نشده؛ کمپین‌ها را در «ثبت‌های روزانه» ثبت کنید.")
+                else {
+                    val len = campaign.endDate!!.epochDay - campaign.date.epochDay + 1
+                    val during = core.reports.profitAndLoss(campaign.date, campaign.endDate, branch).ratios.sales
+                    val before = core.reports.profitAndLoss(campaign.date.plusDays(-len), campaign.date.plusDays(-1), branch).ratios.sales
+                    val lift = Ratio.changeBp(before, during)
+                    if (lift == null) unknown("D07.LIFT", Dimension.D07, "رشد فروش روزهای کمپین", KpiUnit.PERCENT, "کمپین‌ها", "پیش از کمپین «${campaign.subject}» فروشی ثبت نشده است.")
+                    else Kpi("D07.LIFT", Dimension.D07, "رشد فروش روزهای کمپین «${campaign.subject}»", lift, KpiUnit.PERCENT, KpiTarget.higher(1_000, 0), KpiQuality.OK,
+                        "فروش غذا در روزهای کمپین در برابر همان تعداد روز پیش از آن", during, before,
+                        "هزینه‌ی کمپین ${Fa.rial(campaign.value ?: 0)} ریال؛ رشد فروش مساوی سود نیست")
+                })
+
+            // D08: customers' ratings.
+            val feedback = recordsIn(FieldRecord.Kind.FEEDBACK)
+            if (feedback.size < MIN_FEEDBACK) {
+                add(unknown("D08.RATING", Dimension.D08, "میانگین رضایت مشتری", KpiUnit.RATING, "نظر مشتریان",
+                    "در این دوره ${Fa.number(feedback.size.toLong())} نظر ثبت شده؛ دست‌کم ${Fa.number(MIN_FEEDBACK.toLong())} نظر لازم است («ثبت‌های روزانه»)."))
+            } else {
+                val sum = feedback.sumOf { it.value!! }
+                add(Kpi("D08.RATING", Dimension.D08, "میانگین رضایت مشتری", Ratio.mulDiv(sum, 100, feedback.size.toLong()), KpiUnit.RATING, KpiTarget.higher(450, 300),
+                    KpiQuality.OK, "امتیاز ۱ تا ۵ نظرهای ثبت‌شده", sum, feedback.size.toLong()))
+                val complaints = feedback.count { it.value!! <= 2 }.toLong()
+                add(Kpi("D08.COMPLAINTS", Dimension.D08, "سهم نظرهای ناراضی (امتیاز ۱ یا ۲)", bp(complaints, feedback.size.toLong()), KpiUnit.PERCENT,
+                    KpiTarget.lower(500, 2_000), KpiQuality.OK, "نظرهای ثبت‌شده", complaints, feedback.size.toLong()))
+            }
+
+            // D11: portions weighed against the recipe.
+            val portions = recordsIn(FieldRecord.Kind.PORTION)
+            if (portions.size >= MIN_PORTIONS) {
+                val within = portions.count { kotlin.math.abs(it.value2!! - it.value!!) * 10_000 <= PORTION_TOLERANCE_BP * it.value }.toLong()
+                add(Kpi("D11.PORTION", Dimension.D11, "پرس‌های نمونه در محدوده‌ی ±${Fa.percent(PORTION_TOLERANCE_BP)} رسپی", bp(within, portions.size.toLong()), KpiUnit.PERCENT,
+                    KpiTarget.higher(9_000, 6_000), KpiQuality.OK, "وزن نمونه‌ی پرس در برابر رسپی", within, portions.size.toLong()))
+            } else add(unknown("D11.PORTION", Dimension.D11, "پرس‌های نمونه در محدوده‌ی رسپی", KpiUnit.PERCENT, "وزن نمونه‌ی پرس",
+                "در این دوره کمتر از ${Fa.number(MIN_PORTIONS.toLong())} پرس وزن شده؛ هفته‌ای چند پرس را وزن و ثبت کنید."))
+
+            // D14: fridge and freezer temperatures.
+            val temps = recordsIn(FieldRecord.Kind.TEMPERATURE)
+            if (recs(FieldRecord.Kind.TEMPERATURE).isEmpty()) {
+                add(unknown("D14.TEMP_DAYS", Dimension.D14, "روزهای دارای ثبت دما", KpiUnit.PERCENT, "دمای یخچال و فریزر",
+                    "دمای یخچال و فریزر ثبت نمی‌شود؛ روزی یک بار در «ثبت‌های روزانه» ثبت کنید."))
+            } else {
+                val first = maxOf(from.epochDay, recs(FieldRecord.Kind.TEMPERATURE).minOf { it.date.epochDay })
+                val expected = (to.epochDay - first + 1).coerceAtLeast(1)
+                val withReading = temps.map { it.date }.distinct().size.toLong()
+                add(Kpi("D14.TEMP_DAYS", Dimension.D14, "روزهای دارای ثبت دما", bp(withReading, expected), KpiUnit.PERCENT, KpiTarget.higher(10_000, 7_000), KpiQuality.OK,
+                    "ثبت‌های دما از نخستین ثبت", withReading, expected))
+                add(Kpi("D14.TEMP_BAD", Dimension.D14, "ثبت‌های دمای خارج از محدوده", temps.count { it.unsafe }.toLong(), KpiUnit.COUNT, KpiTarget.lower(0, 3), KpiQuality.OK,
+                    "یخچال ۱- تا ۵ درجه، فریزر ۱۸- درجه یا سردتر", temps.count { it.unsafe }.toLong(), temps.size.toLong()))
+            }
+
+            // D15: breakdowns.
+            add(if (recs(FieldRecord.Kind.BREAKDOWN).isEmpty()) unknown("D15.BREAKDOWNS", Dimension.D15, "خرابی تجهیزات", KpiUnit.COUNT, "خرابی‌ها",
+                    "خرابی و تعمیر تجهیزات ثبت نمی‌شود؛ هر خرابی را در «ثبت‌های روزانه» ثبت کنید.")
+                else recordsIn(FieldRecord.Kind.BREAKDOWN).let { b ->
+                    Kpi("D15.BREAKDOWNS", Dimension.D15, "خرابی تجهیزات در دوره", b.size.toLong(), KpiUnit.COUNT, KpiTarget.lower(0, 4), KpiQuality.OK, "خرابی‌های ثبت‌شده",
+                        note = "هزینه‌ی تعمیر ${Fa.rial(b.sumOf { it.value ?: 0 })} ریال")
+                })
+
+            // D16: permits — the latest record of each one.
+            val permits = latestPermits()
+            add(if (permits.isEmpty()) unknown("D16.PERMITS", Dimension.D16, "مجوزهای منقضی یا رو به پایان", KpiUnit.COUNT, "مجوزها",
+                    "پروانه‌ی کسب و مجوزها ثبت نشده‌اند؛ هر کدام را با تاریخ اعتبارش ثبت کنید.")
+                else permits.count { it.endDate!!.epochDay - to.epochDay <= PERMIT_WARN_DAYS }.toLong().let { n ->
+                    Kpi("D16.PERMITS", Dimension.D16, "مجوزهای منقضی یا رو به پایان (${Fa.number(PERMIT_WARN_DAYS)} روز)", n, KpiUnit.COUNT, KpiTarget.lower(0, 2), KpiQuality.OK,
+                        "مجوزهای ثبت‌شده", n, permits.size.toLong())
+                })
+
+            // D18 / D19: backups (ADR-0025) and their weekly verification, from the audit trail.
+            val backups = core.backupHistory()
+            add(backups.daysSince(backups.lastTaken)?.let { d ->
+                Kpi("D18.BACKUP", Dimension.D18, "روز از آخرین پشتیبان", d, KpiUnit.DAYS, KpiTarget.lower(1, 7), KpiQuality.OK, "رویدادهای پشتیبان در دفتر ممیزی")
+            } ?: unknown("D18.BACKUP", Dimension.D18, "روز از آخرین پشتیبان", KpiUnit.DAYS, "رویدادهای پشتیبان",
+                "پشتیبانی از این دفاتر گرفته نشده؛ «پشتیبان خودکار شبانه» را روشن کنید."))
+            add(backups.daysSince(backups.lastVerified)?.let { d ->
+                Kpi("D19.RESTORE", Dimension.D19, "روز از آخرین آزمایش بازیابی پشتیبان", d, KpiUnit.DAYS, KpiTarget.lower(8, 45), KpiQuality.OK,
+                    "باز کردن فایل پشتیبان و بررسی کامل زنجیره‌ی ممیزی")
+            } ?: unknown("D19.RESTORE", Dimension.D19, "روز از آخرین آزمایش بازیابی پشتیبان", KpiUnit.DAYS, "آزمایش بازیابی",
+                "هنوز هیچ پشتیبانی آزمایش نشده؛ پشتیبان خودکار هر هفته یکی را باز و بررسی می‌کند."))
+
+            // D17: actions past their due date.
+            val actions = store.actions(branch).filter { it.status != AssessmentAction.Status.FALSE_ALARM }
+            if (actions.isNotEmpty()) {
+                val late = actions.count { it.late(to) }.toLong()
+                add(Kpi("D17.ACTIONS", Dimension.D17, "اقدام‌های گذشته از مهلت", late, KpiUnit.COUNT, KpiTarget.lower(0, 3), KpiQuality.OK, "اقدام‌های ثبت‌شده برای عارضه‌ها",
+                    late, actions.count { it.status == AssessmentAction.Status.OPEN }.toLong()))
+            }
+        }
+
+        fun latestPermits() = recs(FieldRecord.Kind.PERMIT).groupBy { it.subject }.values.map { l -> l.maxWith(compareBy({ it.date.epochDay }, { it.endDate?.epochDay ?: 0 })) }
+
+        /** Findings from the facts recorded by hand. */
+        fun recordFindings(): List<Finding> = buildList {
+            // The latest reading of each fridge and freezer, if it is unsafe and recent.
+            recs(FieldRecord.Kind.TEMPERATURE).filter { it.date <= to }.groupBy { it.subject }.values.map { it.last() }
+                .filter { it.unsafe && to.epochDay - it.date.epochDay <= 1 }.forEach { t ->
+                    add(Finding("TEMPERATURE:${t.subject}", Finding.Severity.CRITICAL, Dimension.D14, "دمای «${t.subject}» ${celsius(t.value!!)} است",
+                        listOf("ثبت ${Fa.date(t.date)} به دست ${t.by}" + (if (t.note.isNotBlank()) ": ${t.note}" else "")), null, null,
+                        listOf("در باز مانده", "خرابی کمپرسور یا ترموستات", "پر بودن بیش از اندازه"),
+                        "مواد را به جای سرد دیگری ببرید، دستگاه را بررسی کنید و دوباره دما را ثبت کنید. مواد مشکوک را مصرف نکنید.", Finding.Confidence.HIGH))
+                }
+            latestPermits().forEach { p ->
+                val left = p.endDate!!.epochDay - to.epochDay
+                if (left < 0) add(Finding("PERMIT:${p.subject}", Finding.Severity.CRITICAL, Dimension.D16, "«${p.subject}» از ${Fa.date(p.endDate)} منقضی است",
+                    listOf("آخرین ثبت: ${Fa.date(p.date)}"), null, null, emptyList(), "برای تمدید اقدام کنید و مجوز تازه را ثبت کنید.", Finding.Confidence.HIGH))
+                else if (left <= PERMIT_URGENT_DAYS) add(Finding("PERMIT:${p.subject}", Finding.Severity.HIGH, Dimension.D16,
+                    "«${p.subject}» ${Fa.number(left)} روز دیگر منقضی می‌شود", listOf("اعتبار تا ${Fa.date(p.endDate)}"), null, null, emptyList(),
+                    "تمدید را از همین هفته شروع کنید.", Finding.Confidence.HIGH))
+            }
+            recordsIn(FieldRecord.Kind.BREAKDOWN).groupBy { it.subject }.filter { it.value.size >= 2 }.forEach { (equipment, list) ->
+                val cost = list.sumOf { it.value ?: 0 }
+                add(Finding("BREAKDOWN:$equipment", Finding.Severity.MEDIUM, Dimension.D15, "«$equipment» ${Fa.number(list.size.toLong())} بار در این دوره خراب شد",
+                    list.map { "${Fa.date(it.date)}" + (it.value?.let { v -> " · ${Fa.rial(v)} ریال" } ?: "") + (if (it.note.isNotBlank()) " · ${it.note}" else "") },
+                    cost, cost, listOf("تعمیر ناقص", "فرسودگی", "استفاده‌ی نادرست"),
+                    "هزینه‌ی تعمیرهای پی‌درپی را با خرید دستگاه تازه یا قرارداد سرویس دوره‌ای مقایسه کنید.", Finding.Confidence.MEDIUM))
+            }
+            recordsIn(FieldRecord.Kind.PORTION).takeIf { it.size >= MIN_PORTIONS }?.let { l ->
+                val over = Ratio.mulDivSigned(l.sumOf { it.value2!! - it.value!! }, 10_000, l.sumOf { it.value!! })
+                if (over >= PORTION_TOLERANCE_BP) add(Finding("PORTIONS_HEAVY", Finding.Severity.MEDIUM, Dimension.D11, "پرس‌ها به‌طور میانگین ${Fa.percent(over)} سنگین‌تر از رسپی‌اند",
+                    l.sortedByDescending { (it.value2!! - it.value!!) * 10_000 / it.value }.take(3).map { "«${it.subject}»: رسپی ${Fa.number(it.value!!)} گرم، وزن‌شده ${Fa.number(it.value2!!)} گرم" },
+                    null, null, listOf("نبود ترازو یا پیمانه در خط پخت", "رسپی به‌روز نیست"), "ترازو یا پیمانه در خط پخت بگذارید و رسپی را با آشپزها مرور کنید.", Finding.Confidence.MEDIUM))
+            }
+            recordsIn(FieldRecord.Kind.FEEDBACK).takeIf { it.size >= MIN_FEEDBACK }?.let { l ->
+                val unhappy = l.filter { it.value!! <= 2 }
+                if (unhappy.size * 10_000L >= COMPLAINT_BP * l.size) add(Finding("COMPLAINTS", Finding.Severity.MEDIUM, Dimension.D08,
+                    "${Fa.number(unhappy.size.toLong())} نظر ناراضی از ${Fa.number(l.size.toLong())}", unhappy.filter { it.note.isNotBlank() }.takeLast(3).map { "${Fa.date(it.date)}: ${it.note}" },
+                    null, null, emptyList(), "شکایت‌های تکراری را با سرآشپز و سالن مرور کنید و با مشتریان ناراضی تماس بگیرید.", Finding.Confidence.MEDIUM))
+            }
+            val backups = core.backupHistory()
+            if (backups.lastFailure != null) add(Finding("BACKUP_UNREADABLE", Finding.Severity.CRITICAL, Dimension.D19, "آخرین آزمایش بازیابی پشتیبان ناموفق بود",
+                listOf(backups.lastFailure), null, null, listOf("فایل ناقص یا خراب در پوشه‌ی مقصد", "رمز پشتیبان عوض شده"),
+                "همین حالا یک پشتیبان دستی بگیرید و پوشه‌ی پشتیبان خودکار را بررسی کنید.", Finding.Confidence.HIGH))
+            val age = backups.daysSince(backups.lastTaken)
+            if ((age == null || age > BACKUP_LATE_DAYS) && salesByDay.values.any { l -> l.any { it.status == SaleStatus.POSTED } }) add(Finding("BACKUP_OLD", Finding.Severity.HIGH, Dimension.D18,
+                age?.let { "${Fa.number(it)} روز است پشتیبان گرفته نشده" } ?: "از این دفاتر هیچ پشتیبانی نیست",
+                listOf("با گم شدن یا خرابی گوشی، همه‌ی ثبت‌های پس از آخرین پشتیبان از دست می‌رود."), null, null, emptyList(),
+                "«پشتیبان خودکار شبانه» را در «من ← پشتیبان» روی پوشه‌ای بیرون از این گوشی روشن کنید.", Finding.Confidence.HIGH))
+            store.actions(branch).filter { it.late(to) }.takeIf { it.isNotEmpty() }?.let { late ->
+                add(Finding("ACTIONS_LATE", Finding.Severity.LOW, Dimension.D17, "${Fa.number(late.size.toLong())} اقدام از مهلتش گذشته",
+                    late.take(5).map { "${it.title}: ${it.owner} · مهلت ${Fa.date(it.due)}" }, null, null, emptyList(), "وضعیت این اقدام‌ها را روشن کنید یا مهلت تازه بگذارید.", Finding.Confidence.HIGH))
+            }
         }
 
         /** What is late, by kind, for D17. */
@@ -506,7 +865,9 @@ class Assessments internal constructor(private val core: SabouCore) {
             if (pnl.openShortages > 0) add(QualityPart("کسری‌های تعیین‌تکلیف‌شده", 0, "${Fa.number(pnl.openShortages.toLong())} کسری باز؛ بهای غذا قطعی نیست"))
         }
 
-        fun findings(kpis: List<Kpi>): List<Finding> = buildList {
+        fun findings(kpis: List<Kpi>): List<Finding> = baseFindings(kpis) + recordFindings()
+
+        fun baseFindings(kpis: List<Kpi>): List<Finding> = buildList {
             fun kpi(id: String) = kpis.firstOrNull { it.id == id }
 
             kpi("D01.TRIAL")?.takeIf { (it.value ?: 0) != 0L }?.let {
@@ -648,7 +1009,19 @@ class Assessments internal constructor(private val core: SabouCore) {
 
     companion object {
         /** Bumped whenever an indicator, target or rule changes meaning (shown on every report). */
-        const val RULES_VERSION = 1
+        const val RULES_VERSION = 2
+        const val SETTINGS_KEY = "assessment.settings"
+
+        /** Every indicator whose target the owner may set, with the direction that is better. */
+        val DIRECTIONS: Map<String, KpiTarget.Better> = (
+            listOf("D02.MARGIN", "D02.GROSS", "D04.CASH", "D09.ONTIME", "D09.FULL", "D11.RECIPES", "D14.HEALTH", "D18.DAYS", "D18.COSTED", "D20.GROWTH", "D20.YOY",
+                "D07.LIFT", "D08.RATING", "D11.PORTION", "D14.TEMP_DAYS")
+                .associateWith { KpiTarget.Better.HIGHER } +
+            listOf("D01.TRIAL", "D01.OPEN", "D01.BANK", "D03.FOOD", "D03.PRIME", "D03.WASTE", "D03.VARIANCE", "D04.OVERDUE", "D04.DSO", "D06.DOGS", "D06.OVER",
+                "D09.PRICES", "D09.MATCH", "D10.SHORT", "D10.COUNTS", "D10.EXPIRED", "D13.LABOR", "D16.TAX", "D16.CONTRACTS", "D17.BACKLOG", "D18.FORECAST",
+                "D19.CUSTOMER", "D19.SUPPLIER", "D08.COMPLAINTS", "D14.TEMP_BAD", "D15.BREAKDOWNS", "D16.PERMITS", "D17.ACTIONS", "D18.BACKUP", "D19.RESTORE").associateWith { KpiTarget.Better.LOWER })
+
+        fun better(id: String): KpiTarget.Better = DIRECTIONS[id] ?: throw DomainException(DomainError.InvalidInput("target", id))
         /** No overall score below half of the weight measured: the card says «داده‌ی کافی نیست» instead. */
         const val MIN_COVERAGE_BP = 5_000L
         const val DEFAULT_FOOD_COST_BP = 3_200L
@@ -657,14 +1030,35 @@ class Assessments internal constructor(private val core: SabouCore) {
         const val PRICE_RISE_BP = 1_000L
         const val UNEXPLAINED_BP = 100L
         const val CONCENTRATION_BP = 3_000L
+        const val FALSE_ALARM_DAYS = 30L
+        const val ACTION_DAYS = 90L
+        const val MIN_FEEDBACK = 5
+        const val MIN_PORTIONS = 3
+        const val PORTION_TOLERANCE_BP = 500L
+        const val COMPLAINT_BP = 2_000L
+        const val PERMIT_WARN_DAYS = 30L
+        const val PERMIT_URGENT_DAYS = 14L
+        const val BACKUP_LATE_DAYS = 7L
+
+        /** The indicator by which an action on a finding is measured. */
+        val FINDING_KPI = mapOf(
+            "BOOKS_OFF_BALANCE" to "D01.TRIAL", "OPEN_SALES" to "D01.OPEN", "PROFIT_DROP" to "D02.MARGIN", "FOOD_COST" to "D03.FOOD",
+            "UNEXPLAINED_USAGE" to "D03.VARIANCE", "CASH_SHORT" to "D04.CASH", "RECEIVABLES_LATE" to "D04.OVERDUE", "MENU" to "D06.DOGS",
+            "PRICE_RISES" to "D09.PRICES", "SHORTAGES" to "D10.SHORT", "EXPIRED_STOCK" to "D10.EXPIRED", "PORTIONS_HEAVY" to "D11.PORTION",
+            "HEALTH_CARDS" to "D14.HEALTH", "BACKLOG" to "D17.BACKLOG", "ACTIONS_LATE" to "D17.ACTIONS", "CUSTOMER_CONCENTRATION" to "D19.CUSTOMER",
+            "COMPLAINTS" to "D08.COMPLAINTS", "BACKUP_OLD" to "D18.BACKUP", "BACKUP_UNREADABLE" to "D19.RESTORE",
+        )
+
+        fun celsius(tenths: Long): String = (if (tenths < 0) "−" else "") + Fa.number(kotlin.math.abs(tenths) / 10) +
+            (if (kotlin.math.abs(tenths) % 10 != 0L) "٫" + Fa.number(kotlin.math.abs(tenths) % 10) else "") + " درجه"
 
         /** What the app does not record; each dimension says what would measure it. */
         val NOT_RECORDED = listOf(
-            Dimension.D07 to "منبع آشنایی مشتری و کمپین‌ها ثبت نمی‌شود؛ بدون آن بازده تبلیغات سنجیده نمی‌شود.",
-            Dimension.D08 to "شکایت و نظر مشتریان ثبت نمی‌شود؛ بدون آن تجربه‌ی مشتری سنجیده نمی‌شود.",
+            Dimension.D07 to "کمپین‌ها ثبت نمی‌شوند؛ هر کمپین را با تاریخ و هزینه‌اش در «ثبت‌های روزانه» ثبت کنید.",
+            Dimension.D08 to "نظر مشتریان ثبت نمی‌شود؛ امتیاز ۱ تا ۵ هر نظر را در «ثبت‌های روزانه» ثبت کنید.",
             Dimension.D12 to "زمان آماده‌سازی و تحویل سفارش از صندوق وارد نمی‌شود؛ بدون آن سرعت سرویس سنجیده نمی‌شود.",
-            Dimension.D14 to "دمای یخچال و فریزر و چک‌لیست بهداشت ثبت نمی‌شود؛ ایمنی غذا فقط با کارت بهداشت و تاریخ انقضا سنجیده شد.",
-            Dimension.D15 to "خرابی و تعمیر تجهیزات ثبت نمی‌شود؛ بدون آن وضعیت تجهیزات سنجیده نمی‌شود.",
+            Dimension.D14 to "دمای یخچال و فریزر ثبت نمی‌شود؛ روزی یک بار در «ثبت‌های روزانه» ثبت کنید.",
+            Dimension.D15 to "خرابی و تعمیر تجهیزات ثبت نمی‌شود؛ هر خرابی را در «ثبت‌های روزانه» ثبت کنید.",
         )
 
         fun channelName(c: ir.sabou.sales.SalesChannel?) = ReportTables.channelName(c)
@@ -711,6 +1105,7 @@ class Assessments internal constructor(private val core: SabouCore) {
                 KpiUnit.WEEKS -> Fa.number(v) + " هفته"
                 KpiUnit.COUNT -> Fa.number(v)
                 KpiUnit.RIAL_PER_HOUR -> Fa.rial(v) + " ریال در ساعت"
+                KpiUnit.RATING -> Fa.number(v / 100) + (if (v % 100 != 0L) "٫" + Fa.number((v % 100) / 10) else "") + " از ۵"
             }
         } ?: if (k.quality == KpiQuality.NOT_APPLICABLE) "ندارد" else "نامعلوم"
 
