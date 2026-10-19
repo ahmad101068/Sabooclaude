@@ -175,6 +175,7 @@ object OperationsScreens {
             if (session.can(Permission.INVENTORY_TRANSFER)) item { NavRow(R.drawable.ic_transfer, "انتقال", "بین انبارها و شعب", onClick = { nav.go(Route.StockTransfer) }) }
             if (session.can(Permission.INVENTORY_VIEW)) item { NavRow(R.drawable.ic_transfer, "درخواست کالا", "آشپزخانه یا شعبه درخواست می‌دهد، انبار ارسال می‌کند", onClick = { nav.go(Route.StockRequests) }) }
             if (session.can(Permission.INVENTORY_TRANSFER)) item { NavRow(R.drawable.ic_transfer, "انتقال بین شعب", "کالای در راه؛ تحویل گرفتن با مقدار رسیده", onClick = { nav.go(Route.StockTransits) }) }
+            if (session.can(Permission.INVENTORY_COUNT)) item { NavRow(R.drawable.ic_calendar, "ثبت‌های روزانه", "دمای یخچال و فریزر، خرابی دستگاه، وزن نمونه‌ی پرس", onClick = { nav.go(Route.FieldRecords) }) }
             if (session.can(Permission.INVENTORY_WASTE)) item { NavRow(R.drawable.ic_waste, "ضایعات", "ثبت با دلیل؛ چند کالا یا یک غذا", onClick = { nav.go(Route.Waste) }) }
             if (session.can(Permission.INVENTORY_VIEW)) item { NavRow(R.drawable.ic_count, "اسناد انبار", "ضایعات، انتقال، تولید و موجودی اول دوره؛ برگشت سند اشتباه", onClick = { nav.go(Route.StockDocuments) }) }
             if (kitchen) item { SectionTitle("آشپزخانه") }
