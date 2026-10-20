@@ -101,6 +101,31 @@ class TenantIsolationTest {
         assertEquals(1, coreB.journals.all().size)
     }
 
+    /**
+     * Audit 2026-10: a refused command rolls its transaction back; on PostgreSQL the audit position must not be
+     * taken from an identity (not rolled back), or the next event leaves a gap the chain check reads as tampering.
+     */
+    @Test fun aRefusedCommandLeavesNoGapInTheAuditChain() {
+        org.junit.Assume.assumeTrue("PostgreSQL only", DevDatabases.onPostgres)
+        val (core, _) = core(tenant("e"))
+        core.bootstrap("رستوران ه", "مالک", "owner", "123456".toCharArray())
+        journal(core, 1_000)
+        // Refused late, after the invoice's own audit event was written: paying more than the cash box holds.
+        val branch = Scope.Branch(core.overview.branches().single().id)
+        val kitchen = core.overview.locations(branch).single().id
+        val cash = core.overview.treasury().single().account.id
+        val item = core.inventory.createItem(ir.sabou.inventory.CreateItem(id(), "برنج", ir.sabou.inventory.StockUnit.KILOGRAM, ir.sabou.kernel.Quantity.units(1))).resultId
+        val supplier = core.purchasing.registerSupplier(ir.sabou.purchasing.RegisterSupplier(id(), "غله", "021")).resultId
+        repeat(3) {
+            val refused = runCatching { core.purchasing.postInvoice(ir.sabou.purchasing.PostPurchaseInvoice(id(), branch, supplier, "R$it", kitchen, day, day,
+                listOf(ir.sabou.purchasing.InvoiceLine(item, ir.sabou.kernel.Quantity.units(1), Money.of(5_000_000))),
+                payNow = ir.sabou.purchasing.ImmediatePayment(cash, Money.of(5_000_000)))) }.exceptionOrNull()
+            assertTrue((refused as? ir.sabou.kernel.DomainException)?.error?.code?.startsWith("INSUFFICIENT_FUNDS") == true, refused.toString())
+        }
+        journal(core, 2_000)
+        assertEquals(StartupVerdict.Healthy, core.verifyAuditFull())
+    }
+
     @Test fun postedDocumentsAreImmutableInTheDatabase() {
         org.junit.Assume.assumeTrue("PostgreSQL only", DevDatabases.onPostgres)
         val (core, db) = core(tenant("c"))

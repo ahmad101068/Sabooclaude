@@ -760,14 +760,15 @@ class PayrollOperations(
         val yearEnd = JalaliCalendar.date(year, 12, JalaliCalendar.monthLength(year, 12))
         val yearDays = yearEnd.epochDay - yearStart.epochDay + 1
         val leaving = e.endDate != null && e.endDate >= from && e.endDate <= to
-        val dayRate = Money.of(monthly.rial / 30)
+        // N days of wages = monthly × N ÷ 30 in one exact step (a truncated day rate times 60 lost up to 59 Rial).
+        fun daysOfWage(days: Long): Long = Ratio.mulDiv(monthly.rial, days, 30)
         fun paidThisYear(code: String) = scopesOf(e).flatMap { payroll.runs(it) }.any { r ->
             r.status == RunStatus.APPROVED && JalaliCalendar.yearOf(r.to) == year && r.payslips.any { p -> p.employeeId == e.id && p.lines.any { it.code == code } }
         }
         val eidiMonth = JalaliCalendar.of(to).month == options.eidiMonth
         if (options.eidiEnabled && (eidiMonth || leaving) && !paidThisYear("EIDI:$year")) {
             // Days of salary for a full year (capped), for the days worked this year.
-            val full = Money.of(Math.multiplyExact(dayRate.rial, options.eidiDays.toLong())).let { if (options.eidiCap.rial > 0) minOf(it, options.eidiCap) else it }
+            val full = Money.of(daysOfWage(options.eidiDays.toLong())).let { if (options.eidiCap.rial > 0) minOf(it, options.eidiCap) else it }
             val worked = e.employedDays(yearStart, if (leaving) e.endDate!! else yearEnd).toLong()
             val eidi = Money.of(Ratio.mulDiv(full.rial, worked, yearDays))
             val exempt = minOf(eidi, Money.of(Ratio.mulDiv(options.eidiTaxExempt.rial, worked, yearDays)))
@@ -782,7 +783,7 @@ class PayrollOperations(
                 leaving && start != null -> if (options.sanavatYearly) e.employedDays(yearStart, e.endDate!!).toLong() else e.endDate!!.epochDay - start.epochDay + 1
                 else -> 0L
             }
-            if (sanavatDays > 0) add(PayLine(if (leaving) "SANAVAT:EXIT" else "SANAVAT:$year", "سنوات", Money.of(Ratio.mulDiv(Math.multiplyExact(dayRate.rial, options.sanavatDays.toLong()), sanavatDays, 365)),
+            if (sanavatDays > 0) add(PayLine(if (leaving) "SANAVAT:EXIT" else "SANAVAT:$year", "سنوات", Money.of(Ratio.mulDiv(daysOfWage(options.sanavatDays.toLong()), sanavatDays, 365)),
                 PayLine.Kind.EARNING, insurable = false, taxable = false))
         }
         if (leaving && options.leavePayoutOnExit && store != null) {

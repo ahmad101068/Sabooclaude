@@ -185,6 +185,23 @@ class SyncTest {
         assertTrue(p.hubDb.query("SELECT detail FROM audit_events WHERE action = 'LOGIN_SUCCESS'").any { it.str("detail") == "owner@phone-2" })
     }
 
+    /** ADR-0062 on two phones: records, actions and scorecard settings made on the second phone are the same on both. */
+    @Test fun scorecardRecordsAndSettingsFromTheSecondPhoneAreOnBoth() {
+        val p = Pair2()
+        p.replica.identity.login("owner", "123456".toCharArray())
+        val branch = Scope.Branch(p.replica.overview.branches().single().id)
+        p.replica.assessments.record(RecordField(id(), branch, FieldRecord.Kind.TEMPERATURE, day, "یخچال", 40, 0))
+        p.replica.assessments.openAction(OpenAssessmentAction(id(), branch, "FOOD_COST", "D03.FOOD", "بهای غذا", "رسپی‌ها بازبینی شود", "مدیر", day.plusDays(7), 0, day))
+        p.replica.assessments.setSettings(SetAssessmentSettings(id(), mapOf("D03.WASTE" to listOf(200L, 500L)), emptyMap(), mapOf("ONLINE" to 2_000L)))
+        p.hub.identity.login("owner", "123456".toCharArray())
+        assertEquals(p.hub.assessments.records(branch, FieldRecord.Kind.TEMPERATURE), p.replica.assessments.records(branch, FieldRecord.Kind.TEMPERATURE))
+        assertEquals(1, p.replica.assessments.actions(branch).size)
+        assertEquals(p.hub.assessments.settings(), p.replica.assessments.settings())
+        p.replicate()                                                                   // the main phone's own sign-in, too
+        assertEquals(dump(p.hubDb), dump(p.replicaDb))
+        assertEquals(StartupVerdict.Healthy, p.replica.verifyAuditFull())
+    }
+
     @Test fun aRetriedCommandRunsOnceAndAnswersWithItsFirstResult() {
         val p = Pair2()
         p.replica.identity.login("owner", "123456".toCharArray())
