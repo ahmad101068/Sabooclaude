@@ -27,7 +27,12 @@ class SqlIdempotencyStore(private val db: SqlDatabase) : IdempotencyStore {
     )
 }
 
-/** Audit rows are immutable (trigger). Positions are contiguous because AUTOINCREMENT rolls back with the transaction. */
+/**
+ * Audit rows are immutable (trigger). Positions must be contiguous (the chain check reads a gap as a removed event),
+ * so each is the last position + 1, taken inside the writing transaction (writes are serialized: one writer on a
+ * phone, an advisory lock per tenant on PostgreSQL, ADR-0058). Not the table's counter: a PostgreSQL identity is
+ * not rolled back with a refused command and left gaps (audit 2026-10, ADR-0063).
+ */
 class SqlAuditStore(private val db: SqlDatabase) : AuditStore {
     private fun read(r: SqlRow) = AuditEvent(
         r.str("epoch"), r.long("sequence"), r.str("previous_hash"), r.str("hash"), r.long("occurred_at"), r.str("actor_id"),
@@ -37,12 +42,15 @@ class SqlAuditStore(private val db: SqlDatabase) : AuditStore {
 
     override fun head(): AuditEvent? = db.query("SELECT * FROM audit_events ORDER BY position DESC LIMIT 1").firstOrNull()?.let(::read)
 
-    override fun append(event: AuditEvent) = db.execute(
-        "INSERT INTO audit_events (epoch, sequence, previous_hash, hash, occurred_at, actor_id, actor_name, module, action, entity_type, entity_id, scope, command_id, detail) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        event.epoch, event.sequence, event.previousHash, event.hash, event.occurredAtEpochMillis, event.actorId, event.actorName,
-        event.module.name, event.action, event.entityType, event.entityId, event.scope, event.commandId, event.detail,
-    )
+    override fun append(event: AuditEvent) {
+        val position = db.query("SELECT COALESCE(MAX(position), 0) AS p FROM audit_events").single().long("p") + 1
+        db.execute(
+            "INSERT INTO audit_events (position, epoch, sequence, previous_hash, hash, occurred_at, actor_id, actor_name, module, action, entity_type, entity_id, scope, command_id, detail) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            position, event.epoch, event.sequence, event.previousHash, event.hash, event.occurredAtEpochMillis, event.actorId, event.actorName,
+            event.module.name, event.action, event.entityType, event.entityId, event.scope, event.commandId, event.detail,
+        )
+    }
 
     override fun page(afterPosition: Long, limit: Int): List<AuditEvent> =
         db.query("SELECT * FROM audit_events WHERE position > ? ORDER BY position LIMIT ?", afterPosition, limit).map(::read)
