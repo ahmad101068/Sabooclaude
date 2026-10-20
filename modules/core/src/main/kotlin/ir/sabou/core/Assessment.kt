@@ -301,7 +301,7 @@ class Assessments internal constructor(private val core: SabouCore) {
             }
             FieldRecord.Kind.PORTION -> {
                 need(subject.isNotEmpty(), "subject", "بنویسید چه چیزی وزن شد.")
-                need((cmd.value ?: 0) > 0 && (cmd.value2 ?: 0) > 0, "value", "وزن رسپی و وزن واقعی را به گرم بنویسید.")
+                need((cmd.value ?: 0) in 1..MAX_PORTION_GRAMS && (cmd.value2 ?: 0) in 1..MAX_PORTION_GRAMS, "value", "وزن رسپی و وزن واقعی را به گرم بنویسید (حداکثر ۱۰ کیلو).")
             }
             FieldRecord.Kind.PERMIT -> {
                 need(subject.isNotEmpty(), "subject", "نام مجوز را بنویسید.")
@@ -1106,6 +1106,7 @@ class Assessments internal constructor(private val core: SabouCore) {
         const val PERMIT_URGENT_DAYS = 14L
         const val BACKUP_LATE_DAYS = 7L
         const val CHANNEL_COST_BP = 2_000L
+        const val MAX_PORTION_GRAMS = 10_000L
 
         /** The indicator by which an action on a finding is measured. */
         val FINDING_KPI = mapOf(

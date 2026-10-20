@@ -136,6 +136,14 @@ class PersonnelPayTest {
         assertEquals(emptyList(), run(7).payslips.single().lines.filter { it.code.startsWith("EIDI") })
     }
 
+    /** Audit 2026-10: N days of wages is monthly × N ÷ 30 in one step, not a truncated day rate × N. */
+    @Test fun eidiOfASalaryNotDivisibleByThirtyIsExact() {
+        start(PayrollSettings(eidiEnabled = true))
+        core.payroll.registerEmployee(RegisterEmployee(id(), branch, "رضا", "0012345679", Money.of(100_000_001), JalaliCalendar.date(1402, 7, 10)))
+        val eidi = run(12).payslips.single().lines.filter { it.code.startsWith("EIDI") }.sumOf { it.amount.rial }
+        assertEquals(200_000_002, eidi)                                                  // 60 ÷ 30 × 100,000,001; truncating first gave 199,999,980
+    }
+
     @Test fun leavingPaysEidiSeveranceAndUnusedLeave() {
         start(PayrollSettings(eidiEnabled = true, sanavatEnabled = true))
         val ali = hire(JalaliCalendar.date(1404, 7, 1))
