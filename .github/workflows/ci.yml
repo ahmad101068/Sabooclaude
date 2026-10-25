@@ -195,6 +195,8 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Run instrumented tests (SQLCipher, Keystore, backup/restore, drafts, every page)
+        # Its own limit, under the job's: a hang still leaves time to publish what happened.
+        timeout-minutes: 45
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
