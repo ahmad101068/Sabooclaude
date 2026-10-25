@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -453,6 +454,8 @@ object MeScreens {
         var from by rememberSaveable { mutableStateOf(session.today) }
         var renaming by rememberSaveable { mutableStateOf<GlobalId?>(null) }
         var newName by rememberSaveable { mutableStateOf("") }
+        var categorizing by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+        var newCategory by rememberSaveable { mutableStateOf("") }
         var deleting by remember { mutableStateOf<ir.sabou.inventory.MenuItem?>(null) }
         val rows = ir.sabou.app.ui.rememberRows<RecipeRow>({ listOf(it.item, it.qty, it.yieldText) }, { RecipeRow(it[0] as GlobalId?, it[1] as Quantity?, it[2] as String) }) { listOf(RecipeRow(null, null)) }
         val action = rememberAction()
@@ -466,6 +469,7 @@ object MeScreens {
                         SCard {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(m.name, style = SabouType.bodyStrong, color = if (m.isActive) Sabou.colors.ink else Sabou.colors.muted, modifier = Modifier.weight(1f))
+                                if (m.category.isNotBlank()) Chip(m.category, ChipKind.PRIMARY)
                                 if (!m.isActive) Chip("خارج از منو", ChipKind.NEUTRAL)
                             }
                             d.prices[m.id]?.let { p ->
@@ -494,8 +498,20 @@ object MeScreens {
                                             enabled = newName.trim().length >= 2 && !action.busy)
                                         SecondaryButton("انصراف", { renaming = null })
                                     }
-                                } else Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                } else if (categorizing == m.id) {
+                                    val known = menu.map { it.category }.filter { it.isNotBlank() }.distinct()
+                                    TextInput("دسته (مثلاً کباب، نوشیدنی؛ خالی = بدون دسته)", newCategory, { newCategory = it.take(40) })
+                                    if (known.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        known.take(6).forEach { k -> MenuLink(k) { newCategory = k } }
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        SecondaryButton("ذخیره دسته", { action.run({ inventory.setMenuItemCategory(ir.sabou.inventory.SetMenuItemCategory(GlobalId.new(), m.id, newCategory)) }) { categorizing = null } },
+                                            enabled = !action.busy)
+                                        SecondaryButton("انصراف", { categorizing = null })
+                                    }
+                                } else Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                                     MenuLink("ویرایش نام") { renaming = m.id; newName = m.name }
+                                    MenuLink("دسته") { categorizing = m.id; newCategory = m.category }
                                     if (m.isActive) MenuLink(if (v == null) "تعریف رسپی" else "ویرایش رسپی") {
                                         // A recipe is never changed in place: its lines prefill a new version from today.
                                         menuItem = m.id; from = session.today; rows.clear()

@@ -45,8 +45,11 @@ jobs:
           for attempt in 1 2 3; do git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs && break; sleep $((attempt * 5)); done || true
       - name: Upload test reports
         if: always()
+        # Diagnostics only: a full artifact quota must not fail a green build.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: domain-test-reports
           path: "modules/**/build/reports/tests/**"
           if-no-files-found: ignore
@@ -85,8 +88,11 @@ jobs:
         run: ./gradlew --no-daemon --stacktrace domainBuild
       - name: Upload test reports
         if: always()
+        # Diagnostics only: a full artifact quota must not fail a green build.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: postgres-test-reports
           path: "modules/**/build/reports/tests/**"
           if-no-files-found: ignore
@@ -126,8 +132,11 @@ jobs:
           # Diagnostics only: retried, and never the reason a build fails (reports are also uploaded as artifacts).
           for attempt in 1 2 3; do git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs && break; sleep $((attempt * 5)); done || true
       - name: Upload debug APK
+        # Diagnostics only: a full artifact quota must not fail a green build.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: sabou-debug-apk
           path: app/build/outputs/apk/debug/*.apk
       # The real app, signed with the owner's private key. Runs only when the four signing secrets exist
@@ -147,21 +156,28 @@ jobs:
           rm -f "$SABOU_KEYSTORE_PATH"
       - name: Upload release APK
         if: env.SABOU_KEYSTORE_B64 != ''
+        # Diagnostics only: a full artifact quota must not fail a green build.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: sabou-release-apk
           path: app/build/outputs/apk/release/*.apk
       - name: Upload lint report
         if: always()
+        # Diagnostics only: a full artifact quota must not fail a green build.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: lint-report
           path: app/build/reports/lint-results-debug.*
           if-no-files-found: ignore
 
   device:
     name: Android device tests (emulator)
-    runs-on: ubuntu-latest
+    # Pinned: since ubuntu-latest moved to Ubuntu 26 (Oct 2026) the emulator times out booting there.
+    runs-on: ubuntu-24.04
     needs: android
     timeout-minutes: 60
     steps:
@@ -178,19 +194,33 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: Free disk space for the emulator
+        # The runner disk arrives about 90% full; the emulator's system image and data need several GB.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/node_modules /opt/ghc /usr/local/.ghcup /usr/share/swift /usr/local/share/powershell /opt/hostedtoolcache/CodeQL || true
+          df -h / | tail -1
+      - name: Emulator libraries
+        # Runner images from October 2026 no longer ship libpulse; without it the emulator cannot start at all.
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libpulse0
+          ldd "$ANDROID_HOME"/emulator/qemu/linux-x86_64/qemu-system-x86_64 | grep "not found" || echo "emulator libraries complete"
       - name: Run instrumented tests (SQLCipher, Keystore, backup/restore, drafts, every page)
+        # Its own limit, under the job's: a hang still leaves time to publish what happened.
+        timeout-minutes: 45
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
           arch: x86_64
           target: google_apis
           disable-animations: true
+          emulator-boot-timeout: 900
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           # While the verification metadata is missing (being regenerated), record it here too: this run
           # also resolves the device-test toolchain that the other jobs never download.
           script: bash scripts/ci_device_tests.sh
       - name: Publish device test results to ci-device branch
         if: always()
+        timeout-minutes: 8
         shell: bash
         run: |
           mkdir -p /tmp/dev && cd /tmp/dev
@@ -199,6 +229,21 @@ jobs:
           find "$GITHUB_WORKSPACE"/app/build/outputs/androidTest-results -name '*.xml' -exec cp {} . \; 2>/dev/null || true
           find "$GITHUB_WORKSPACE"/app/build/outputs/androidTest-results -name 'logcat*' -exec cp {} . \; 2>/dev/null || true
           echo "run ${{ github.run_id }} sha ${{ github.sha }} status ${{ job.status }}" > README.txt
+          # Why an emulator did not boot, when it did not: the host, KVM, disk, the emulator and its log.
+          {
+            uname -a; cat /etc/os-release | head -3; nproc; free -m; df -h / | tail -1
+            ls -l /dev/kvm 2>&1; groups
+            timeout 20 "$ANDROID_HOME"/emulator/emulator -version 2>&1 | head -2
+            timeout 20 "$ANDROID_HOME"/emulator/emulator -accel-check 2>&1 | tail -3
+            ls "$ANDROID_HOME"/system-images/*/* 2>&1; ls ~/.android/avd 2>&1
+            timeout 10 "$ANDROID_HOME"/platform-tools/adb devices 2>&1
+            timeout 10 "$ANDROID_HOME"/platform-tools/adb shell getprop sys.boot_completed 2>&1
+            timeout 20 "$ANDROID_HOME"/platform-tools/adb logcat -d 2>&1 | tail -150
+            if ! timeout 10 "$ANDROID_HOME"/platform-tools/adb devices | grep -q emulator; then
+              echo "--- emulator started again for 90 s, its own output ---"
+              timeout 90 "$ANDROID_HOME"/emulator/emulator -avd test -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -verbose 2>&1 | tail -120
+            fi
+          } > host.txt 2>&1 || true
           git init -q && git checkout -q -b ci-device
           git config user.name ci && git config user.email ci@users.noreply.github.com
           git add -A && git commit -qm "device tests ${{ github.run_id }}"
@@ -206,8 +251,11 @@ jobs:
           for attempt in 1 2 3; do git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-device && break; sleep $((attempt * 5)); done || true
       - name: Upload device test reports
         if: always()
+        # Diagnostics only: a full artifact quota must not fail a green build.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: device-test-reports
           path: app/build/reports/androidTests/**
           if-no-files-found: ignore

@@ -137,6 +137,8 @@ sealed interface Route : java.io.Serializable {
     data object SalesForecast : Route
     /** Why profit changed between two periods (ADR-0053). */
     data object ProfitBridge : Route
+    /** The manager's dashboard (ADR-0064). */
+    data object ManagementDashboard : Route
     /** The 360° scorecard and diagnosis (ADR-0061). */
     data object Assessment : Route
     /** Temperatures, feedback, campaigns, breakdowns, portion weights, permits (ADR-0062). */

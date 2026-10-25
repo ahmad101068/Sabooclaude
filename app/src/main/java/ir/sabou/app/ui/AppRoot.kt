@@ -586,6 +586,7 @@ private fun Pages(route: Route, nav: Nav) {
         Route.DailyPnl -> ReportsScreens.DailyPnl(nav)
         Route.SalesForecast -> ReportsScreens.SalesForecast(nav)
         Route.ProfitBridge -> ReportsScreens.ProfitBridge(nav)
+        Route.ManagementDashboard -> ir.sabou.app.ui.screens.ManagementDashboardScreen.Show(nav)
         Route.Assessment -> ir.sabou.app.ui.screens.AssessmentScreen.Show(nav)
         Route.FieldRecords -> ir.sabou.app.ui.screens.FieldRecordScreens.Records(nav)
         Route.WhatIf -> ir.sabou.app.ui.screens.WhatIfScreen.Show(nav)

@@ -115,6 +115,28 @@ object ReportTables {
         return listOf(card, kpis, findings, requests)
     }
 
+    /** ADR-0064: the dashboard as tables — headline figures, the week, categories, payments, months, best sellers, latest sales. */
+    fun managementDashboard(d: ManagementDashboard): List<ReportTable> {
+        val sub = "${d.branchName} · ${period(d.from, d.to)} در برابر ${period(d.baseFrom, d.baseTo)}"
+        fun change(k: DashKpi) = k.changeBp?.let { (if (it > 0) "+" else if (it < 0) "−" else "") + Fa.percent(kotlin.math.abs(it)) } ?: "—"
+        fun value(k: DashKpi) = Assessments.valueText(Kpi("", Dimension.D02, k.title, k.value, k.unit, null, if (k.value == null) KpiQuality.UNKNOWN else KpiQuality.OK, ""))
+        return listOf(
+            ReportTable("داشبورد مدیریتی", sub, listOf("شاخص", "مقدار", "تغییر", "توضیح"), d.kpis.map { listOf(Cell.of(it.title), Cell.of(value(it)), Cell.of(change(it)), Cell.of(it.note)) }),
+            ReportTable("فروش هفت روز اخیر", sub, listOf("روز", "فروش", "همان روز هفته‌ی قبل"),
+                d.week.map { listOf(Cell.of(Fa.dayTitle(it.date)), Cell.Amount(it.sales), Cell.Amount(it.previous)) }, notes = listOf(RIAL)),
+            ReportTable("فروش به تفکیک دسته", sub, listOf("دسته", "فروش", "سهم"), d.categories.map { listOf(Cell.of(it.name), Cell.Amount(it.amount), Cell.of(Fa.percent(it.shareBp))) }, notes = listOf(RIAL)),
+            ReportTable("روش پرداخت", sub, listOf("روش", "مبلغ", "سهم"), d.payments.map { listOf(Cell.of(it.name), Cell.Amount(it.amount), Cell.of(Fa.percent(it.shareBp))) }, notes = listOf(RIAL)),
+            ReportTable("هزینه و سود ماهانه", d.branchName, listOf("ماه", "هزینه‌ی پرسنل", "بهای مواد", "سود عملیاتی"),
+                d.months.map { listOf(Cell.of("${Fa.monthNames[it.month - 1]} ${Fa.number(it.year.toLong())}"), Cell.Amount(it.labor), Cell.Amount(it.materials), Cell.Amount(it.profit)) }, notes = listOf(RIAL)),
+            ReportTable("اقلام پرفروش", sub, listOf("غذا", "تعداد", "فروش", "حاشیه‌ی سود", "طبقه‌ی منو"),
+                d.topItems.map { listOf(Cell.of(it.name), Cell.of(Fa.quantity(it.portions)), Cell.Amount(it.sales), Cell.of(it.marginBp?.let(Fa::percent) ?: "—"),
+                    Cell.of(it.menuClass?.let(Assessments::menuClassName) ?: "—")) }, notes = listOf(RIAL)),
+            ReportTable("آخرین فروش‌ها", d.branchName, listOf("روز", "اقلام", "مبلغ", "وضعیت"),
+                d.latestSales.map { listOf(Cell.of(Fa.date(it.date)), Cell.of(it.dishes), Cell.Amount(it.payable), Cell.of(if (it.status == ir.sabou.sales.SaleStatus.REVERSED) "برگشت خورده" else "ثبت شده")) },
+                notes = listOf(RIAL)),
+        )
+    }
+
     fun exposure(f: Finding): String = when {
         f.exposureHigh == null -> "—"
         f.exposureLow == null -> "تا ${Fa.rial(f.exposureHigh)}"

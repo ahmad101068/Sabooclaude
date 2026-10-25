@@ -67,6 +67,7 @@ object ReportsScreens {
             Page {
                 if (session.can(Permission.LEDGER_VIEW)) {
                     SectionTitle("مالی")
+                    NavRow(R.drawable.ic_finance, "داشبورد مدیریتی", "فروش، سود، بهای مواد، روش پرداخت، اقلام پرفروش و اقدامات پیشنهادی در یک نگاه", onClick = { nav.go(Route.ManagementDashboard) })
                     NavRow(R.drawable.ic_finance, "کارنامه و عارضه‌یابی", "۲۰ بُعد با امتیاز و کیفیت داده؛ عارضه‌ها با شواهد، مبلغ در معرض و اقدام پیشنهادی", onClick = { nav.go(Route.Assessment) })
                     NavRow(R.drawable.ic_finance, "اگر قیمت‌ها تغییر کند", "گرانی یک کالا یا تغییر قیمت منو: اثر بر سود و قیمت لازم هر غذا", onClick = { nav.go(Route.WhatIf) })
                     NavRow(R.drawable.ic_calendar, "پیش‌بینی فروش", "دو هفته‌ی آینده، با روزهای تعطیل و مناسبت", onClick = { nav.go(Route.SalesForecast) })

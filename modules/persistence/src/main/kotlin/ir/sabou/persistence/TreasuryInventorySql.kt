@@ -262,12 +262,12 @@ class SqlStockStore(db: SqlDatabase) : SqlTable(db), StockStore {
 }
 
 class SqlRecipeStore(db: SqlDatabase) : SqlTable(db), RecipeStore {
-    override fun menuItem(id: GlobalId) = doc("SELECT doc FROM menu_items WHERE id = ?", id.value)?.let { MenuItem(Codec.id(it.str("id")), it.str("name"), it.bool("active")) }
-    override fun menuItems(): List<MenuItem> = docs("SELECT doc FROM menu_items ORDER BY rowid").map { MenuItem(Codec.id(it.str("id")), it.str("name"), it.bool("active")) }
+    override fun menuItem(id: GlobalId) = doc("SELECT doc FROM menu_items WHERE id = ?", id.value)?.let { MenuItem(Codec.id(it.str("id")), it.str("name"), it.bool("active"), it.strOr("category", "")) }
+    override fun menuItems(): List<MenuItem> = docs("SELECT doc FROM menu_items ORDER BY rowid").map { MenuItem(Codec.id(it.str("id")), it.str("name"), it.bool("active"), it.strOr("category", "")) }
     override fun deleteMenuItem(id: GlobalId) { db.execute("DELETE FROM menu_items WHERE id = ?", id.value) }
     override fun saveMenuItem(item: MenuItem) = upsert(
         "menu_items", "id",
-        mapOf("id" to item.id.value, "doc" to Json.encode(mapOf("id" to item.id.value, "name" to item.name, "active" to item.isActive))),
+        mapOf("id" to item.id.value, "doc" to Json.encode(mapOf("id" to item.id.value, "name" to item.name, "active" to item.isActive, "category" to item.category))),
     )
 
     override fun versions(menuItemId: GlobalId) = docs("SELECT doc FROM recipe_versions WHERE menu_item_id = ? ORDER BY rowid", menuItemId.value).map { d ->
