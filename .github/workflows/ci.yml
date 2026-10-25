@@ -45,8 +45,11 @@ jobs:
           for attempt in 1 2 3; do git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs && break; sleep $((attempt * 5)); done || true
       - name: Upload test reports
         if: always()
+        # Diagnostics only: a full artifact quota must not fail a green build.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: domain-test-reports
           path: "modules/**/build/reports/tests/**"
           if-no-files-found: ignore
@@ -85,8 +88,11 @@ jobs:
         run: ./gradlew --no-daemon --stacktrace domainBuild
       - name: Upload test reports
         if: always()
+        # Diagnostics only: a full artifact quota must not fail a green build.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: postgres-test-reports
           path: "modules/**/build/reports/tests/**"
           if-no-files-found: ignore
@@ -126,8 +132,11 @@ jobs:
           # Diagnostics only: retried, and never the reason a build fails (reports are also uploaded as artifacts).
           for attempt in 1 2 3; do git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs && break; sleep $((attempt * 5)); done || true
       - name: Upload debug APK
+        # Diagnostics only: a full artifact quota must not fail a green build.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: sabou-debug-apk
           path: app/build/outputs/apk/debug/*.apk
       # The real app, signed with the owner's private key. Runs only when the four signing secrets exist
@@ -147,14 +156,20 @@ jobs:
           rm -f "$SABOU_KEYSTORE_PATH"
       - name: Upload release APK
         if: env.SABOU_KEYSTORE_B64 != ''
+        # Diagnostics only: a full artifact quota must not fail a green build.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: sabou-release-apk
           path: app/build/outputs/apk/release/*.apk
       - name: Upload lint report
         if: always()
+        # Diagnostics only: a full artifact quota must not fail a green build.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: lint-report
           path: app/build/reports/lint-results-debug.*
           if-no-files-found: ignore
@@ -206,8 +221,11 @@ jobs:
           for attempt in 1 2 3; do git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-device && break; sleep $((attempt * 5)); done || true
       - name: Upload device test reports
         if: always()
+        # Diagnostics only: a full artifact quota must not fail a green build.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: device-test-reports
           path: app/build/reports/androidTests/**
           if-no-files-found: ignore
