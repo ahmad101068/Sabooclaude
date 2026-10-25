@@ -71,7 +71,7 @@ object ManagementDashboardScreen {
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                             val columns = when { maxWidth >= 900.dp -> 3; maxWidth >= 600.dp -> 2; else -> 1 }
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Grid(if (columns == 1) 2 else 3 * (columns - 1), d.kpis.map { k -> cell { KpiCard(k) { kpiTarget(k)?.let(nav::go) } } })
+                                Grid(if (columns == 1) 2 else 3 * (columns - 1), d.kpis.map { k -> cell { KpiCard(k) { kpiTarget(k)?.let { nav.go(it) } } } })
                                 Grid(columns, listOf(
                                     cell { WeekCard(d) },
                                     cell { CategoryCard(d) },
