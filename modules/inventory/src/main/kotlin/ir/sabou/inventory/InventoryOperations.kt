@@ -228,6 +228,15 @@ data class UpdateMenuItem(override val commandId: GlobalId, val menuItemId: Glob
     override fun fingerprint() = "$menuItemId|$name|$isActive"
 }
 
+/** Puts a menu item in a category for the reports (empty: none). */
+@NoDocument
+data class SetMenuItemCategory(override val commandId: GlobalId, val menuItemId: GlobalId, val category: String) : Command {
+    override val requiredPermission = Permission.RECIPE_MANAGE
+    override val scope: Scope = Scope.Organization
+    override val sharedCatalog = true
+    override fun fingerprint() = "$menuItemId|$category"
+}
+
 /** Deletes a menu item that was never used (no recipe, price or sale); a used one can only be deactivated. */
 @NoDocument
 data class DeleteMenuItem(override val commandId: GlobalId, val menuItemId: GlobalId) : Command {
@@ -645,6 +654,15 @@ class InventoryOperations(
         ensure(recipes.menuItems().none { it.id != item.id && it.name == name }) { DomainError.InvalidInput("name", "آیتمی با این نام در منو هست.") }
         recipes.saveMenuItem(item.copy(name = name, isActive = cmd.isActive))
         ctx.audit(AuditDraft("MENU_ITEM_UPDATE", "MENU_ITEM", item.id.value, "name=$name;active=${cmd.isActive}"))
+        item.id
+    }
+
+    fun setMenuItemCategory(c: SetMenuItemCategory): CommandOutcome = bus.execute(ModuleId.INVENTORY, c) { cmd, ctx ->
+        val item = recipes.menuItem(cmd.menuItemId) ?: throw DomainException(DomainError.NotFound("MENU_ITEM"))
+        val category = cmd.category.trim()
+        ensure(category.length <= 40) { DomainError.InvalidInput("category", "نام دسته حداکثر ۴۰ حرف است.") }
+        recipes.saveMenuItem(item.copy(category = category))
+        ctx.audit(AuditDraft("MENU_ITEM_CATEGORY", "MENU_ITEM", item.id.value, category))
         item.id
     }
 

@@ -112,7 +112,8 @@ data class RecipeVersion(
     val lines: List<RecipeLine>,
 )
 
-data class MenuItem(val id: GlobalId, val name: String, val isActive: Boolean = true)
+/** [category]: the owner's grouping for reports («کباب»، «نوشیدنی»…); empty when none was chosen. */
+data class MenuItem(val id: GlobalId, val name: String, val isActive: Boolean = true, val category: String = "")
 
 /**
  * Immutable version of how a prepared item is made: [lines] produce [outputQuantity] of the item.

@@ -198,6 +198,7 @@ class SabouCore private constructor(
     val cashFlows = CashFlows(this)
     val assessments = Assessments(this)
     val whatIfs = WhatIfs(this)
+    val managementDashboards = ManagementDashboards(this)
     val books = Books(this)
     /** Two phones, one set of books (ADR-0042). */
     val sync = Sync(this)

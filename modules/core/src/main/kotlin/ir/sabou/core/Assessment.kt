@@ -273,6 +273,10 @@ class Assessments internal constructor(private val core: SabouCore) {
 
     // ------------------------------------------------------------ field records (ADR-0062)
 
+    /** Live records of [kind] in a period, for the dashboard (its caller checks the permission). */
+    internal fun recordsIn(branch: Scope.Branch, kind: FieldRecord.Kind, from: BusinessDate, to: BusinessDate): List<FieldRecord> =
+        store.records(branch, kind).filter { !it.voided && it.date in from..to }
+
     fun records(branch: Scope.Branch, kind: FieldRecord.Kind): List<FieldRecord> {
         val a = core.session.currentActor() ?: throw DomainException(DomainError.AuthenticationRequired)
         if (!a.role.allows(kind.permission) && !a.role.allows(Permission.LEDGER_VIEW)) throw DomainException(DomainError.PermissionDenied(kind.permission.name))
