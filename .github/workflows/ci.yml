@@ -210,6 +210,7 @@ jobs:
           script: bash scripts/ci_device_tests.sh
       - name: Publish device test results to ci-device branch
         if: always()
+        timeout-minutes: 5
         shell: bash
         run: |
           mkdir -p /tmp/dev && cd /tmp/dev
@@ -222,12 +223,12 @@ jobs:
           {
             uname -a; cat /etc/os-release | head -3; nproc; free -m; df -h / | tail -1
             ls -l /dev/kvm 2>&1; groups
-            "$ANDROID_HOME"/emulator/emulator -version 2>&1 | head -2
-            "$ANDROID_HOME"/emulator/emulator -accel-check 2>&1 | tail -3
+            timeout 20 "$ANDROID_HOME"/emulator/emulator -version 2>&1 | head -2
+            timeout 20 "$ANDROID_HOME"/emulator/emulator -accel-check 2>&1 | tail -3
             ls "$ANDROID_HOME"/system-images/*/* 2>&1; ls ~/.android/avd 2>&1
-            "$ANDROID_HOME"/platform-tools/adb devices 2>&1
-            "$ANDROID_HOME"/platform-tools/adb shell getprop sys.boot_completed 2>&1
-            "$ANDROID_HOME"/platform-tools/adb logcat -d 2>&1 | tail -150
+            timeout 10 "$ANDROID_HOME"/platform-tools/adb devices 2>&1
+            timeout 10 "$ANDROID_HOME"/platform-tools/adb shell getprop sys.boot_completed 2>&1
+            timeout 20 "$ANDROID_HOME"/platform-tools/adb logcat -d 2>&1 | tail -150
           } > host.txt 2>&1 || true
           git init -q && git checkout -q -b ci-device
           git config user.name ci && git config user.email ci@users.noreply.github.com
