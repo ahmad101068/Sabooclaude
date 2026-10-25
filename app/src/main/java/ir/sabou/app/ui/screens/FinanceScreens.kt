@@ -196,7 +196,7 @@ object FinanceScreens {
                 if (session.can(Permission.LEDGER_VIEW) || session.can(Permission.ACCOUNT_MANAGE)) item { NavRow(R.drawable.ic_settings, "سرفصل حساب‌ها", "حساب‌های استاندارد و حساب‌های خودتان", onClick = { nav.go(Route.Chart) }) }
                 if (session.can(Permission.JOURNAL_MANUAL_POST)) item { NavRow(R.drawable.ic_settings, "مانده‌های اول دوره", "بدهی به تأمین‌کنندگان و طلب از مشتریان پیش از برنامه", onClick = { nav.go(Route.OpeningBalances) }) }
                 if (session.can(Permission.PERIOD_CLOSE)) item { NavRow(R.drawable.ic_check, "بستن ماه", "چک‌لیست پایان دوره و قفل دوره", onClick = { nav.go(Route.MonthClose) }) }
-                if (session.can(Permission.TREASURY_VIEW) || session.can(Permission.CHEQUE_MANAGE)) item {
+                if (session.can(Permission.BANK_VIEW) || session.can(Permission.CHEQUE_MANAGE)) item {
                     NavRow(R.drawable.ic_payment, "چک‌ها", "دریافتی و پرداختی، سررسیدها، وصول و برگشت", tint = Sabou.colors.bank, tile = Sabou.colors.bankSoft, onClick = { nav.go(Route.Cheques) })
                 }
                 if (session.can(Permission.LEDGER_VIEW)) item { NavRow(R.drawable.ic_finance, "بودجه", "بودجه در برابر عملکرد", onClick = { nav.go(Route.BudgetReport) }) }

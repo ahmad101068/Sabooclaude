@@ -66,7 +66,7 @@ class MoadianClient(
     data class ServerKey(val id: String, val key: PublicKey)
 
     /** One invoice's receipt: the tax system's `uid` (ours) and `referenceNumber` (theirs), or why it was refused. */
-    data class Receipt(val uid: String, val referenceNumber: String?, val error: String?)
+    data class Receipt(val uid: String, val referenceNumber: String?, val error: String?, val answered: Boolean = true)
 
     /** One invoice's processing result. */
     data class Inquiry(val referenceNumber: String, val uid: String?, val status: String, val errors: List<String>, val warnings: List<String>) {
@@ -105,11 +105,13 @@ class MoadianClient(
         }
         val r = call("POST", "invoice", body = "[" + packets.joinToString(",") + "]") as? Map<*, *> ?: throw ApiException("send_result")
         val results = (r["result"] as? List<*>).orEmpty().map { it as Map<*, *> }
-        return invoices.mapIndexed { i, (uid, _) ->
-            val res = results.firstOrNull { it["uid"] == uid } ?: results.getOrNull(i)
-            Receipt(uid, res?.get("referenceNumber") as? String,
-                listOfNotNull(res?.get("errorCode")?.toString(), res?.get("errorDetail")?.toString()).joinToString(" ").ifBlank { null }
-                    ?: if (res?.get("referenceNumber") == null) "پاسخی برای این صورتحساب نیامد." else null)
+        // Matched by our uid only (SABOU-AUDIT-007): a result without it is never pinned on an invoice by its position.
+        return invoices.map { (uid, _) ->
+            val res = results.firstOrNull { it["uid"] == uid }
+                ?: return@map Receipt(uid, null, "پاسخی برای این صورتحساب نیامد؛ پیش از ارسال دوباره، وضعیت آن را در سامانه بررسی کنید.", answered = false)
+            Receipt(uid, res["referenceNumber"] as? String,
+                listOfNotNull(res["errorCode"]?.toString(), res["errorDetail"]?.toString()).joinToString(" ").ifBlank { null }
+                    ?: if (res["referenceNumber"] == null) "سامانه شماره‌ی پیگیری نداد." else null)
         }
     }
 

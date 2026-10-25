@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.inventory.Item
 import ir.sabou.inventory.InventoryOperations
 import ir.sabou.inventory.MovementKind
@@ -655,7 +656,7 @@ class Reports internal constructor(private val core: SabouCore) {
         fun perUnit(itemId: GlobalId): Long? = cache.getOrPut(itemId) {
             val balances = core.locations.all().filter { it.scope == branch }.map { core.stock.balance(itemId, it.id) }
             val qty = balances.sumOf { it.quantity.micros }
-            val value = balances.sumOf { it.value.rial }
+            val value = balances.sumOfExact { it.value.rial }
             if (qty > 0 && value > 0) Ratio.mulDiv(value, Quantity.SCALE, qty)
             else lastPurchase(itemId) ?: prepCost(itemId)
         }

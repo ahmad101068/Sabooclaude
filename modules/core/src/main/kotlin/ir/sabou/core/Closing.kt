@@ -86,7 +86,11 @@ class Closing internal constructor(private val core: SabouCore) {
         add("PENDING_COUNTS", pendingCounts > 0, CloseCheck.Severity.WARN, "انبارگردانی در انتظار تأیید", "${Fa.number(pendingCounts.toLong())} شمارش تأیید یا رد نشده است.", "شمارشی در انتظار نیست.")
         val locations = core.locations.all().filter { it.isActive }
         val shortages = core.inventoryGateway.openShortages(locations.map { it.id }.toSet()).count { it.date <= to }
-        add("SHORTAGES", shortages > 0, CloseCheck.Severity.WARN, "کسری مصرف باز", "${Fa.number(shortages.toLong())} کسری با خرید یا انبارگردانی بسته نشده است.", "کسری بازی نیست.")
+        // A blocker (audit SABOU-AUDIT-003): once the month is closed, a shortage settled later can no longer take its
+        // cost back into it, so the month's food cost would stay short for good.
+        add("SHORTAGES", shortages > 0, CloseCheck.Severity.BLOCK, "کسری مصرف باز",
+            "${Fa.number(shortages.toLong())} کسری با خرید یا انبارگردانی بسته نشده است؛ فاکتورهای خرید ماه را ثبت کنید یا انبارگردانی کنید، وگرنه بهای مواد این ماه کمتر از واقع می‌ماند.",
+            "کسری بازی نیست.")
         val stocked = locations.filter { loc -> core.stock.balances(loc.id).any { !it.quantity.isZero } }
         val counted = core.stockCounts.all().filter { it.status == ir.sabou.inventory.CountStatus.POSTED && it.date in from..to }.map { it.locationId }.toSet()
         val uncounted = stocked.filter { it.id !in counted }

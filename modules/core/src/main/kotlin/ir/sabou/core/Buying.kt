@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.inventory.Item
 import ir.sabou.inventory.PrepGraph
 import ir.sabou.inventory.RecipeBook
@@ -201,7 +202,7 @@ class Buying internal constructor(private val core: SabouCore) {
         val changes = ArrayList<PriceChange>()
         postedInOrder(a).forEach { inv ->
             inv.lines.filter { !it.quantity.isZero }.groupBy { it.itemId }.forEach { (itemId, lines) ->
-                val price = Ratio.mulDiv(lines.sumOf { it.value.rial }, Quantity.SCALE, lines.sumOf { it.quantity.micros })
+                val price = Ratio.mulDiv(lines.sumOfExact { it.value.rial }, Quantity.SCALE, lines.sumOf { it.quantity.micros })
                 val previous = last[itemId]
                 if (previous != null && inv.date >= from && inv.date <= to) {
                     val change = PriceChange(items[itemId] ?: return@forEach, names[inv.supplierId].orEmpty(), inv.id, inv.date, previous.date, previous.price, price, previous.supplier)

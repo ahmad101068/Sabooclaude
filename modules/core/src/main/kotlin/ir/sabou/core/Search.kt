@@ -55,7 +55,7 @@ class Search internal constructor(private val core: SabouCore) {
                 .forEach { out += SearchHit(SearchHit.Kind.PURCHASE_INVOICE, it.id, "فاکتور ${Fa.digits(it.supplierInvoiceNo)} · ${names[it.supplierId].orEmpty()}",
                     "${Fa.date(it.date)} · ${Fa.rial(it.total)} ریال" + if (it.status == InvoiceStatus.REVERSED) " · برگشت‌خورده" else "") }
         }
-        if (can(Permission.CHEQUE_MANAGE, Permission.TREASURY_VIEW)) core.cheques.all().filter { c ->
+        if (can(Permission.CHEQUE_MANAGE, Permission.BANK_VIEW)) core.cheques.all().filter { c ->
             visible(c.scope) && (compact(c.details.number) == compact(query) || (c.details.sayadId.isNotBlank() && compact(c.details.sayadId) == compact(query)) ||
                 has(c.details.counterparty) || (number != null && c.amount.rial == number))
         }.forEach { out += SearchHit(SearchHit.Kind.CHEQUE, it.id, "چک ${Fa.digits(it.details.number)} · ${it.details.counterparty}", "${Fa.date(it.dueDate)} · ${Fa.rial(it.amount)} ریال") }

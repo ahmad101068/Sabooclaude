@@ -1,5 +1,6 @@
 package ir.sabou.purchasing
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Money
@@ -141,7 +142,7 @@ object InvoiceMatching {
      * may bring less (or nothing) of an item without it being a difference; more than ordered still is.
      */
     fun compare(order: PurchaseOrder, lines: List<InvoiceLine>, received: Map<GlobalId, Long> = emptyMap(), partial: Boolean = false): List<Discrepancy> {
-        val invoiced = lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } to l.sumOf { it.value.rial } }
+        val invoiced = lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } to l.sumOfExact { it.value.rial } }
         val ordered = order.lines.groupBy { it.itemId }.mapValues { (item, l) -> maxOf(0L, l.sumOf { it.quantity.micros } - (received[item] ?: 0L)) to l.first().unitPrice.rial }
         val out = ArrayList<Discrepancy>()
         ordered.forEach { (item, o) ->

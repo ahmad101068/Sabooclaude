@@ -90,7 +90,7 @@ class AppContainer(private val context: Context) {
             // was moved away), so the interrupted reset completes instead of looking like a swap.
             val epoch = newEpoch ?: runCatching { IntegrityGuard(anchors, InMemoryAuditStore()).pendingEpoch() }.getOrNull()
             val db = openHelper(DB_NAME, keys.databasePassphrase()).also { helper = it }.writableDatabase
-            val core = SabouCore.open(AndroidSqlDatabase(db), anchors, Clock.SYSTEM, newDatabaseEpoch = epoch, deviceTime = deviceTime)
+            val core = SabouCore.open(AndroidSqlDatabase(db), anchors, Clock.SYSTEM, newDatabaseEpoch = epoch, deviceTime = deviceTime, datePolicy = SabouCore.restaurantDatePolicy())
             when (val verdict = runCatching { core.verifyStartup() }.getOrElse { StartupVerdict.RollbackDetected(it.message ?: "ANCHOR") }) {
                 StartupVerdict.Healthy -> AppState.Ready(core).also { verifyInBackgroundIfDue(core); twoPhones.attach(core) }
                 is StartupVerdict.RollbackDetected -> AppState.Recovery(verdict.detail, core)

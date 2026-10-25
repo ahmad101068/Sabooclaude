@@ -58,7 +58,7 @@ class Books internal constructor(private val core: SabouCore) {
 
     // ------------------------------------------------------------ Cheques
 
-    private fun rows(filter: (Cheque) -> Boolean): List<ChequeRow> = rows(actor(Permission.TREASURY_VIEW, Permission.CHEQUE_MANAGE), filter)
+    private fun rows(filter: (Cheque) -> Boolean): List<ChequeRow> = rows(actor(Permission.BANK_VIEW, Permission.CHEQUE_MANAGE), filter)
 
     private fun rows(a: Actor, filter: (Cheque) -> Boolean): List<ChequeRow> {
         val accounts = core.treasuryAccounts.all().associateBy { it.id }

@@ -51,6 +51,36 @@ class PersistenceTest {
         assertTrue(e.message!!.startsWith("DATABASE_NEWER_THAN_APP"))
     }
 
+    /** Audit SABOU-AUDIT-010: migration 2's backfill indexes the stock movements a version-1 database already holds. */
+    @Test fun migrationTwoIndexesExistingStockMovements() {
+        val db = memoryDb(); Schema.migrate(db, 1)
+        db.execute("INSERT INTO stock_movements(id, source_type, source_id, reversal_of, doc) VALUES ('m1', 'PURCHASE', 'p1', NULL, ?)",
+            """{"item":"i1","location":"l1","date":20000,"kind":"RECEIPT","qty":2000000,"value":500000}""")
+        db.execute("INSERT INTO stock_movements(id, source_type, source_id, reversal_of, doc) VALUES ('m2', 'SALE', 's1', NULL, ?)",
+            """{"item":"i1","location":"l1","date":20001,"kind":"ISSUE","qty":-500000,"value":-125000}""")
+        Schema.migrate(db)
+        val rows = db.query("SELECT movement_id, item_id, location_id, date, kind, qty, value FROM stock_movement_index ORDER BY date")
+            .map { listOf(it.str("movement_id"), it.str("item_id"), it.str("location_id"), it.long("date"), it.str("kind"), it.long("qty"), it.long("value")) }
+        assertEquals(listOf(listOf("m1", "i1", "l1", 20000L, "RECEIPT", 2_000_000L, 500_000L), listOf("m2", "i1", "l1", 20001L, "ISSUE", -500_000L, -125_000L)), rows)
+        assertEquals(Schema.latestVersion.toLong(), db.query("SELECT MAX(version) AS v FROM schema_version").single().long("v"))
+    }
+
+    /** Audit SABOU-AUDIT-010: migration 3 turns each earlier return's credit into an allocation on its own invoice. */
+    @Test fun migrationThreeAllocatesEarlierReturnCredits() {
+        val db = memoryDb(); Schema.migrate(db, 2)
+        db.execute("INSERT INTO suppliers(id, doc) VALUES ('s1', '{}')")
+        db.execute("INSERT INTO purchase_invoices(id, supplier_id, number, doc) VALUES ('inv', 's1', 'F1', ?)", """{"id":"inv","supplier":"s1","scope":"B:b1"}""")
+        db.execute("INSERT INTO purchase_returns(id, invoice_id, doc) VALUES ('r1', 'inv', ?)", """{"credit":300000,"date":20010}""")
+        db.execute("INSERT INTO purchase_returns(id, invoice_id, doc) VALUES ('r2', 'inv', ?)", """{"credit":0,"date":20011}""")
+        Schema.migrate(db)
+        val allocations = db.query("SELECT supplier_id, scope, invoice_id, doc FROM credit_allocations")
+        assertEquals(1, allocations.size)
+        val a = allocations.single()
+        assertEquals(listOf("s1", "B:b1", "inv"), listOf(a.str("supplier_id"), a.str("scope"), a.str("invoice_id")))
+        @Suppress("UNCHECKED_CAST") val doc = Json.decode(a.str("doc")) as Map<String, Any?>
+        assertEquals(300_000L, doc["amount"]); assertEquals("r1", doc["return"]); assertEquals(false, doc["released"])
+    }
+
     @Test fun postedRecordsAreImmutableAtTheDatabaseLevel() {
         val db = memoryDb(); Schema.migrate(db)
         db.execute("INSERT INTO accounts(code, doc) VALUES ('1101', '{}')")

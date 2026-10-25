@@ -145,7 +145,7 @@ class Alerts internal constructor(private val core: SabouCore) {
                             "${c.supplier}: ${Fa.rial(c.price)} ریال؛ قبلی ${Fa.rial(c.previousPrice)} از ${c.previousSupplier}"))
                     }
                 }
-                if (actor.role.allows(Permission.TREASURY_VIEW) || actor.role.allows(Permission.CHEQUE_MANAGE)) {
+                if (actor.role.allows(Permission.BANK_VIEW) || actor.role.allows(Permission.CHEQUE_MANAGE)) {
                     safe { core.books.chequesDue(today, CHEQUE_DAYS) }.forEach { r ->
                         val c = r.cheque
                         val overdue = c.dueDate < today

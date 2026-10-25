@@ -118,3 +118,9 @@ object Ratio {
         }
     }
 }
+
+/** The exact sum of Rial amounts: an overflow fails instead of wrapping to a wrong total (audit SABOU-AUDIT-012). */
+fun sumExact(values: Iterable<Long>): Long = values.fold(0L) { a, b -> Math.addExact(a, b) }
+
+/** [sumExact] of [selector] over the elements. */
+inline fun <T> Iterable<T>.sumOfExact(selector: (T) -> Long): Long = fold(0L) { a, e -> Math.addExact(a, selector(e)) }

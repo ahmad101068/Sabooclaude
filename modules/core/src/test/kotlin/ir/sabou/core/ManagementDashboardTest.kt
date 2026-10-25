@@ -71,13 +71,18 @@ class ManagementDashboardTest {
         sell(day, 10, 8, 14_000_000)                      // today: 40 m + 4 m, 14 m cash and 30 m card
         core.assessments.record(RecordField(id(), branch, FieldRecord.Kind.FEEDBACK, day, "", 5))
         core.assessments.record(RecordField(id(), branch, FieldRecord.Kind.FEEDBACK, day, "", 2))
+        // Two ratings are no measure yet (SABOU-AUDIT-005): the scorecard's minimum of five applies.
+        val few = core.managementDashboards.of(branch, day.plusDays(-6), day).kpis.single { it.title.startsWith("رضایت") }
+        assertNull(few.value)
+        assertTrue(few.note.contains("۲ نظر ثبت شده"), few.note)
+        listOf(4L, 5L, 1L, 3L).forEach { core.assessments.record(RecordField(id(), branch, FieldRecord.Kind.FEEDBACK, day, "", it)) }
 
         val d = core.managementDashboards.of(branch, day.plusDays(-6), day)
         fun kpi(prefix: String) = d.kpis.single { it.title.startsWith(prefix) }
         assertEquals(44_000_000, kpi("فروش").value)
         assertEquals(17_500, kpi("فروش").changeBp)                                         // 44 m against 16 m: +175 %
         assertEquals(true, kpi("فروش").good)
-        assertEquals(5_000, kpi("رضایت").value)                                           // one of two rated 4 or 5
+        assertEquals(5_000, kpi("رضایت").value)                                           // three of six rated 4 or 5
         assertNull(kpi("میانگین زمان").value)                                             // not recorded: not invented
         // The week: today 44 m, the same weekday a week earlier nothing; the day before 16 m, a week earlier 20 m.
         assertEquals(44_000_000, d.week.last().sales)
@@ -99,6 +104,30 @@ class ManagementDashboardTest {
         core.identity.createUser("cashier", "صندوقدار", Role.CASHIER, setOf(branch.branchId), "654321".toCharArray())
         core.identity.logout(); core.identity.login("cashier", "654321".toCharArray())
         assertTrue(assertFailsWith<DomainException> { core.managementDashboards.of(branch, day, day) }.error.code.startsWith("PERMISSION_DENIED"))
+    }
+
+    /** SABOU-AUDIT-004: today's sales are recorded at the end of the day; until then the headline is the last recorded day. */
+    @Test fun theHeadlineIsTheLastDayWithRecordedSales() {
+        core.bootstrap("شعبه ونک", "مالک", "owner", "123456".toCharArray())
+        val branch = Scope.Branch(core.overview.branches().single().id)
+        val kitchen = core.overview.locations(branch).single().id
+        val cash = core.overview.treasury().single().account.id
+        val drink = core.inventory.defineMenuItem(DefineMenuItem(id(), "دوغ")).resultId
+        val yogurt = core.inventory.createItem(CreateItem(id(), "ماست", StockUnit.KILOGRAM, Quantity.units(0))).resultId
+        core.inventory.publishRecipe(PublishRecipe(id(), drink, BusinessDate(19_000), listOf(RecipeLine(yogurt, Quantity.of(100_000)))))
+        fun sell(d: BusinessDate, amount: Long) {
+            val s = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, d, kitchen, listOf(SaleLineInput(drink, Quantity.units(1), rial(amount))),
+                rial(0), rial(0), rial(0), listOf(Settlement.Liquid(cash, rial(amount))))).resultId
+            core.salesOps.post(PostDailySale(id(), branch, s))
+        }
+        sell(day.plusDays(-2), 10_000_000)
+        sell(day.plusDays(-1), 12_000_000)
+        val headline = core.managementDashboards.of(branch, day.plusDays(-6), day).kpis.first()
+        assertEquals("فروش ${Fa.dayTitle(day.plusDays(-1))}", headline.title)
+        assertEquals(12_000_000, headline.value)
+        assertEquals(2_000, headline.changeBp)                                            // +20 % on the day before it
+        assertEquals(true, headline.good)
+        assertTrue(headline.note.startsWith("آخرین روز ثبت‌شده"))
     }
 
     @Test fun aCategoryIsCheckedAndKeptAcrossRenames() {

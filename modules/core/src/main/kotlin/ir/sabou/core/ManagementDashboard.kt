@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -7,6 +8,7 @@ import ir.sabou.kernel.JalaliCalendar
 import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Ratio
 import ir.sabou.kernel.Scope
+import ir.sabou.kernel.sumExact
 import ir.sabou.platform.Permission
 import ir.sabou.sales.SaleStatus
 import ir.sabou.sales.Settlement
@@ -57,24 +59,30 @@ class ManagementDashboards internal constructor(private val core: SabouCore) {
         val (baseFrom, baseTo) = core.profitBridges.previous(from, to)
         val pnl = core.reports.profitAndLoss(from, to, branch)
         val base = core.reports.profitAndLoss(baseFrom, baseTo, branch)
-        val day = core.reports.profitAndLoss(to, to, branch)
-        val dayBefore = core.reports.profitAndLoss(to.plusDays(-1), to.plusDays(-1), branch)
+        // Sales are recorded once a day, at its end (SABOU-AUDIT-004): the headline day is the latest day of the period
+        // that has recorded sales, so a day still in progress never shows as «zero, -100%».
+        val salesDay = pnl.byDay.filter { it.second.revenue > 0 }.maxOfOrNull { it.first } ?: to
+        val day = core.reports.profitAndLoss(salesDay, salesDay, branch)
+        val dayBefore = core.reports.profitAndLoss(salesDay.plusDays(-1), salesDay.plusDays(-1), branch)
         val assessment = core.assessments.of(branch, from, to)
 
         // ---- headline figures
-        fun satisfaction(f: BusinessDate, t: BusinessDate): Long? = core.assessments.recordsIn(branch, FieldRecord.Kind.FEEDBACK, f, t)
-            .takeIf { it.isNotEmpty() }?.let { l -> Ratio.mulDiv(l.count { (it.value ?: 0) >= 4 }.toLong(), 10_000, l.size.toLong()) }
+        // As the scorecard: below MIN_FEEDBACK ratings there is no measure (SABOU-AUDIT-005), one rating is not «100%».
+        fun ratings(f: BusinessDate, t: BusinessDate) = core.assessments.recordsIn(branch, FieldRecord.Kind.FEEDBACK, f, t)
+        fun satisfaction(f: BusinessDate, t: BusinessDate): Long? = ratings(f, t)
+            .takeIf { it.size >= Assessments.MIN_FEEDBACK }?.let { l -> Ratio.mulDiv(l.count { (it.value ?: 0) >= 4 }.toLong(), 10_000, l.size.toLong()) }
         val happy = satisfaction(from, to); val happyBefore = satisfaction(baseFrom, baseTo)
-        val alerts = runCatching { core.alerts.forUser(actor.userId, to).size.toLong() }.getOrNull()
+        // A failure to read the alerts is shown, never turned into «—» (SABOU-AUDIT-009).
+        val alerts = core.alerts.forUser(actor.userId, to).size.toLong()
         val kpis = listOf(
-            DashKpi("فروش ${Fa.dayTitle(to)}", day.ratios.sales, KpiUnit.RIAL, Ratio.changeBp(dayBefore.ratios.sales, day.ratios.sales), KpiTarget.Better.HIGHER,
-                "در برابر روز قبل"),
+            DashKpi("فروش ${Fa.dayTitle(salesDay)}", day.ratios.sales, KpiUnit.RIAL, Ratio.changeBp(dayBefore.ratios.sales, day.ratios.sales), KpiTarget.Better.HIGHER,
+                if (salesDay == to) "در برابر روز قبل" else "آخرین روز ثبت‌شده؛ در برابر روز قبلش"),
             DashKpi("سود ناخالص دوره", pnl.totals.grossProfit, KpiUnit.RIAL, Ratio.changeBp(base.totals.grossProfit, pnl.totals.grossProfit), KpiTarget.Better.HIGHER,
                 if (pnl.provisional) "کسری انبار باز هست؛ قطعی نیست" else "در برابر دوره‌ی قبل"),
             DashKpi("درصد بهای مواد", pnl.ratios.foodBp, KpiUnit.PERCENT,
                 pnl.ratios.foodBp?.let { now -> base.ratios.foodBp?.let { before -> now - before } }, KpiTarget.Better.LOWER, "تغییر به واحد درصد"),
             DashKpi("رضایت مشتری", happy, KpiUnit.PERCENT, happy?.let { h -> happyBefore?.let { h - it } }, KpiTarget.Better.HIGHER,
-                if (happy == null) "نظر مشتری ثبت نشده (ثبت‌های روزانه)" else "سهم امتیاز ۴ و ۵"),
+                if (happy == null) "دست‌کم ${Fa.number(Assessments.MIN_FEEDBACK.toLong())} نظر لازم است؛ ${Fa.number(ratings(from, to).size.toLong())} نظر ثبت شده (ثبت‌های روزانه)" else "سهم امتیاز ۴ و ۵"),
             DashKpi("میانگین زمان آماده‌سازی", null, KpiUnit.COUNT, null, KpiTarget.Better.LOWER, "از خروجی سپند وارد نمی‌شود"),
             DashKpi("هشدارهای باز", alerts, KpiUnit.COUNT, null, KpiTarget.Better.LOWER, if (assessment.critical.isNotEmpty()) "${Fa.number(assessment.critical.size.toLong())} بحرانی" else ""),
         )
@@ -88,8 +96,8 @@ class ManagementDashboards internal constructor(private val core: SabouCore) {
         // ---- sales by category (the owner's menu categories) and by way of payment
         val mix = runCatching { core.reports.productMix(branch, from, to) }.getOrNull()
         val categoryOf = core.recipes.menuItems().associate { it.id to it.category.ifBlank { "بدون دسته" } }
-        val byCategory = mix?.rows.orEmpty().groupBy { categoryOf[it.menuItemId] ?: "بدون دسته" }.mapValues { (_, r) -> r.sumOf { it.gross.rial } }
-        val categoryTotal = byCategory.values.sum()
+        val byCategory = mix?.rows.orEmpty().groupBy { categoryOf[it.menuItemId] ?: "بدون دسته" }.mapValues { (_, r) -> r.sumOfExact { it.gross.rial } }
+        val categoryTotal = sumExact(byCategory.values)
         val categories = byCategory.entries.sortedByDescending { it.value }.map { DashSlice(it.key, it.value, share(it.value, categoryTotal)) }
 
         val kinds = core.treasuryAccounts.all().associate { it.id to it.kind }
@@ -106,7 +114,7 @@ class ManagementDashboards internal constructor(private val core: SabouCore) {
             }
             paid.merge(name, s.amount.rial, Long::plus)
         }
-        val paidTotal = paid.values.sum()
+        val paidTotal = sumExact(paid.values)
         val payments = paid.entries.sortedByDescending { it.value }.map { DashSlice(it.key, it.value, share(it.value, paidTotal)) }
 
         // ---- six Jalali months: personnel, materials, operating profit
@@ -130,7 +138,10 @@ class ManagementDashboards internal constructor(private val core: SabouCore) {
         // ---- the latest sales recorded
         val names = core.recipes.menuItems().associate { it.id to it.name }
         val latest = core.sales.sales(branch, to.plusDays(-30), to).filter { it.status == SaleStatus.POSTED || it.status == SaleStatus.REVERSED }
-            .sortedWith(compareByDescending<ir.sabou.sales.DailySale> { it.date.epochDay }).take(TOP).map { s ->
+            // Newest day first; within a day, by document number (recording order), newest first (SABOU-AUDIT-009).
+            .let { list -> val nos = core.numbers.of(ir.sabou.platform.DocumentSeries.DAILY_SALE, list.map { it.id }); list.sortedWith(
+                compareByDescending<ir.sabou.sales.DailySale> { it.date.epochDay }.thenByDescending { nos[it.id]?.sequence ?: 0L }.thenByDescending { it.id.value }) }
+            .take(TOP).map { s ->
                 DashSale(s.date, s.lines.sortedByDescending { it.gross.rial }.take(2).joinToString("، ") { names[it.menuItemId].orEmpty() } +
                     if (s.lines.size > 2) " و ${Fa.number((s.lines.size - 2).toLong())} قلم دیگر" else "", s.payable.rial, s.status)
             }

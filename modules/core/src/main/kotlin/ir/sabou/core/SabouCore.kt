@@ -385,11 +385,18 @@ class SabouCore private constructor(
             policies: List<StatutoryPolicy> = emptyList(),
             newDatabaseEpoch: String? = null,
             deviceTime: ir.sabou.platform.DeviceTime = ir.sabou.platform.DeviceTime.PROCESS,
+            /** The document date rule (ADR-0065); the app passes [restaurantDatePolicy], tests leave it off. */
+            datePolicy: ir.sabou.ledger.DatePolicy? = null,
         ): SabouCore {
             check(db.query("PRAGMA foreign_keys").single().long("foreign_keys") == 1L) { "FOREIGN_KEYS_DISABLED" }
             Schema.migrate(db)
-            return SabouCore(db, anchors, clock, policies, newDatabaseEpoch, deviceTime)
+            return SabouCore(db, anchors, clock, policies, newDatabaseEpoch, deviceTime).also { it.ledger.datePolicy = datePolicy }
         }
+
+        /** The restaurant's rule: nothing dated after today (payroll and depreciation: this month's end), 45 days back without BACKDATE. */
+        fun restaurantDatePolicy(pastDays: Long = ir.sabou.ledger.DatePolicy.DEFAULT_PAST_DAYS) = ir.sabou.ledger.DatePolicy(
+            pastDays, setOf(ir.sabou.payroll.PayrollOperations.RUN, ir.sabou.assets.AssetOperations.DEPRECIATION),
+        )
 
         fun newEpoch(): String = java.util.UUID.randomUUID().toString()
 

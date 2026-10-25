@@ -13,7 +13,7 @@ permissions:
 jobs:
   release:
     name: Signed release APK
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       SABOU_KEYSTORE_B64: ${{ secrets.SABOU_KEYSTORE_B64 }}
