@@ -96,17 +96,22 @@ class Moadian internal constructor(private val core: SabouCore) {
         val ready = invoices().map { it.invoice }.filter { it.status == ir.sabou.sales.TaxInvoiceStatus.READY && (ids == null || it.id in ids) }
         if (ready.isEmpty()) return TaxSendReport(0, 0, 0, 0, emptyList())
         val receipts = client.send(ready.map { it.id.value to MoadianPayload.invoice(it) })
-        var sent = 0; var rejected = 0
+        var sent = 0; var rejected = 0; var waiting = 0
         val problems = mutableListOf<String>()
-        ready.zip(receipts).forEach { (inv, r) ->
-            if (r.referenceNumber != null) {
+        val byUid = receipts.associateBy { it.uid }
+        ready.forEach { inv ->
+            val r = byUid[inv.id.value]
+            if (r == null || !r.answered) {
+                // No answer is not a refusal: the invoice may have arrived. It stays ready, with the reason shown.
+                waiting++; problems += "${Fa.digits(inv.taxId)}: ${r?.error ?: "پاسخی نیامد."}"
+            } else if (r.referenceNumber != null) {
                 record(inv, ir.sabou.sales.TaxInvoiceStatus.SENT, r.referenceNumber, r.uid, emptyList(), now); sent++
             } else {
                 record(inv, ir.sabou.sales.TaxInvoiceStatus.REJECTED, null, r.uid, listOfNotNull(r.error), now); rejected++
                 problems += "${Fa.digits(inv.taxId)}: ${r.error.orEmpty()}"
             }
         }
-        return TaxSendReport(0, sent, rejected, 0, problems)
+        return TaxSendReport(0, sent, rejected, waiting, problems)
     }
 
     /** Asks for the result of every sent invoice and records the answers that are final. */

@@ -1,5 +1,6 @@
 package ir.sabou.payroll
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.NationalId
 import ir.sabou.kernel.JalaliCalendar
 import ir.sabou.kernel.JalaliDay
@@ -685,7 +686,7 @@ class PayrollOperations(
                 // One salary all month: the usual rule. Several: each for its days, over the month (or the 30-day basis when partial).
                 if (runs.size == 1) null else {
                     val divisor = if (partial) policy.prorationDays.toLong() else periodDays.toLong()
-                    Money.of(minOf(runs.maxOf { it.first.rial }, runs.sumOf { (s, d) -> Ratio.mulDiv(s.rial, d.toLong(), divisor) }))
+                    Money.of(minOf(runs.maxOf { it.first.rial }, runs.sumOfExact { (s, d) -> Ratio.mulDiv(s.rial, d.toLong(), divisor) }))
                 }
             } else {
                 // Daily and hourly pay: a day's wage for each day worked, an hour's for each hour worked (from attendance).

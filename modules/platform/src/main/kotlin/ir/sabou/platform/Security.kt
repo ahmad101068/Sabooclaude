@@ -43,6 +43,13 @@ enum class Permission {
     TIME_CLOCK,
     // Organization-wide data (non-branch documents)
     ORGANIZATION_DATA,
+    /** Post a document dated before the open window of the date policy (ADR-0065). */
+    BACKDATE,
+    /**
+     * See bank, card-terminal and cheque accounts and the cheques (ADR-0065, SABOU-AUDIT-008); without it, treasury
+     * viewing shows the cash boxes only (the cashier's).
+     */
+    BANK_VIEW,
 }
 
 enum class Role(val permissions: Set<Permission>) {
@@ -67,7 +74,7 @@ enum class Role(val permissions: Set<Permission>) {
             Permission.TREASURY_VIEW, Permission.TREASURY_RECEIPT, Permission.TREASURY_PAYMENT, Permission.TREASURY_TRANSFER,
             Permission.TREASURY_RECONCILE, Permission.TREASURY_REVERSE, Permission.CHEQUE_MANAGE, Permission.SALES_VIEW, Permission.RECEIVABLE_COLLECT,
             Permission.PURCHASE_VIEW, Permission.PURCHASE_PAY, Permission.PERSONNEL_VIEW, Permission.PAYROLL_CALCULATE,
-            Permission.PAYROLL_PAY, Permission.AUDIT_VIEW, Permission.ORGANIZATION_DATA,
+            Permission.PAYROLL_PAY, Permission.AUDIT_VIEW, Permission.ORGANIZATION_DATA, Permission.BACKDATE, Permission.BANK_VIEW,
         ),
     ),
     CASHIER(setOf(Permission.SALES_VIEW, Permission.SALES_RECORD, Permission.TREASURY_VIEW, Permission.TIME_CLOCK)),

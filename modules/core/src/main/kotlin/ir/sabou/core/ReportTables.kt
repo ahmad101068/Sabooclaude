@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.inventory.StockUnit
 import ir.sabou.kernel.BusinessDate
 
@@ -210,7 +211,7 @@ object ReportTables {
         "فروش به تفکیک کانال", "${m.branch} · ${period(m.from, m.to)}",
         listOf("کانال", "خالص فروش", "سهم", "تعداد فاکتور", "میانگین هر فاکتور"),
         m.channels.map { listOf(Cell.of(channelName(it.channel)), Cell.Amount(it.net.rial), Cell.Percent(it.shareBp), Cell.of(Fa.number(it.transactions.toLong())), amount(it.perTransaction?.rial)) },
-        footer = listOf(Cell.of("جمع"), Cell.Amount(m.channels.sumOf { it.net.rial }), Cell.Percent(if (m.channels.isEmpty()) 0 else 10_000),
+        footer = listOf(Cell.of("جمع"), Cell.Amount(m.channels.sumOfExact { it.net.rial }), Cell.Percent(if (m.channels.isEmpty()) 0 else 10_000),
             Cell.of(Fa.number(m.channels.sumOf { it.transactions }.toLong())), Cell.EMPTY),
         notes = listOf(RIAL, "خالص فروش: پس از تخفیف، پیش از سرویس و مالیات. کانال هر فروش هنگام ثبت انتخاب می‌شود یا از «نوع فروش» فاکتورهای صندوق می‌آید."),
     )
@@ -301,7 +302,7 @@ object ReportTables {
                 Cell.of("${l.account.value} ${accounts[l.account].orEmpty()}"), Cell.of(l.memo), Cell.Amount(l.debit.rial), Cell.Amount(l.credit.rial))
         } },
         footer = listOf(Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.of("جمع"),
-            Cell.Amount(entries.sumOf { e -> e.entry.lines.sumOf { it.debit.rial } }), Cell.Amount(entries.sumOf { e -> e.entry.lines.sumOf { it.credit.rial } })),
+            Cell.Amount(entries.sumOfExact { e -> e.entry.lines.sumOfExact { it.debit.rial } }), Cell.Amount(entries.sumOfExact { e -> e.entry.lines.sumOfExact { it.credit.rial } })),
         notes = listOf(RIAL),
     )
 
@@ -328,7 +329,7 @@ object ReportTables {
             listOf(Cell.of(item.name), Cell.of(item.shelf), Cell.of(unitName(item.unit)), Cell.Qty(b.quantity.micros), Cell.Amount(b.value.rial),
                 if (b.quantity.isZero) Cell.of("—") else Cell.Amount(ir.sabou.kernel.Ratio.mulDiv(b.value.rial, ir.sabou.kernel.Quantity.SCALE, b.quantity.micros)))
         },
-        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOf { it.second.value.rial }), Cell.EMPTY),
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOfExact { it.second.value.rial }), Cell.EMPTY),
         notes = listOf(RIAL, "میانگین بها برای یک واحد هر کالا است."),
     )
 
@@ -339,15 +340,15 @@ object ReportTables {
                 Cell.Amount(it.invoice.total.rial), Cell.Amount(it.outstanding.rial),
                 Cell.of(if (it.invoice.status == ir.sabou.purchasing.InvoiceStatus.REVERSED) "برگشت‌خورده" else "ثبت‌شده"))
         },
-        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.filter { it.invoice.status == ir.sabou.purchasing.InvoiceStatus.POSTED }.sumOf { it.invoice.total.rial }),
-            Cell.Amount(rows.sumOf { it.outstanding.rial }), Cell.EMPTY),
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.filter { it.invoice.status == ir.sabou.purchasing.InvoiceStatus.POSTED }.sumOfExact { it.invoice.total.rial }),
+            Cell.Amount(rows.sumOfExact { it.outstanding.rial }), Cell.EMPTY),
         notes = listOf(RIAL),
     )
 
     fun suppliers(rows: List<SupplierBalance>) = ReportTable(
         "بدهی به تأمین‌کنندگان", "", listOf("تأمین‌کننده", "تلفن", "بدهی", "اعتبار مرجوعی"),
         rows.map { listOf(Cell.of(it.supplier.name), Cell.of(it.supplier.phone), Cell.Amount(it.owed.rial), Cell.Amount(it.credit.rial)) },
-        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.Amount(rows.sumOf { it.owed.rial }), Cell.Amount(rows.sumOf { it.credit.rial })),
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.Amount(rows.sumOfExact { it.owed.rial }), Cell.Amount(rows.sumOfExact { it.credit.rial })),
         notes = listOf(RIAL, "اعتبار مرجوعی: مبلغ کالای برگشتی که هنوز با فاکتوری تسویه نشده است."),
     )
 
@@ -381,14 +382,14 @@ object ReportTables {
                     Cell.Qty(it.onOrder.micros), Cell.Qty(it.par.micros), Cell.Qty(it.planned.micros), Cell.Qty(it.suggested.micros), amount(it.value?.rial))
             }
         },
-        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(groups.sumOf { it.total.rial })),
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(groups.sumOfExact { it.total.rial })),
         notes = listOf(RIAL, "پیشنهاد = سطح مطلوب + مصرف برنامه‌ریزی‌شده − موجودی − سفارش‌های باز."),
     )
 
     fun receivables(rows: List<OpenReceivable>) = ReportTable(
         "مطالبات از مشتریان", "", listOf("مشتری", "سررسید", "مبلغ", "مانده"),
         rows.map { listOf(Cell.of(it.customer), Cell.of(Fa.date(it.receivable.dueDate)), Cell.Amount(it.receivable.amount.rial), Cell.Amount(it.outstanding.rial)) },
-        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOf { it.outstanding.rial })), notes = listOf(RIAL),
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOfExact { it.outstanding.rial })), notes = listOf(RIAL),
     )
 
     fun accountHistory(account: AccountBalance, rows: List<ir.sabou.treasury.TreasuryMovement>) = ReportTable(
@@ -399,8 +400,8 @@ object ReportTables {
                 Cell.Amount(if (inbound) it.amount.rial else 0), Cell.Amount(if (inbound) 0 else it.amount.rial))
         },
         footer = listOf(Cell.of("جمع"), Cell.EMPTY,
-            Cell.Amount(rows.filter { it.direction == ir.sabou.treasury.Direction.RECEIPT }.sumOf { it.amount.rial }),
-            Cell.Amount(rows.filter { it.direction == ir.sabou.treasury.Direction.PAYMENT }.sumOf { it.amount.rial })),
+            Cell.Amount(rows.filter { it.direction == ir.sabou.treasury.Direction.RECEIPT }.sumOfExact { it.amount.rial }),
+            Cell.Amount(rows.filter { it.direction == ir.sabou.treasury.Direction.PAYMENT }.sumOfExact { it.amount.rial })),
         notes = listOf(RIAL),
     )
 
@@ -447,7 +448,7 @@ object ReportTables {
         run.payslips.mapIndexed { i, p ->
             val e = people[p.employeeId]
             val days = p.payableDays ?: (run.to.epochDay - run.from.epochDay + 1).toInt()
-            val insurableExtra = p.lines.filter { it.kind == ir.sabou.payroll.PayLine.Kind.EARNING && it.insurable }.sumOf { it.amount.rial } + p.overtimePay.rial
+            val insurableExtra = p.lines.filter { it.kind == ir.sabou.payroll.PayLine.Kind.EARNING && it.insurable }.sumOfExact { it.amount.rial } + p.overtimePay.rial
             val wage = p.baseSalary.rial - p.absenceDeduction.rial
             listOf(Cell.Count((i + 1).toLong()), Cell.of(e?.profile?.insuranceNumber.orEmpty()), Cell.of(e?.nationalId.orEmpty()), Cell.of(e?.name.orEmpty()),
                 Cell.of(e?.profile?.fatherName.orEmpty()), Cell.Count(days.toLong()), Cell.Amount(if (days > 0) wage / days else 0), Cell.Amount(wage),
@@ -455,8 +456,8 @@ object ReportTables {
                 Cell.Amount(p.unemploymentInsurance.rial))
         },
         footer = listOf(Cell.of("جمع")) + List(8) { Cell.EMPTY } + listOf(
-            Cell.Amount(run.payslips.sumOf { it.insurableBase.rial }), Cell.Amount(run.payslips.sumOf { it.employeeInsurance.rial }),
-            Cell.Amount(run.payslips.sumOf { it.employerInsurance.rial }), Cell.Amount(run.payslips.sumOf { it.unemploymentInsurance.rial }),
+            Cell.Amount(run.payslips.sumOfExact { it.insurableBase.rial }), Cell.Amount(run.payslips.sumOfExact { it.employeeInsurance.rial }),
+            Cell.Amount(run.payslips.sumOfExact { it.employerInsurance.rial }), Cell.Amount(run.payslips.sumOfExact { it.unemploymentInsurance.rial }),
         ),
         notes = listOf(RIAL, "پیش‌نویس برای تهیه‌ی لیست در سامانه‌ی تأمین اجتماعی؛ فایل بارگذاری سامانه نیست."),
     )
@@ -470,9 +471,9 @@ object ReportTables {
             listOf(Cell.Count((i + 1).toLong()), Cell.of(e?.nationalId.orEmpty()), Cell.of(e?.name.orEmpty()), Cell.Amount(p.gross.rial),
                 Cell.Amount(maxOf(0L, p.gross.rial - p.taxableIncome.rial)), Cell.Amount(p.taxableIncome.rial), Cell.Amount(p.incomeTax.rial))
         },
-        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.Amount(run.payslips.sumOf { it.gross.rial }),
-            Cell.Amount(run.payslips.sumOf { maxOf(0L, it.gross.rial - it.taxableIncome.rial) }), Cell.Amount(run.payslips.sumOf { it.taxableIncome.rial }),
-            Cell.Amount(run.payslips.sumOf { it.incomeTax.rial })),
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.Amount(run.payslips.sumOfExact { it.gross.rial }),
+            Cell.Amount(run.payslips.sumOfExact { maxOf(0L, it.gross.rial - it.taxableIncome.rial) }), Cell.Amount(run.payslips.sumOfExact { it.taxableIncome.rial }),
+            Cell.Amount(run.payslips.sumOfExact { it.incomeTax.rial })),
         notes = listOf(RIAL, "پیش‌نویس برای تهیه‌ی لیست در سامانه‌ی مالیات حقوق؛ فایل بارگذاری سامانه نیست."),
     )
 
@@ -546,7 +547,7 @@ object ReportTables {
                 Cell.of(c.details.number), Cell.of(c.details.bank), Cell.of(c.details.sayadId), Cell.of(c.details.counterparty), Cell.Amount(c.amount.rial),
                 Cell.of(chequeStatusName(c.status)), Cell.of(it.branch))
         },
-        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOf { it.cheque.amount.rial }), Cell.EMPTY, Cell.EMPTY),
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOfExact { it.cheque.amount.rial }), Cell.EMPTY, Cell.EMPTY),
         notes = listOf(RIAL),
     )
 
@@ -565,9 +566,9 @@ object ReportTables {
                 Cell.Amount(a.cost.rial), Cell.Amount(a.accumulated.rial), Cell.Amount(a.bookValue.rial),
                 Cell.of(if (a.status == ir.sabou.assets.AssetStatus.ACTIVE) "فعال" else "واگذارشده"))
         },
-        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.filter { it.asset.status == ir.sabou.assets.AssetStatus.ACTIVE }.sumOf { it.asset.cost.rial }),
-            Cell.Amount(rows.filter { it.asset.status == ir.sabou.assets.AssetStatus.ACTIVE }.sumOf { it.asset.accumulated.rial }),
-            Cell.Amount(rows.filter { it.asset.status == ir.sabou.assets.AssetStatus.ACTIVE }.sumOf { it.asset.bookValue.rial }), Cell.EMPTY),
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.filter { it.asset.status == ir.sabou.assets.AssetStatus.ACTIVE }.sumOfExact { it.asset.cost.rial }),
+            Cell.Amount(rows.filter { it.asset.status == ir.sabou.assets.AssetStatus.ACTIVE }.sumOfExact { it.asset.accumulated.rial }),
+            Cell.Amount(rows.filter { it.asset.status == ir.sabou.assets.AssetStatus.ACTIVE }.sumOfExact { it.asset.bookValue.rial }), Cell.EMPTY),
         notes = listOf(RIAL, "روش و نرخ استهلاک هر گروه باید با جدول استهلاکات مالیاتی و مشاور مالیاتی تطبیق داده شود."),
     )
 

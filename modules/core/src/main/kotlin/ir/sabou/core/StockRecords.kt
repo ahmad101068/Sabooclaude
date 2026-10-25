@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.inventory.InventoryDocument
 import ir.sabou.inventory.InventoryOperations
 import ir.sabou.inventory.Item
@@ -32,7 +33,7 @@ data class InventoryDocView(
 
 /** A transfer between branches; [incoming] when [branch] is the receiving one. */
 data class TransitView(val transit: StockTransit, val number: String?, val from: String, val to: String, val incoming: Boolean, val lines: List<TransitItem>) {
-    val value: Long get() = transit.lines.sumOf { it.value.rial }
+    val value: Long get() = transit.lines.sumOfExact { it.value.rial }
 }
 
 data class TransitItem(val item: Item?, val line: ir.sabou.inventory.TransitLine)

@@ -158,12 +158,15 @@ class Overview internal constructor(private val core: SabouCore) {
     /** Every cash box and account the person may see, closed ones included (to manage them). */
     fun allTreasuryAccounts(): List<AccountBalance> {
         val a = actor(Permission.TREASURY_VIEW, Permission.TREASURY_ACCOUNT_MANAGE)
-        return core.treasuryAccounts.all().filter { a.canAccess(it.scope) }.map { AccountBalance(it, core.treasuryGateway.balance(it.id)) }
+        return core.treasuryAccounts.all().filter { a.canAccess(it.scope) && (a.role.allows(Permission.TREASURY_ACCOUNT_MANAGE) || a.sees(it)) }.map { AccountBalance(it, core.treasuryGateway.balance(it.id)) }
     }
+
+    /** Cash boxes for everyone who views the treasury; bank, terminal and cheque accounts only with BANK_VIEW (SABOU-AUDIT-008). */
+    private fun Actor.sees(account: ir.sabou.treasury.TreasuryAccount): Boolean = role.allows(Permission.BANK_VIEW) || account.kind in CASH_KINDS
 
     fun treasury(): List<AccountBalance> {
         val a = actor(Permission.TREASURY_VIEW)
-        return core.treasuryAccounts.all().filter { it.isActive && a.canAccess(it.scope) }
+        return core.treasuryAccounts.all().filter { it.isActive && a.canAccess(it.scope) && a.sees(it) }
             .map { AccountBalance(it, core.treasuryGateway.balance(it.id)) }
     }
 
@@ -177,7 +180,7 @@ class Overview internal constructor(private val core: SabouCore) {
 
     fun recentMovements(limit: Int = 20): List<TreasuryMovement> {
         val a = actor(Permission.TREASURY_VIEW)
-        return core.treasuryAccounts.all().filter { a.canAccess(it.scope) }
+        return core.treasuryAccounts.all().filter { a.canAccess(it.scope) && a.sees(it) }
             .flatMap { core.treasuryMovements.byAccount(it.id, limit) }
             .sortedByDescending { it.recordedAtEpochMillis }.take(limit)
     }
@@ -186,6 +189,7 @@ class Overview internal constructor(private val core: SabouCore) {
         val a = actor(Permission.TREASURY_VIEW)
         val account = core.treasuryAccounts.byId(accountId) ?: throw DomainException(DomainError.NotFound("TREASURY_ACCOUNT"))
         a.require(account.scope)
+        if (!a.sees(account)) throw DomainException(DomainError.PermissionDenied(Permission.BANK_VIEW.name))
         return AccountBalance(account, core.treasuryGateway.balance(account.id)) to core.treasuryMovements.byAccount(account.id, limit)
     }
 
@@ -483,3 +487,6 @@ class Overview internal constructor(private val core: SabouCore) {
         }.filter { it.second != 0L }
     }
 }
+
+/** Cash in hand: what a cashier may see of the treasury (ADR-0065). */
+internal val CASH_KINDS = setOf(ir.sabou.treasury.TreasuryKind.CASH, ir.sabou.treasury.TreasuryKind.PETTY_CASH)

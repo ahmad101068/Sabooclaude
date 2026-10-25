@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -71,7 +72,7 @@ class Labor internal constructor(private val core: SabouCore) {
             val deduct = core.payrollSettings.current().deductPlannedBreaks
             val cost = Money.sum(day.mapNotNull { s -> employees[s.employeeId]?.let { core.shifts.cost(it, s.paidMinutes(deduct), policy, date) } })
             val budget = core.budgetStore.entries().filter { it.scope == branch && it.account in LABOR_ACCOUNTS && it.from <= date && it.to >= date }
-                .sumOf { Ratio.mulDiv(it.amount.rial, 1, it.to.epochDay - it.from.epochDay + 1) }
+                .sumOfExact { Ratio.mulDiv(it.amount.rial, 1, it.to.epochDay - it.from.epochDay + 1) }
             val sales = expected[date] ?: 0L
             LaborDay(date, day.map { ShiftView(it, employees[it.employeeId]?.name.orEmpty()) }, day.sumOf { it.paidMinutes(deduct) }, cost, Money.of(budget), Money.of(sales))
         }

@@ -1,5 +1,6 @@
 package ir.sabou.ledger
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.platform.NoDocument
 
 import ir.sabou.kernel.BusinessDate
@@ -64,7 +65,7 @@ class BudgetOperations(
             val id = existing.firstOrNull { it.from == p.from }?.id ?: GlobalId.new()
             budgets.save(BudgetEntry(id, cmd.scope, cmd.account, p.from, p.to, p.amount))
         }
-        ctx.audit(AuditDraft("BUDGET_SET", "BUDGET", cmd.account.value, "scope=${cmd.scope};periods=${sorted.size};total=${sorted.sumOf { it.amount.rial }}"))
+        ctx.audit(AuditDraft("BUDGET_SET", "BUDGET", cmd.account.value, "scope=${cmd.scope};periods=${sorted.size};total=${sorted.sumOfExact { it.amount.rial }}"))
         GlobalId.new()
     }
 }

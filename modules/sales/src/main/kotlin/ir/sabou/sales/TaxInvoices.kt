@@ -1,5 +1,6 @@
 package ir.sabou.sales
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -169,10 +170,10 @@ class TaxInvoiceOperations(
                 Money.of(Ratio.mulDiv(net.rial, vatBp, 10_000L)))
         }
         // The VAT recorded on the sale must be the VAT of its lines at the legal rate (a rial per line for rounding).
-        val vat = lines.sumOf { it.vat.rial }
+        val vat = lines.sumOfExact { it.vat.rial }
         ensure(kotlin.math.abs(vat - sale.tax.rial) <= lines.size) { DomainError.InvalidState("SALE", "VAT_MISMATCH:$vat") }
         val creditTotal = Money.sum(credit.map { it.amount })
-        val total = lines.sumOf { it.total.rial }
+        val total = lines.sumOfExact { it.total.rial }
         val serial = nextSerial()
         val invoice = TaxInvoice(
             GlobalId.new(), sale.scope, sale.id, customer.id, TaxInvoiceKind.ORIGINAL, serial,

@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
 import ir.sabou.kernel.GlobalId
@@ -51,8 +52,8 @@ data class Reconciliation(
     val bookOnly: List<BookItem>,
     val bookBalance: Long,
 ) {
-    private val statementOnlyNet: Long get() = statementOnly.sumOf { if (it.direction == Direction.RECEIPT) it.amount.rial else -it.amount.rial }
-    private val bookOnlyNet: Long get() = bookOnly.sumOf { if (it.movement.direction == Direction.RECEIPT) it.movement.amount.rial else -it.movement.amount.rial }
+    private val statementOnlyNet: Long get() = statementOnly.sumOfExact { if (it.direction == Direction.RECEIPT) it.amount.rial else -it.amount.rial }
+    private val bookOnlyNet: Long get() = bookOnly.sumOfExact { if (it.movement.direction == Direction.RECEIPT) it.movement.amount.rial else -it.movement.amount.rial }
     /** The book balance as the bank should see it. */
     val adjustedBook: Long get() = bookBalance - bookOnlyNet + statementOnlyNet
     val unexplained: Long? get() = statement.closingBalance?.let { it.rial - adjustedBook }
@@ -111,7 +112,7 @@ class BankRec internal constructor(private val core: SabouCore) {
         val statement = core.bankStatements.effective(stored)
         val matched = core.bankStatements.matchedMovements(statement.accountId)
         val all = core.treasuryMovements.byAccount(statement.accountId)
-        val bookBalance = all.filter { it.date <= statement.to }.sumOf { if (it.direction == Direction.RECEIPT) it.amount.rial else -it.amount.rial }
+        val bookBalance = all.filter { it.date <= statement.to }.sumOfExact { if (it.direction == Direction.RECEIPT) it.amount.rial else -it.amount.rial }
         // What the books have and no statement has shown yet, up to this statement's end — including items from before
         // it (a cheque issued last month and still not cleared is still outstanding, audit F07). Reconciliation starts
         // with the account's first statement: movements before that are its opening, not outstanding items.

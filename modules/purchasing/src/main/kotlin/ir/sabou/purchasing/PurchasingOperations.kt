@@ -1,5 +1,6 @@
 package ir.sabou.purchasing
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.platform.NoDocument
 
 import ir.sabou.platform.DocumentSeries
@@ -316,18 +317,18 @@ class PurchasingOperations(
     /** Return credit of a supplier in a branch not yet set against any invoice. */
     fun unappliedCredit(supplierId: GlobalId, scope: Scope.Branch): Money {
         val returned = purchases.invoices().filter { it.supplierId == supplierId && it.scope == scope }
-            .sumOf { inv -> purchases.returns(inv.id).sumOf { it.credit.rial } }
-        val allocated = purchases.allocationsOf(supplierId, scope).filter { !it.released && it.advanceId == null }.sumOf { it.amount.rial }
-        val refunded = purchases.refundsOf(supplierId, scope).filter { !it.reversed }.sumOf { it.amount.rial }
+            .sumOfExact { inv -> purchases.returns(inv.id).sumOfExact { it.credit.rial } }
+        val allocated = purchases.allocationsOf(supplierId, scope).filter { !it.released && it.advanceId == null }.sumOfExact { it.amount.rial }
+        val refunded = purchases.refundsOf(supplierId, scope).filter { !it.reversed }.sumOfExact { it.amount.rial }
         return Money.of(returned - allocated - refunded)
     }
 
     /** Supplier sub-ledger balance (owed minus unapplied credit); equals GL 2101 for that supplier. */
     fun supplierBalance(supplierId: GlobalId, scope: Scope.Branch? = null): SignedAmount {
         val scopes = purchases.invoices().filter { it.supplierId == supplierId && (scope == null || it.scope == scope) }.map { it.scope }.distinct()
-        val owed = purchases.invoices().filter { it.supplierId == supplierId && (scope == null || it.scope == scope) }.sumOf { outstanding(it.id).rial }
-        val ahead = advances.of(supplierId).filter { !it.reversed && (scope == null || it.scope == scope) }.sumOf { advanceLeft(it.id).rial }
-        return SignedAmount(owed - scopes.sumOf { unappliedCredit(supplierId, it).rial } - ahead)
+        val owed = purchases.invoices().filter { it.supplierId == supplierId && (scope == null || it.scope == scope) }.sumOfExact { outstanding(it.id).rial }
+        val ahead = advances.of(supplierId).filter { !it.reversed && (scope == null || it.scope == scope) }.sumOfExact { advanceLeft(it.id).rial }
+        return SignedAmount(owed - scopes.sumOfExact { unappliedCredit(supplierId, it).rial } - ahead)
     }
 
     /** What is left of an advance to set against invoices. */
@@ -404,7 +405,7 @@ class PurchasingOperations(
         val payable = purchases.invoices().filter {
             it.supplierId == cmd.supplierId && it.scope == cmd.scope && it.status == InvoiceStatus.POSTED && it.approved && !it.needsMatchReview && it.date <= cmd.date
         }.sortedWith(compareBy({ it.dueDate }, { it.date })).map { it to outstanding(it.id) }.filter { !it.second.isZero }
-        ensure(cmd.amount.rial <= payable.sumOf { it.second.rial }) { DomainError.InvalidState("SUPPLIER", "PAYMENT_EXCEEDS_PAYABLE") }
+        ensure(cmd.amount.rial <= payable.sumOfExact { it.second.rial }) { DomainError.InvalidState("SUPPLIER", "PAYMENT_EXCEEDS_PAYABLE") }
         var left = cmd.amount
         var first: GlobalId? = null
         for ((invoice, open) in payable) {
@@ -643,13 +644,13 @@ class PurchasingOperations(
         val locationId = invoice.locationId ?: throw DomainException(DomainError.InvalidInput("item", "این فاکتور کالایی ندارد."))
         // An item may appear on several invoice lines: price it per item over the whole invoice.
         val boughtQty = invoice.lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } }
-        val boughtValue = invoice.lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.value.rial } }
+        val boughtValue = invoice.lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOfExact { it.value.rial } }
         val previous = purchases.returns(invoice.id).flatMap { it.lines }.groupBy { it.itemId }
         val priced = cmd.lines.map { line ->
             val qty = boughtQty[line.itemId] ?: throw DomainException(DomainError.InvalidInput("item", "این کالا در فاکتور نیست."))
             val value = boughtValue.getValue(line.itemId)
             val returnedQty = previous[line.itemId].orEmpty().sumOf { it.quantity.micros }
-            val returnedValue = previous[line.itemId].orEmpty().sumOf { it.value.rial }
+            val returnedValue = previous[line.itemId].orEmpty().sumOfExact { it.value.rial }
             val remaining = qty - returnedQty
             ensure(!line.quantity.isZero && line.quantity.micros <= remaining) { DomainError.InvalidInput("quantity", "مقدار مرجوعی از مقدار خریداری‌شده بیشتر است.") }
             // Cumulative pricing: after this return, the total credited is value × returned/bought (rounded).
@@ -814,7 +815,7 @@ class PurchasingOperations(
     /** Adds [delta] Rial (freight − discount) to [lines] in proportion to their value; the rounding rest goes to the largest. */
     private fun spread(lines: List<InvoiceLine>, delta: Long): List<InvoiceLine> {
         if (delta == 0L || lines.isEmpty()) return lines
-        val total = lines.sumOf { it.value.rial }
+        val total = lines.sumOfExact { it.value.rial }
         val sign = if (delta < 0) -1L else 1L
         val shares = lines.map { sign * (if (total == 0L) kotlin.math.abs(delta) / lines.size else Ratio.mulDiv(kotlin.math.abs(delta), it.value.rial, total, ir.sabou.kernel.Rounding.DOWN)) }.toMutableList()
         val largest = lines.indices.maxByOrNull { lines[it].value.rial }!!

@@ -1,5 +1,6 @@
 package ir.sabou.sales
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.platform.NoDocument
 
 import ir.sabou.platform.DocumentSeries
@@ -390,7 +391,7 @@ class SalesOperations(
         val cost = LongArray(lines.size)
         consumption.lines.groupBy { it.itemId }.forEach { (itemId, issued) ->
             val weights = perLine.map { reqs -> reqs?.filter { it.itemId == itemId }?.sumOf { it.quantity.micros.coerceAtLeast(0) } ?: 0L }
-            Ratio.allocate(issued.sumOf { it.cost.rial }, weights).forEachIndexed { i, v -> cost[i] = Math.addExact(cost[i], v) }
+            Ratio.allocate(issued.sumOfExact { it.cost.rial }, weights).forEachIndexed { i, v -> cost[i] = Math.addExact(cost[i], v) }
         }
         val short = consumption.shortages.map { it.itemId }.toSet()
         return lines.mapIndexed { i, l ->
@@ -661,7 +662,7 @@ class SalesOperations(
     /** Card sales recorded into terminal [account] on [date] (posted sales). */
     fun cardSalesOn(scope: Scope.Branch, date: BusinessDate, account: GlobalId): Long =
         sales.salesOn(scope, date).filter { it.status == SaleStatus.POSTED }.flatMap { it.settlements }
-            .filterIsInstance<Settlement.Liquid>().filter { it.treasuryAccountId == account }.sumOf { it.amount.rial }
+            .filterIsInstance<Settlement.Liquid>().filter { it.treasuryAccountId == account }.sumOfExact { it.amount.rial }
 
     fun shiftCounts(scope: Scope.Branch, date: BusinessDate): List<ShiftCount> = deposits.shiftCounts(scope, date)
 

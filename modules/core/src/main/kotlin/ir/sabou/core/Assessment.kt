@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -455,7 +456,7 @@ class Assessments internal constructor(private val core: SabouCore) {
             generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }.firstOrNull { d -> salesByDay[d]?.any { it.status == SaleStatus.POSTED } == true }
         }
 
-        fun channelCost(rows: List<ChannelRow>) = rows.sumOf { r -> settings.channelCosts[r.channel]?.let { Ratio.mulDiv(r.net.rial, it, 10_000) } ?: 0L }
+        fun channelCost(rows: List<ChannelRow>) = rows.sumOfExact { r -> settings.channelCosts[r.channel]?.let { Ratio.mulDiv(r.net.rial, it, 10_000) } ?: 0L }
 
         fun account(code: ir.sabou.ledger.AccountCode, p: ProfitAndLoss = pnl) = (p.costOfSales + p.expenses).filter { it.account.code == code }.sumOf { it.amount }
 
@@ -549,11 +550,11 @@ class Assessments internal constructor(private val core: SabouCore) {
             add(if (channels.isEmpty()) unknown("D05.TOP", Dimension.D05, "سهم بزرگ‌ترین کانال فروش", KpiUnit.PERCENT, "فروش به تفکیک کانال",
                     "کانال فروش (حضوری، بیرون‌بر، پیک، شرکتی) در فروش‌ها ثبت نشده است؛ با ورود فروش از سپند ثبت می‌شود.")
                 else Kpi("D05.TOP", Dimension.D05, "سهم بزرگ‌ترین کانال: ${channelName(channels.first().channel)}", channels.first().shareBp, KpiUnit.PERCENT, null,
-                    KpiQuality.OK, "فروش خالص غذا به تفکیک کانال", channels.first().net.rial, channels.sumOf { it.net.rial }))
+                    KpiQuality.OK, "فروش خالص غذا به تفکیک کانال", channels.first().net.rial, channels.sumOfExact { it.net.rial }))
             // What the channels cost (commission, couriers), at the rates the owner set.
             val paid = channels.filter { it.channel != null && it.channel != ir.sabou.sales.SalesChannel.DINE_IN }
             if (paid.isNotEmpty()) {
-                val net = channels.sumOf { it.net.rial }
+                val net = channels.sumOfExact { it.net.rial }
                 val unset = paid.filter { settings.channelCosts[it.channel] == null }
                 add(if (unset.size == paid.size) unknown("D05.COMMISSION", Dimension.D05, "هزینه‌ی کانال‌ها به فروش", KpiUnit.PERCENT, "تنظیمات کارنامه",
                         "درصد کمیسیون و هزینه‌ی پیک کانال‌های ${unset.joinToString("، ") { channelName(it.channel) }} را در «کارنامه ← تغییر وزن حوزه‌ها» وارد کنید.")
@@ -570,7 +571,7 @@ class Assessments internal constructor(private val core: SabouCore) {
             add(if (me == null || classified.isEmpty()) unknown("D06.DOGS", Dimension.D06, "سهم فروش غذاهای کم‌سود و کم‌فروش", KpiUnit.PERCENT, "مهندسی منو",
                     "برای طبقه‌بندی منو، غذاها رسپی و بهای مواد می‌خواهند.")
                 else {
-                    val dogs = classified.filter { it.menuClass == MenuClass.DOG }.sumOf { it.mix.gross.rial }
+                    val dogs = classified.filter { it.menuClass == MenuClass.DOG }.sumOfExact { it.mix.gross.rial }
                     Kpi("D06.DOGS", Dimension.D06, "سهم فروش غذاهای کم‌سود و کم‌فروش", bp(dogs, me.mix.gross.rial), KpiUnit.PERCENT, KpiTarget.lower(500, 2_000),
                         if (classified.size < me.rows.size) KpiQuality.PARTIAL else KpiQuality.OK, "مهندسی منو (کاساوانا و اسمیت)", dogs, me.mix.gross.rial,
                         if (classified.size < me.rows.size) "${Fa.number((me.rows.size - classified.size).toLong())} غذا بی‌بها مانده" else "")
@@ -716,7 +717,7 @@ class Assessments internal constructor(private val core: SabouCore) {
                 else -> Kpi("D19.CUSTOMER", Dimension.D19, "سهم بزرگ‌ترین مشتری نسیه («${cr.rows.first().customer.name}») از فروش", cr.topShareBp, KpiUnit.PERCENT,
                     KpiTarget.lower(1_500, 4_000), KpiQuality.OK, "فروش نسیه‌ی ${Fa.number(CashFlows.CUSTOMER_DAYS.toLong())} روز گذشته", cr.rows.first().sales, cr.totalSales)
             })
-            val bySupplier = periodInvoices.groupBy { it.supplierId }.mapValues { (_, l) -> l.sumOf { it.total.rial } }
+            val bySupplier = periodInvoices.groupBy { it.supplierId }.mapValues { (_, l) -> l.sumOfExact { it.total.rial } }
             val purchased = bySupplier.values.sum()
             add(if (purchased <= 0) na("D19.SUPPLIER", Dimension.D19, "سهم بزرگ‌ترین تأمین‌کننده", "خریدی در دوره نیست")
                 else bySupplier.maxBy { it.value }.let { (id, amount) ->

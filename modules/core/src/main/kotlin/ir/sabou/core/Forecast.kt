@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -100,7 +101,7 @@ class Forecasts internal constructor(private val core: SabouCore) {
         val history = normalized(days)
         val special = core.specialDays.of(branch).associateBy { it.date }
         val pairs = days.filter { it.date >= from.plusDays(-28) }.mapNotNull { d ->
-            val actual = d.sales.sumOf { it.netFood.rial }
+            val actual = d.sales.sumOfExact { it.netFood.rial }
             val f = day(d.date, history.filterKeys { it < d.date }, special[d.date])
             if (f.samples == 0 || actual <= 0) null else f.expected to actual
         }
@@ -118,7 +119,7 @@ class Forecasts internal constructor(private val core: SabouCore) {
         normalized(core.tradingDays(branch, (from.epochDay..to.epochDay).map { BusinessDate(it) }))
 
     private fun normalized(days: List<TradingDay>): Map<BusinessDate, Long> =
-        days.associate { d -> d.date to Ratio.mulDiv(d.sales.sumOf { it.netFood.rial }, 100, d.percent) }
+        days.associate { d -> d.date to Ratio.mulDiv(d.sales.sumOfExact { it.netFood.rial }, 100, d.percent) }
 
     companion object {
         const val WEEKS = 8

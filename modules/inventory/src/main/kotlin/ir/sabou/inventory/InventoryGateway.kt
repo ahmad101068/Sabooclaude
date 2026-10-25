@@ -173,18 +173,27 @@ class InventoryGateway(
             if (balance.quantity.isZero) return
             val take = if (shortage.open < balance.quantity) shortage.open else balance.quantity
             val cost = valueOf(balance, take)
-            val journal = if (cost.isZero) null else ledger.post(context, owner, JournalDraft(date, location.scope, SHORTAGE, shortage.id,
+            val on = costDate(context, shortage, date)
+            val journal = if (cost.isZero) null else ledger.post(context, owner, JournalDraft(on, location.scope, SHORTAGE, shortage.id,
                 "تسویه کسری مصرف", listOf(
                     LineDraft(StandardAccounts.COGS, debit = cost, memo = "مصرف پیشین بدون موجودی", by = capability),
                     LineDraft(StandardAccounts.INVENTORY, credit = cost, memo = location.name, by = capability),
                 )))
-            stockOut(context, itemId, location, take, cost, MovementKind.ISSUE, date, journal?.id, SourceDocument(owner.module, SHORTAGE, shortage.id), null)
+            stockOut(context, itemId, location, take, cost, MovementKind.ISSUE, on, journal?.id, SourceDocument(owner.module, SHORTAGE, shortage.id), null)
             val settled = shortage.settled + take
             shortages.save(shortage.copy(settled = settled, settledCost = shortage.settledCost + cost, takenFromStock = shortage.takenFromStock + take,
                 takenCost = shortage.takenCost + cost, status = if (settled == shortage.quantity) StockShortage.Status.SETTLED else StockShortage.Status.OPEN))
             context.audit(AuditDraft("STOCK_SHORTAGE_SETTLE", "STOCK_SHORTAGE", shortage.id.value, "qty=${take.micros};cost=${cost.rial}"))
         }
     }
+
+    /**
+     * The date the cost of a shortage belongs to (audit SABOU-AUDIT-003): the day it was consumed — the sale — so the
+     * month that had the revenue also has its food cost; the day the goods came in [fallback] only when that day
+     * can no longer take a document (closed period, or older than the date rule allows this person).
+     */
+    private fun costDate(context: CommandContext, shortage: StockShortage, fallback: BusinessDate): BusinessDate =
+        if (shortage.date < fallback && ledger.dateAllowed(context, shortage.date, SHORTAGE)) shortage.date else fallback
 
     /**
      * A stock count has measured what is really there, so a shortage still open for a counted item can no longer
@@ -195,7 +204,7 @@ class InventoryGateway(
         for (shortage in shortages.open(itemId, location.id)) {
             val unit = unitCost(itemId, location.id)
             val cost = if (unit == null) Money.ZERO else Money.of(Ratio.mulDiv(unit, shortage.open.micros, Quantity.SCALE))
-            if (!cost.isZero) ledger.post(context, capability, JournalDraft(date, location.scope, SHORTAGE, shortage.id, "کسری مصرف در انبارگردانی", listOf(
+            if (!cost.isZero) ledger.post(context, capability, JournalDraft(costDate(context, shortage, date), location.scope, SHORTAGE, shortage.id, "کسری مصرف در انبارگردانی", listOf(
                 LineDraft(StandardAccounts.COGS, debit = cost, memo = "مصرف بدون موجودی دفتری", by = capability),
                 LineDraft(StandardAccounts.INVENTORY_VARIANCE, credit = cost, memo = "شمارش ${sourceId.value.take(8)}", by = capability),
             )))

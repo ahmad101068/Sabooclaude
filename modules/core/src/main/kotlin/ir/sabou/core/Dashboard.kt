@@ -58,7 +58,8 @@ class Dashboards internal constructor(private val core: SabouCore) {
             costLines.drop(SLICES).sumOf { it.amount }.takeIf { it > 0 }?.let { listOf(CostSlice("سایر", it, null)) }.orEmpty()
 
         val balances = if (actor.role.allows(Permission.TREASURY_VIEW)) {
-            core.treasuryAccounts.all().filter { it.isActive && actor.canAccess(it.scope) && (branch == null || it.scope == branch) }
+            core.treasuryAccounts.all().filter { it.isActive && actor.canAccess(it.scope) && (branch == null || it.scope == branch) &&
+                (actor.role.allows(Permission.BANK_VIEW) || it.kind in CASH_KINDS) }
                 .map { it.kind to core.treasuryGateway.balance(it.id) }
         } else emptyList()
 

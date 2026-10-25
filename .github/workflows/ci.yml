@@ -8,12 +8,13 @@ on:
 permissions:
   contents: write   # only used to publish failure logs to the ci-logs branch
 
-# ubuntu-latest runners ship the Android SDK (ANDROID_HOME); AGP installs missing platforms itself.
+# The pinned ubuntu runners ship the Android SDK (ANDROID_HOME); AGP installs missing platforms itself.
 
 jobs:
   domain:
     name: Domain, persistence and core (JVM tests)
-    runs-on: ubuntu-latest
+    # Pinned (SABOU-AUDIT-006): a moving image broke the emulator in October 2026.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -56,7 +57,8 @@ jobs:
 
   postgres:
     name: Domain tests on PostgreSQL (server path, ADR-0060)
-    runs-on: ubuntu-latest
+    # Pinned (SABOU-AUDIT-006): a moving image broke the emulator in October 2026.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -99,7 +101,8 @@ jobs:
 
   android:
     name: Android app (compile, lint, debug APK)
-    runs-on: ubuntu-latest
+    # Pinned (SABOU-AUDIT-006): a moving image broke the emulator in October 2026.
+    runs-on: ubuntu-24.04
     needs: domain
     timeout-minutes: 45
     env:
@@ -141,6 +144,10 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
       # The real app, signed with the owner's private key. Runs only when the four signing secrets exist
       # (Settings → Secrets and variables → Actions); the key never enters the repository.
+      - name: Release signing not set up
+        # SABOU-AUDIT-001: without the owner's key only the debuggable test app is built; say so on every run.
+        if: env.SABOU_KEYSTORE_B64 == ''
+        run: echo "::warning title=Release signing not set up::Only the debug test app (ir.sabou.erp.debug, debuggable) was built. Set the four SABOU_* signing secrets (docs/RELEASE.md) and install sabou-release-apk on the restaurant's phone."
       - name: Signed release APK
         if: env.SABOU_KEYSTORE_B64 != ''
         shell: bash
@@ -262,7 +269,8 @@ jobs:
 
   dependency-verification:
     name: Dependency verification metadata (generated only while it is missing)
-    runs-on: ubuntu-latest
+    # Pinned (SABOU-AUDIT-006): a moving image broke the emulator in October 2026.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5

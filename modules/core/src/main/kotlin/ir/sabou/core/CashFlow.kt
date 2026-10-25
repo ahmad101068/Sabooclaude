@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -214,11 +215,11 @@ class CashFlows internal constructor(private val core: SabouCore) {
         val from = today.plusDays(-HISTORY_DAYS.toLong())
         val days = core.tradingDays(branch, (from.epochDay until today.epochDay).map { BusinessDate(it) })
         val posted = days.flatMap { it.sales }
-        val net = posted.sumOf { it.netFood.rial }
-        val liquid = posted.sumOf { s -> s.settlements.filterIsInstance<Settlement.Liquid>().sumOf { it.amount.rial } }
-        val credit = posted.sumOf { s -> s.settlements.filterIsInstance<Settlement.Credit>().sumOf { it.amount.rial } }
+        val net = posted.sumOfExact { it.netFood.rial }
+        val liquid = posted.sumOfExact { s -> s.settlements.filterIsInstance<Settlement.Liquid>().sumOfExact { it.amount.rial } }
+        val credit = posted.sumOfExact { s -> s.settlements.filterIsInstance<Settlement.Credit>().sumOfExact { it.amount.rial } }
         val recent = invoices.filter { it.date >= from && it.date < today && !it.opening }
-        val goods = recent.sumOf { inv -> inv.total.rial - inv.accountLines.sumOf { it.amount.rial } }.coerceAtLeast(0)
+        val goods = recent.sumOfExact { inv -> inv.total.rial - inv.accountLines.sumOfExact { it.amount.rial } }.coerceAtLeast(0)
         val term = weightedDays(recent.map { (it.dueDate.epochDay - it.date.epochDay) to it.total.rial }) ?: 0
         val collection = history.values.filter { it.collectionDays != null }
             .let { h -> weightedDays(h.map { it.collectionDays!!.toLong() to it.collected }) }
@@ -265,8 +266,8 @@ class CashFlows internal constructor(private val core: SabouCore) {
         add(monthEnd(today), CashItem.Kind.PAYROLL_DUES, -dues.coerceAtLeast(0), "بیمه و مالیات حقوق پرداختنی", true)
         val last = core.payrollStore.runs(branch).filter { it.status == ir.sabou.payroll.RunStatus.APPROVED }.maxByOrNull { it.to }
         if (last != null) {
-            val monthNet = last.payslips.sumOf { it.net.rial }
-            val monthDues = last.payslips.sumOf { it.employeeInsurance.rial + it.employerInsurance.rial + it.unemploymentInsurance.rial + it.incomeTax.rial }
+            val monthNet = last.payslips.sumOfExact { it.net.rial }
+            val monthDues = last.payslips.sumOfExact { it.employeeInsurance.rial + it.employerInsurance.rial + it.unemploymentInsurance.rial + it.incomeTax.rial }
             var e = monthEnd(last.to.plusDays(1))
             while (e <= end) {
                 add(e, CashItem.Kind.PAYROLL, -monthNet, "حقوق ${monthTitle(e)} (مثل آخرین حقوق تأییدشده)", true)
@@ -282,7 +283,7 @@ class CashFlows internal constructor(private val core: SabouCore) {
             while (start <= end) {
                 val stop = monthEnd(start)
                 budgets.map { it.account }.distinct().forEach { code ->
-                    val budget = budgets.filter { it.account == code }.sumOf { b -> overlap(b.from, b.to, start, stop, b.amount.rial) }
+                    val budget = budgets.filter { it.account == code }.sumOfExact { b -> overlap(b.from, b.to, start, stop, b.amount.rial) }
                     val booked = if (today > start) booked(code, branch, start, today.plusDays(-1)) else 0L
                     val left = (budget - booked).coerceAtLeast(0)
                     val first = maxOf(start, today)
@@ -320,7 +321,7 @@ class CashFlows internal constructor(private val core: SabouCore) {
     fun customers(branch: Scope.Branch, today: BusinessDate): CustomerReport {
         actor().require(branch)
         val from = today.plusDays(-CUSTOMER_DAYS.toLong())
-        val total = core.sales.sales(branch, from, today).filter { it.status == SaleStatus.POSTED }.sumOf { it.payable.rial }
+        val total = core.sales.sales(branch, from, today).filter { it.status == SaleStatus.POSTED }.sumOfExact { it.payable.rial }
         val history = customerHistory(branch)
         val customers = core.customers.all().associateBy { it.id }
         val receivables = receivablesOf(branch).filter { !it.voided }.groupBy { it.customerId }
@@ -352,7 +353,7 @@ class CashFlows internal constructor(private val core: SabouCore) {
             PayHistory(
                 weightedDays(done.map { it.first to it.third }),
                 weightedDays(done.mapNotNull { d -> d.second?.let { it to d.third } }),
-                done.sumOf { it.third }, done.size, list.sumOf { it.amount.rial },
+                done.sumOf { it.third }, done.size, list.sumOfExact { it.amount.rial },
             )
         }
 

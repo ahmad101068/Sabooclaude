@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Quantity
@@ -182,7 +183,7 @@ class ProfitBridges internal constructor(private val core: SabouCore) {
     private class Dish { var q = 0L; var gross = 0L; var costedQ = 0L; var cost = 0L }
 
     private fun discountOf(branch: Scope.Branch, from: BusinessDate, to: BusinessDate): Long =
-        core.sales.sales(branch, from, to).filter { it.status == SaleStatus.POSTED }.sumOf { it.discount.rial }
+        core.sales.sales(branch, from, to).filter { it.status == SaleStatus.POSTED }.sumOfExact { it.discount.rial }
 
     /** Posted lines of [branch] in the period by dish. */
     private fun dishes(branch: Scope.Branch, from: BusinessDate, to: BusinessDate): Map<GlobalId, Dish> {

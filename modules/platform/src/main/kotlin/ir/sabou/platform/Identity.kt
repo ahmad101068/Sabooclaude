@@ -160,11 +160,24 @@ class Session(private val users: UserStore, private val clock: Clock, private va
         acting.get()?.let { return it }
         val id = userId ?: return null
         val now = clock.nowEpochMillis()
-        if (now - lastActivity > idleTimeoutMillis) { userId = null; return null }
         val user = users.byId(id)
         if (user == null || !user.isActive) { userId = null; return null }
+        val actor = user.toActor()
+        if (now - lastActivity > idleLimit(actor)) { userId = null; return null }
         lastActivity = now
-        return user.toActor()
+        return actor
+    }
+
+    /**
+     * How long a session may sit unused (SABOU-AUDIT-011): on a shared counter phone, whoever sees profit, pay or the
+     * users signs out sooner than staff who only record sales or stock.
+     */
+    private fun idleLimit(actor: Actor): Long =
+        if (PRIVILEGED.any { actor.role.allows(it) }) minOf(idleTimeoutMillis, PRIVILEGED_IDLE_MILLIS) else idleTimeoutMillis
+
+    companion object {
+        const val PRIVILEGED_IDLE_MILLIS = 10 * 60_000L
+        private val PRIVILEGED = setOf(Permission.LEDGER_VIEW, Permission.USER_MANAGE, Permission.PAYROLL_PAY, Permission.BANK_VIEW)
     }
 
     @Synchronized internal fun start(id: GlobalId) { userId = id; lastActivity = clock.nowEpochMillis() }

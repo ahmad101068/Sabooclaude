@@ -21,6 +21,13 @@ class Ledger(
     private val journals: JournalStore,
     private val periods: PeriodStore,
 ) {
+    /** The date rule for documents (ADR-0065); null — no rule beyond closed periods (tests, tools). */
+    @Volatile var datePolicy: DatePolicy? = null
+
+    /** Whether [context]'s person may post a document of [sourceType] dated [date] (open period and date rule). */
+    fun dateAllowed(context: CommandContext, date: BusinessDate, sourceType: String): Boolean =
+        periods.closedLockCovering(date) == null && datePolicy?.allows(context, date, sourceType) != false
+
     fun account(code: AccountCode): Account? = accounts.byCode(code)
 
     fun post(context: CommandContext, owner: PostingCapability, draft: JournalDraft): JournalEntry {
@@ -40,6 +47,7 @@ class Ledger(
         }
         ensure(debit == credit) { DomainError.UnbalancedJournal(debit.rial, credit.rial) }
         requireOpenPeriod(draft.date)
+        datePolicy?.check(context, draft.date, draft.sourceType)
         context.requireScope(draft.scope)
         val entry = JournalEntry(
             id = GlobalId.new(),

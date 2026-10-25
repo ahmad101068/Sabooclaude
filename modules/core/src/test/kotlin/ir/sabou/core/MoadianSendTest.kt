@@ -171,6 +171,45 @@ class MoadianSendTest {
         assertEquals(4L, core.moadian.invoices().first { it.invoice.id == again }.invoice.serial)
     }
 
+    /**
+     * SABOU-AUDIT-007: receipts are matched by our uid only. Answers in another order land on their own invoices, and an
+     * invoice with no answer is not recorded as refused (it may have arrived): it stays ready, reported as waiting.
+     */
+    @Test fun receiptsAreMatchedByUidAndAMissingAnswerIsNoRefusal() {
+        core.bootstrap("شعبه یک", "مالک", "owner", "123456".toCharArray())
+        val branch = Scope.Branch(core.overview.branches().single().id)
+        val kitchen = core.overview.locations(branch).single().id
+        val cash = core.overview.treasury().single().account.id
+        val tea = core.inventory.defineMenuItem(DefineMenuItem(id(), "چای")).resultId
+        val company = core.salesOps.registerCustomer(RegisterCustomer(id(), branch, "شرکت آرین", CustomerType.COMPANY, "021", rial(100_000_000))).resultId
+        core.taxOps.setProfile(SetTaxProfile(id(), "0012345679", "A1B2C3", listOf(VatRate(JalaliCalendar.date(1404, 1, 1), 1_000))))
+        core.taxOps.setCustomerTaxInfo(SetCustomerTaxInfo(id(), branch, company, "10101614561", "1234567890"))
+        core.taxOps.setItemCode(SetItemTaxCode(id(), tea, "2720000654321", "1627"))
+        fun invoice(n: Long): GlobalId {
+            val s = core.salesOps.saveDraft(SaveSaleDraft(id(), branch, day, kitchen, listOf(SaleLineInput(tea, Quantity.units(n), rial(1_000_000))),
+                Money.ZERO, Money.ZERO, rial(100_000 * n), listOf(Settlement.Credit(company, rial(1_100_000 * n), day.plusDays(30))))).resultId
+            core.salesOps.post(PostDailySale(id(), branch, s))
+            return core.taxInvoices.issue(IssueTaxInvoice(id(), branch, s, 1_790_000_000_000L + n)).resultId
+        }
+        val first = invoice(1); val second = invoice(2)
+        val server = FakeTaxServer().apply { reverse = true }
+        val client = MoadianClient("https://tp.example/requestsmanager/api/v2", "A1B2C3", server.clientCredentials, server, now = { 1_790_000_000_000L })
+        assertEquals(2, core.moadian.send(client).sent)
+        fun ref(id: GlobalId) = core.moadian.invoices().single { it.invoice.id == id }.invoice.referenceNumber
+        assertEquals(setOf("ref-1", "ref-2"), setOf(ref(first), ref(second)))
+        // Each reference is the one the server gave that very invoice.
+        server.answer = "SUCCESS"
+        assertEquals(2, core.moadian.inquire(client).accepted)
+
+        val third = invoice(3); val fourth = invoice(4)
+        server.dropFirst = true                                   // reversed, then the first answer left out: one invoice gets none
+        val report = core.moadian.send(client)
+        assertEquals(1, report.sent); assertEquals(0, report.rejected); assertEquals(1, report.waiting)
+        fun status(id: GlobalId) = core.moadian.invoices().single { it.invoice.id == id }.invoice.status
+        assertEquals(setOf(TaxInvoiceStatus.SENT, TaxInvoiceStatus.READY), setOf(status(third), status(fourth)))
+        assertTrue(report.problems.single().contains("پاسخی"))
+    }
+
     @Test fun aSaleWhoseVatIsNotTheLegalRateIsRefused() {
         core.bootstrap("شعبه یک", "مالک", "owner", "123456".toCharArray())
         val branch = Scope.Branch(core.overview.branches().single().id)
@@ -195,6 +234,9 @@ class MoadianSendTest {
         private val clientKeys = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
         val clientCredentials = MoadianCredentials(clientKeys.private, "MIIBfake")
         var answer = "PENDING"
+        /** Answer in the opposite order, and leave out the first answer of that list (SABOU-AUDIT-007). */
+        var reverse = false
+        var dropFirst = false
         var lastInvoice: Map<*, *>? = null
         var tokensVerified = 0
         private val received = mutableMapOf<String, String>()   // reference → uid
@@ -218,7 +260,8 @@ class MoadianSendTest {
                         received[ref] = uid
                         """{"uid":"$uid","referenceNumber":"$ref","errorCode":null,"errorDetail":null}"""
                     }
-                    MoadianClient.Response(200, """{"timestamp":1,"result":[${results.joinToString(",")}]}""")
+                    val answered = (if (reverse) results.reversed() else results).drop(if (dropFirst) 1 else 0)
+                    MoadianClient.Response(200, """{"timestamp":1,"result":[${answered.joinToString(",")}]}""")
                 }
                 "inquiry-by-reference-id" -> {
                     val refs = java.net.URLDecoder.decode(url.substringAfter("referenceIds="), "UTF-8").split(",")
