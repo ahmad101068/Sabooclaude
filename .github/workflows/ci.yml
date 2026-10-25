@@ -216,6 +216,17 @@ jobs:
           find "$GITHUB_WORKSPACE"/app/build/outputs/androidTest-results -name '*.xml' -exec cp {} . \; 2>/dev/null || true
           find "$GITHUB_WORKSPACE"/app/build/outputs/androidTest-results -name 'logcat*' -exec cp {} . \; 2>/dev/null || true
           echo "run ${{ github.run_id }} sha ${{ github.sha }} status ${{ job.status }}" > README.txt
+          # Why an emulator did not boot, when it did not: the host, KVM, disk, the emulator and its log.
+          {
+            uname -a; cat /etc/os-release | head -3; nproc; free -m; df -h / | tail -1
+            ls -l /dev/kvm 2>&1; groups
+            "$ANDROID_HOME"/emulator/emulator -version 2>&1 | head -2
+            "$ANDROID_HOME"/emulator/emulator -accel-check 2>&1 | tail -3
+            ls "$ANDROID_HOME"/system-images/*/* 2>&1; ls ~/.android/avd 2>&1
+            "$ANDROID_HOME"/platform-tools/adb devices 2>&1
+            "$ANDROID_HOME"/platform-tools/adb shell getprop sys.boot_completed 2>&1
+            "$ANDROID_HOME"/platform-tools/adb logcat -d 2>&1 | tail -150
+          } > host.txt 2>&1 || true
           git init -q && git checkout -q -b ci-device
           git config user.name ci && git config user.email ci@users.noreply.github.com
           git add -A && git commit -qm "device tests ${{ github.run_id }}"
