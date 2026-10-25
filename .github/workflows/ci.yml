@@ -176,7 +176,8 @@ jobs:
 
   device:
     name: Android device tests (emulator)
-    runs-on: ubuntu-latest
+    # Pinned: since ubuntu-latest moved to Ubuntu 26 (Oct 2026) the emulator times out booting there.
+    runs-on: ubuntu-24.04
     needs: android
     timeout-minutes: 60
     steps:
@@ -200,6 +201,7 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
+          emulator-boot-timeout: 900
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           # While the verification metadata is missing (being regenerated), record it here too: this run
           # also resolves the device-test toolchain that the other jobs never download.
