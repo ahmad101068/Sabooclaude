@@ -1,9 +1,18 @@
 name: ci
 
+# Build minutes are limited on a private repository (they ran out in October 2026), so each change is built once:
+# a branch through its pull request, main when it is pushed. The long emulator job runs only on main and on demand
+# ("Run workflow"), never on every pull-request update.
 on:
   push:
-    branches: [main, "claude/**"]
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# A newer push to the same pull request stops the run in progress; runs of main always finish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: write   # only used to publish failure logs to the ci-logs branch
@@ -45,12 +54,12 @@ jobs:
           # Diagnostics only: retried, and never the reason a build fails (reports are also uploaded as artifacts).
           for attempt in 1 2 3; do git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs && break; sleep $((attempt * 5)); done || true
       - name: Upload test reports
-        if: always()
+        if: failure()
         # Diagnostics only: a full artifact quota must not fail a green build.
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          retention-days: 7
+          retention-days: 3
           name: domain-test-reports
           path: "modules/**/build/reports/tests/**"
           if-no-files-found: ignore
@@ -89,12 +98,12 @@ jobs:
           SABOU_PG_URL: "jdbc:postgresql://localhost:5432/sabou?user=postgres"
         run: ./gradlew --no-daemon --stacktrace domainBuild
       - name: Upload test reports
-        if: always()
+        if: failure()
         # Diagnostics only: a full artifact quota must not fail a green build.
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          retention-days: 7
+          retention-days: 3
           name: postgres-test-reports
           path: "modules/**/build/reports/tests/**"
           if-no-files-found: ignore
@@ -135,11 +144,10 @@ jobs:
           # Diagnostics only: retried, and never the reason a build fails (reports are also uploaded as artifacts).
           for attempt in 1 2 3; do git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs && break; sleep $((attempt * 5)); done || true
       - name: Upload debug APK
-        # Diagnostics only: a full artifact quota must not fail a green build.
-        continue-on-error: true
+        # The owner installs this one: if it cannot be stored (quota full), the build says so.
         uses: actions/upload-artifact@v4
         with:
-          retention-days: 7
+          retention-days: 30
           name: sabou-debug-apk
           path: app/build/outputs/apk/debug/*.apk
       # The real app, signed with the owner's private key. Runs only when the four signing secrets exist
@@ -167,16 +175,16 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          retention-days: 7
+          retention-days: 30
           name: sabou-release-apk
           path: app/build/outputs/apk/release/*.apk
       - name: Upload lint report
-        if: always()
+        if: failure()
         # Diagnostics only: a full artifact quota must not fail a green build.
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          retention-days: 7
+          retention-days: 3
           name: lint-report
           path: app/build/reports/lint-results-debug.*
           if-no-files-found: ignore
@@ -186,6 +194,7 @@ jobs:
     # Pinned: since ubuntu-latest moved to Ubuntu 26 (Oct 2026) the emulator times out booting there.
     runs-on: ubuntu-24.04
     needs: android
+    if: github.event_name != 'pull_request'
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
@@ -257,12 +266,12 @@ jobs:
           # Diagnostics only: retried, and never the reason a build fails (reports are also uploaded as artifacts).
           for attempt in 1 2 3; do git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-device && break; sleep $((attempt * 5)); done || true
       - name: Upload device test reports
-        if: always()
+        if: failure()
         # Diagnostics only: a full artifact quota must not fail a green build.
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          retention-days: 7
+          retention-days: 3
           name: device-test-reports
           path: app/build/reports/androidTests/**
           if-no-files-found: ignore
