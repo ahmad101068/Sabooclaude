@@ -117,7 +117,7 @@ class VolumeBenchmarkTest {
         timed("management dashboard week", 1500) { core.managementDashboards.of(branch, today.plusDays(-6), today) }
         // SABOU-AUDIT-013: writing stays quick as the books grow (a supplier's invoices are read by index, not all).
         timed("record a purchase invoice", 800) {
-            core.purchasing.postInvoice(PostPurchaseInvoice(GlobalId.new(), branch, suppliers.first(), "bench-new", kitchen, today, today,
+            core.purchasing.postInvoice(PostPurchaseInvoice(GlobalId.new(), branch, suppliers.first(), "bench-new-${GlobalId.new().value.takeLast(12)}", kitchen, today, today,
                 listOf(InvoiceLine(items.first(), Quantity.units(2), Money.of(2_000_000)))))
         }
         timed("pay a supplier", 800) {
