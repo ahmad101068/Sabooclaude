@@ -69,4 +69,17 @@ interface MovementStore {
     /** Receipts minus payments dated on or before [date] (whatever the order they were recorded in). */
     fun balanceAsOf(accountId: GlobalId, date: BusinessDate): Long =
         byAccount(accountId).filter { it.date <= date }.fold(0L) { a, m -> if (m.direction == Direction.RECEIPT) Math.addExact(a, m.amount.rial) else Math.subtractExact(a, m.amount.rial) }
+    /**
+     * The lowest end-of-day balance on [date] and every day after it (and the balance the day before, if lower): what
+     * a payment dated [date] would take from each of those days.
+     */
+    fun lowestBalanceFrom(accountId: GlobalId, date: BusinessDate): Long {
+        var running = balanceAsOf(accountId, date.plusDays(-1))
+        var lowest = running
+        byAccount(accountId).filter { it.date >= date }.groupBy { it.date }.toSortedMap().values.forEach { rows ->
+            running = rows.fold(running) { a, m -> if (m.direction == Direction.RECEIPT) Math.addExact(a, m.amount.rial) else Math.subtractExact(a, m.amount.rial) }
+            lowest = minOf(lowest, running)
+        }
+        return lowest
+    }
 }

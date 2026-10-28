@@ -65,7 +65,14 @@ class SqlMovementStore(db: SqlDatabase) : SqlTable(db), MovementStore {
         d.long("recordedAt"), Codec.idOrNull(d.strOrNull("cheque")),
     )
 
-    override fun insert(movement: TreasuryMovement) = db.execute(
+    override fun insert(movement: TreasuryMovement) {
+        insertRow(movement)
+        val net = if (movement.direction == Direction.RECEIPT) movement.amount.rial else -movement.amount.rial
+        db.execute("INSERT INTO treasury_days (account_id, date, net) VALUES (?, ?, ?) ON CONFLICT(account_id, date) DO UPDATE SET net = treasury_days.net + excluded.net",
+            movement.accountId.value, movement.date.epochDay, net)
+    }
+
+    private fun insertRow(movement: TreasuryMovement) = db.execute(
         "INSERT INTO treasury_movements (id, account_id, direction, amount, source_type, source_id, reversal_of, doc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         movement.id.value, movement.accountId.value, movement.direction.name, movement.amount.rial, movement.source.type,
         movement.source.id.value, movement.reversalOf?.value,
@@ -87,6 +94,19 @@ class SqlMovementStore(db: SqlDatabase) : SqlTable(db), MovementStore {
 
     fun byAccount(accountId: GlobalId, limit: Int): List<TreasuryMovement> =
         docs("SELECT doc FROM treasury_movements WHERE account_id = ? ORDER BY rowid DESC LIMIT ?", accountId.value, limit).map(::read)
+
+    override fun balanceAsOf(accountId: GlobalId, date: BusinessDate): Long = db.query(
+        "SELECT COALESCE(SUM(net), 0) AS n FROM treasury_days WHERE account_id = ? AND date <= ?", accountId.value, date.epochDay,
+    ).single().long("n")
+
+    override fun lowestBalanceFrom(accountId: GlobalId, date: BusinessDate): Long {
+        var running = balanceAsOf(accountId, date.plusDays(-1))
+        var lowest = running
+        db.query("SELECT net FROM treasury_days WHERE account_id = ? AND date >= ? ORDER BY date", accountId.value, date.epochDay).forEach {
+            running = Math.addExact(running, it.long("net")); lowest = minOf(lowest, running)
+        }
+        return lowest
+    }
 
     override fun balance(accountId: GlobalId): Long = db.query(
         "SELECT COALESCE(SUM(CASE direction WHEN 'RECEIPT' THEN amount ELSE -amount END), 0) AS n FROM treasury_movements WHERE account_id = ?",

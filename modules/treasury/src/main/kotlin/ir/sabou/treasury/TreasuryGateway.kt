@@ -355,14 +355,8 @@ class TreasuryGateway(
      */
     private fun requireFunds(account: TreasuryAccount, amount: Money, date: BusinessDate) {
         if (account.allowOverdraft) return
-        // The lowest end-of-day balance from [date] onwards: a payment dated then lowers every one of those days.
-        var running = 0L
-        var available = Long.MAX_VALUE
-        movements.byAccount(account.id).groupBy { it.date }.toSortedMap().forEach { (day, rows) ->
-            running = rows.fold(running) { a, m -> if (m.direction == Direction.RECEIPT) Math.addExact(a, m.amount.rial) else Math.subtractExact(a, m.amount.rial) }
-            if (day >= date) available = minOf(available, running)
-        }
-        available = minOf(available, running, movements.balanceAsOf(account.id, date))
+        // A payment dated [date] lowers that day and every later one: each must still cover it (SABOU-AUDIT-004).
+        val available = movements.lowestBalanceFrom(account.id, date)
         ensure(available >= amount.rial) { DomainError.InsufficientFunds(account.name, available, amount.rial) }
     }
 }
