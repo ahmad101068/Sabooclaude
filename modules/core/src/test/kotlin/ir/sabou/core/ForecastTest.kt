@@ -114,7 +114,7 @@ class ForecastTest {
                 Money.ZERO, Money.ZERO, Money.ZERO, listOf(Settlement.Liquid(cash, amount)))).resultId
             core.salesOps.post(PostDailySale(id(), branch, sale))
         }
-        for (w in 1..8) {
+        for (w in 8 downTo 1) {                                                    // oldest first: a closed day takes nothing dated before it
             val d = from.plusDays(-7L * w)
             when (w) {
                 // Last week: open, nothing sold, the day closed with the cash counted.

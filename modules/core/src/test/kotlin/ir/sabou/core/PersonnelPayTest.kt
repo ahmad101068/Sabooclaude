@@ -158,5 +158,11 @@ class PersonnelPayTest {
     }
 
     /** A punch made at the time it states, in Iran: the main phone's clock is moved there first (SABOU-AUDIT-006). */
-    private fun punchAt(c: ClockPunch) = run { now = c.date.epochDay * 86_400_000L + (c.minute - 210) * 60_000L; core.shifts.punch(c) }
+    private fun punchAt(c: ClockPunch) = run { now = c.date.epochDay * 86_400_000L + (c.minute - 210) * 60_000L
+        // Moving the clock that far ends the owner's session; the clock screen stays signed in on the real phone.
+        try { core.shifts.punch(c) } catch (e: ir.sabou.kernel.DomainException) {
+            if (e.error.code != "AUTHENTICATION_REQUIRED") throw e
+            core.identity.login("owner", "123456".toCharArray()); core.shifts.punch(c)
+        }
+    }
 }

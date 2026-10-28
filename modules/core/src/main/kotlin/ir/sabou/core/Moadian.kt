@@ -63,7 +63,7 @@ class Moadian internal constructor(private val core: SabouCore) {
     /** Posted sales on account to a customer with a tax ID that have no live invoice yet (newest first). */
     fun candidates(): List<TaxCandidate> {
         val a = actor(Permission.TAX_SETTINGS)
-        val live = core.taxInvoiceStore.all().filter { it.kind == ir.sabou.sales.TaxInvoiceKind.ORIGINAL && it.status.live }.map { it.saleId }.toSet()
+        val live = core.taxInvoiceStore.all().filter { it.kind == ir.sabou.sales.TaxInvoiceKind.ORIGINAL && it.status != ir.sabou.sales.TaxInvoiceStatus.REJECTED && it.status != ir.sabou.sales.TaxInvoiceStatus.WITHDRAWN }.map { it.saleId }.toSet()
         val branches = core.branches.all().associate { it.id to it.name }
         return core.customers.all().filter { it.taxId.isNotEmpty() }.flatMap { c ->
             core.sales.receivablesOfCustomer(c.id).map { it.saleId }.distinct().mapNotNull { core.sales.sale(it) }
