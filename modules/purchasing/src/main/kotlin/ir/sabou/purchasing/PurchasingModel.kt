@@ -142,8 +142,8 @@ object InvoiceMatching {
      * may bring less (or nothing) of an item without it being a difference; more than ordered still is.
      */
     fun compare(order: PurchaseOrder, lines: List<InvoiceLine>, received: Map<GlobalId, Long> = emptyMap(), partial: Boolean = false): List<Discrepancy> {
-        val invoiced = lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } to l.sumOfExact { it.value.rial } }
-        val ordered = order.lines.groupBy { it.itemId }.mapValues { (item, l) -> maxOf(0L, l.sumOf { it.quantity.micros } - (received[item] ?: 0L)) to l.first().unitPrice.rial }
+        val invoiced = lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOfExact { it.quantity.micros } to l.sumOfExact { it.value.rial } }
+        val ordered = order.lines.groupBy { it.itemId }.mapValues { (item, l) -> maxOf(0L, l.sumOfExact { it.quantity.micros } - (received[item] ?: 0L)) to l.first().unitPrice.rial }
         val out = ArrayList<Discrepancy>()
         ordered.forEach { (item, o) ->
             val got = invoiced[item]
@@ -191,6 +191,8 @@ data class PurchaseInvoice(
     val vat: Money = Money.ZERO,
     val discount: Money = Money.ZERO,
     val freight: Money = Money.ZERO,
+    /** Corrections of its amounts after recording (SABOU-AUDIT-002), oldest first; [total] already includes them. */
+    val corrections: List<InvoiceCorrection> = emptyList(),
 ) {
     /** Not payable until someone reviews the differences. */
     val needsMatchReview: Boolean get() = discrepancies.isNotEmpty() && matchReview == null
@@ -202,8 +204,34 @@ data class PurchaseInvoice(
     }
     val approved: Boolean get() = approvals.size >= requiredApprovals
     val goodsTotal: Money get() = Money.sum(lines.map { it.value })
+    /** The amount first recorded; [total] is the amount after its corrections (SABOU-AUDIT-002). */
+    val originalTotal: Money get() = Money.of(Math.subtractExact(total.rial, corrections.fold(0L) { a, c -> Math.addExact(a, c.change) }))
+    /** The value of [itemId] on the invoice after its corrections. */
+    fun itemValue(itemId: GlobalId): Long = lines.filter { it.itemId == itemId }.fold(0L) { a, l -> a + l.value.rial } +
+        corrections.flatMap { it.items }.filter { it.itemId == itemId }.fold(0L) { a, c -> a + c.delta }
+    /** The amount of account line [index] after its corrections. */
+    fun accountValue(index: Int): Long = accountLines[index].amount.rial + corrections.flatMap { it.accounts }.filter { it.index == index }.fold(0L) { a, c -> a + c.delta }
     val openReviewLines: List<Pair<Int, ReviewLine>> get() = reviewLines.withIndex().filter { it.value.resolution == null }.map { it.index to it.value }
 }
+
+/**
+ * A recorded change of an invoice's amounts (SABOU-AUDIT-002): the supplier's real price was different (a typo, a
+ * price agreed later). Signed changes per goods item and per account line; the goods' share still in stock changed the
+ * stock's value, the rest went to cost of sales, the account lines to their expense.
+ */
+data class InvoiceCorrection(
+    val id: GlobalId,
+    val date: BusinessDate,
+    val items: List<ItemChange>,
+    val accounts: List<AccountChange>,
+    val reason: String,
+    val journalId: GlobalId?,
+) : java.io.Serializable {
+    val change: Long get() = items.fold(0L) { a, c -> Math.addExact(a, c.delta) } + accounts.fold(0L) { a, c -> Math.addExact(a, c.delta) }
+}
+
+data class ItemChange(val itemId: GlobalId, val delta: Long) : java.io.Serializable
+data class AccountChange(val index: Int, val delta: Long) : java.io.Serializable
 
 data class SupplierPayment(
     val id: GlobalId,
@@ -297,6 +325,8 @@ interface PurchaseStore {
     /** The POSTED invoice with this number; a reversed invoice frees its number for the corrected one. */
     fun invoiceByNumber(supplierId: GlobalId, normalizedNo: String): PurchaseInvoice?
     fun invoices(): List<PurchaseInvoice>
+    /** One supplier's invoices (an indexed read: what a payment, a return or a new invoice of theirs needs, SABOU-AUDIT-013). */
+    fun invoicesOf(supplierId: GlobalId): List<PurchaseInvoice> = invoices().filter { it.supplierId == supplierId }
     fun saveInvoice(invoice: PurchaseInvoice)
     fun payment(id: GlobalId): SupplierPayment?
     fun payments(invoiceId: GlobalId): List<SupplierPayment>

@@ -1,5 +1,6 @@
 package ir.sabou.sales
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -105,24 +106,24 @@ object Verhoeff {
 /** Sets the seller's tax identity and the VAT rates. Nothing is sent to the tax system. */
 @NoDocument
 data class SetTaxProfile(override val commandId: GlobalId, val sellerTaxId: String, val memoryId: String, val vatRates: List<VatRate>) : Command {
-    override val requiredPermission = Permission.TAX_SETTINGS
-    override val scope: Scope = Scope.Organization
+    override val requiredPermission get() = Permission.TAX_SETTINGS
+    override val scope: Scope get() = Scope.Organization
     override fun fingerprint() = "$sellerTaxId|$memoryId|" + vatRates.joinToString(";") { "${it.from.epochDay}:${it.bp}" }
 }
 
 /** Sets (or clears, with a blank [productId]) a menu item's tax product ID. */
 @NoDocument
 data class SetItemTaxCode(override val commandId: GlobalId, val menuItemId: GlobalId, val productId: String, val unitCode: String) : Command {
-    override val requiredPermission = Permission.TAX_SETTINGS
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.TAX_SETTINGS
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$menuItemId|$productId|$unitCode"
 }
 
 /** A customer's tax identity (for invoices with the buyer's details). */
 @NoDocument
 data class SetCustomerTaxInfo(override val commandId: GlobalId, override val scope: Scope.Branch, val customerId: GlobalId, val taxId: String, val postalCode: String) : Command {
-    override val requiredPermission = Permission.CUSTOMER_MANAGE
+    override val requiredPermission get() = Permission.CUSTOMER_MANAGE
     override fun fingerprint() = "$scope|$customerId|$taxId|$postalCode"
 }
 

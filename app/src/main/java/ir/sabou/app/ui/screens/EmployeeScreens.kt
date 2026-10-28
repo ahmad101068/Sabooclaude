@@ -285,6 +285,7 @@ object EmployeeScreens {
         var amount by rememberSaveable(v.advance.id) { mutableStateOf<Money?>(v.outstanding) }
         var account by rememberSaveable(v.advance.id) { mutableStateOf(accounts.firstOrNull()?.id) }
         var reason by rememberSaveable(v.advance.id) { mutableStateOf("") }
+        val repayId = ir.sabou.app.ui.rememberCommandId(v.advance.id)        // the same repayment if retried (SABOU-AUDIT-011)
         val action = rememberAction()
         when (mode) {
             "repay" -> {
@@ -292,7 +293,9 @@ object EmployeeScreens {
                 Picker("دریافت در", accounts.map { Choice(it.id, it.name) }, account, { account = it })
                 action.error?.let { Banner(it) }
                 Buttons("ثبت بازپرداخت", action.busy, amount != null && account != null, {
-                    action.run({ payroll.repayAdvance(ir.sabou.payroll.RepayAdvance(GlobalId.new(), e.scope, v.advance.id, account!!, amount!!, session.today)) }) { mode = null; onDone() }
+                    action.run({ payroll.repayAdvance(ir.sabou.payroll.RepayAdvance(repayId.value, e.scope, v.advance.id, account!!, amount!!, session.today)) }) {
+                        repayId.value = GlobalId.new(); mode = null; onDone()
+                    }
                 }, { mode = null })
             }
             "cancel" -> {

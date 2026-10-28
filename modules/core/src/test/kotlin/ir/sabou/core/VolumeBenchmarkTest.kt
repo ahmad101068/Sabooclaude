@@ -114,6 +114,15 @@ class VolumeBenchmarkTest {
         timed("scorecard 4 weeks", 1500) { core.assessments.of(branch, today.plusDays(-27), today) }
         timed("scorecard month", 1500) { core.assessments.of(branch, today.plusDays(-29), today) }
         timed("what-if 4 weeks", 1500) { core.whatIfs.prices(branch, today.plusDays(-27), today, mapOf(items.first() to 1_500L)) }
+        timed("management dashboard week", 1500) { core.managementDashboards.of(branch, today.plusDays(-6), today) }
+        // SABOU-AUDIT-013: writing stays quick as the books grow (a supplier's invoices are read by index, not all).
+        timed("record a purchase invoice", 800) {
+            core.purchasing.postInvoice(PostPurchaseInvoice(GlobalId.new(), branch, suppliers.first(), "bench-new", kitchen, today, today,
+                listOf(InvoiceLine(items.first(), Quantity.units(2), Money.of(2_000_000)))))
+        }
+        timed("pay a supplier", 800) {
+            core.purchasing.paySupplier(ir.sabou.purchasing.PaySupplier(GlobalId.new(), branch, suppliers.first(), cash, Money.of(1_000_000), today))
+        }
         db.close(); dir.toFile().deleteRecursively()
     }
 

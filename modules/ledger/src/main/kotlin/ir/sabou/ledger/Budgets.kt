@@ -43,7 +43,7 @@ data class SetBudget(
     val account: AccountCode,
     val periods: List<BudgetPeriod>,
 ) : Command {
-    override val requiredPermission = Permission.BUDGET_MANAGE
+    override val requiredPermission get() = Permission.BUDGET_MANAGE
     override fun fingerprint() = "$scope|$account|" + periods.joinToString(";") { "${it.from.epochDay}:${it.to.epochDay}:${it.amount.rial}" }
 }
 

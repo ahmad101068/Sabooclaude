@@ -90,6 +90,11 @@ internal class SecureChannel(
     private val output: DataOutputStream,
     sendKey: ByteArray,
     receiveKey: ByteArray,
+    /**
+     * The largest frame accepted now (SABOU-AUDIT-007): small until the peer has proved the key with a valid frame, so
+     * a stranger who knows a device id cannot make this phone set aside megabytes; the hub raises it after Hello.
+     */
+    @Volatile var maxFrame: Int = MAX_FRAME,
 ) {
     private val sendKey = SecretKeySpec(sendKey, "AES")
     private val receiveKey = SecretKeySpec(receiveKey, "AES")
@@ -110,8 +115,16 @@ internal class SecureChannel(
 
     fun receiveBytes(): ByteArray {
         val size = input.readInt()
-        if (size !in 16..MAX_FRAME) throw IOException("bad frame size")
-        val sealed = ByteArray(size).also { input.readFully(it) }
+        if (size !in 16..maxFrame) throw IOException("bad frame size")
+        // Read as the bytes arrive, never set aside the announced size up front: a frame claiming 48 MB costs only what
+        // was actually sent before the connection times out.
+        val sealed = if (size <= READ_STEP) ByteArray(size).also { input.readFully(it) } else {
+            val out = ByteArrayOutputStream(READ_STEP)
+            val step = ByteArray(READ_STEP)
+            var left = size
+            while (left > 0) { val n = minOf(left, READ_STEP); input.readFully(step, 0, n); out.write(step, 0, n); left -= n }
+            out.toByteArray()
+        }
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.DECRYPT_MODE, receiveKey, GCMParameterSpec(128, iv(received++)))
         return try {
@@ -127,6 +140,9 @@ internal class SecureChannel(
     companion object {
         /** Large enough for a command with a few photos attached; the full copy travels in chunks. */
         const val MAX_FRAME = 48 * 1024 * 1024
+        /** Before the peer is authenticated: a Hello or a pairing confirmation is a few hundred bytes. */
+        const val PRE_AUTH_MAX_FRAME = 64 * 1024
+        private const val READ_STEP = 1024 * 1024
     }
 }
 

@@ -27,6 +27,8 @@ data class StockShortage(
     val takenFromStock: Quantity = Quantity.ZERO,
     val takenCost: Money = Money.ZERO,
     val status: Status = Status.OPEN,
+    /** When it was recorded (clock); 0 for shortages recorded before this was kept (SABOU-AUDIT-009). */
+    val recordedAt: Long = 0L,
 ) {
     enum class Status { OPEN, SETTLED, WRITTEN_OFF, CANCELLED }
 

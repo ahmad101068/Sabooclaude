@@ -184,6 +184,8 @@ interface SalesStore {
     fun saveCollection(collection: Collection)
     fun day(scope: Scope.Branch, date: BusinessDate): SalesDay?
     fun saveDay(day: SalesDay)
+    /** The latest closed day of [scope] on or after [date], if any (SABOU-AUDIT-004). */
+    fun closedOnOrAfter(scope: Scope.Branch, date: BusinessDate): BusinessDate?
 }
 
 /** One imported point-of-sale day (ADR-0026). [active] until its sale is reversed. */

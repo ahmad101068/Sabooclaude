@@ -95,8 +95,8 @@ interface PayrollSettingsStore {
 
 @NoDocument
 data class SavePayrollSettings(override val commandId: GlobalId, val settings: PayrollSettings) : Command {
-    override val requiredPermission = Permission.PAYROLL_APPROVE
-    override val scope: Scope = Scope.Organization
+    override val requiredPermission get() = Permission.PAYROLL_APPROVE
+    override val scope: Scope get() = Scope.Organization
     override fun fingerprint() = settings.toString()
 }
 

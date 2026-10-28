@@ -29,7 +29,7 @@ data class PostManualJournal(
     val description: String,
     val lines: List<ManualLine>,
 ) : Command {
-    override val requiredPermission = Permission.JOURNAL_MANUAL_POST
+    override val requiredPermission get() = Permission.JOURNAL_MANUAL_POST
     override fun fingerprint() = "$scope|${date.epochDay}|$description|" +
         lines.joinToString(";") { "${it.account}:${it.debit.rial}:${it.credit.rial}:${it.memo}" }
 }
@@ -42,7 +42,7 @@ data class ReverseManualJournal(
     val date: BusinessDate,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.JOURNAL_MANUAL_REVERSE
+    override val requiredPermission get() = Permission.JOURNAL_MANUAL_REVERSE
     override fun fingerprint() = "$scope|$entryId|${date.epochDay}|$reason"
 }
 
@@ -52,16 +52,16 @@ data class ClosePeriod(
     val from: BusinessDate,
     val to: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.PERIOD_CLOSE
+    override val requiredPermission get() = Permission.PERIOD_CLOSE
     // A period lock applies to the whole organization, so it needs organization scope.
-    override val scope: Scope = Scope.Organization
+    override val scope: Scope get() = Scope.Organization
     override fun fingerprint() = "${from.epochDay}|${to.epochDay}"
 }
 
 @NoDocument
 data class ReopenPeriod(override val commandId: GlobalId, val lockId: GlobalId, val reason: String) : Command {
-    override val requiredPermission = Permission.PERIOD_REOPEN
-    override val scope: Scope = Scope.Organization
+    override val requiredPermission get() = Permission.PERIOD_REOPEN
+    override val scope: Scope get() = Scope.Organization
     override fun fingerprint() = "$lockId|$reason"
 }
 
@@ -72,18 +72,18 @@ data class ReopenPeriod(override val commandId: GlobalId, val lockId: GlobalId, 
  */
 @NoDocument
 data class DefineAccount(override val commandId: GlobalId, val code: String, val name: String) : Command {
-    override val requiredPermission = Permission.ACCOUNT_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.ACCOUNT_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$code|$name"
 }
 
 /** Renames an account of the restaurant's own, or retires one with nothing left on it. */
 @NoDocument
 data class UpdateAccount(override val commandId: GlobalId, val code: AccountCode, val name: String, val isActive: Boolean) : Command {
-    override val requiredPermission = Permission.ACCOUNT_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.ACCOUNT_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$code|$name|$isActive"
 }
 

@@ -35,7 +35,7 @@ data class CreatePurchaseOrder(
     val lines: List<OrderLine>,
     val note: String = "",
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_ORDER
+    override val requiredPermission get() = Permission.PURCHASE_ORDER
     override fun fingerprint() = "$scope|$supplierId|$locationId|${date.epochDay}|${expectedDate.epochDay}|$note|" +
         lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}:${it.unitPrice.rial}" }
 }
@@ -47,7 +47,7 @@ data class CancelPurchaseOrder(
     val orderId: GlobalId,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_ORDER
+    override val requiredPermission get() = Permission.PURCHASE_ORDER
     override fun fingerprint() = "$scope|$orderId|$reason"
 }
 

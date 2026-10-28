@@ -1,5 +1,7 @@
 package ir.sabou.kernel
 
+import ir.sabou.kernel.sumOfExact
+
 /** Iranian national id (کد ملی) check-digit validation; one rule for personnel, customers and the tax profile. */
 object NationalId {
     /** Persian/Arabic digits → Latin, surrounding spaces removed; the stored and compared form. */

@@ -23,42 +23,42 @@ import ir.sabou.platform.Permission
 /** A received cheque handed to the bank for collection (no money moves until it is collected). */
 @NoDocument
 data class DepositCheque(override val commandId: GlobalId, override val scope: Scope, val chequeId: GlobalId, val bankAccountId: GlobalId, val date: BusinessDate) : Command {
-    override val requiredPermission = Permission.CHEQUE_MANAGE
+    override val requiredPermission get() = Permission.CHEQUE_MANAGE
     override fun fingerprint() = "$scope|$chequeId|$bankAccountId|${date.epochDay}"
 }
 
 /** A deposited cheque taken back from the bank. */
 @NoDocument
 data class RecallCheque(override val commandId: GlobalId, override val scope: Scope, val chequeId: GlobalId, val date: BusinessDate, val reason: String) : Command {
-    override val requiredPermission = Permission.CHEQUE_MANAGE
+    override val requiredPermission get() = Permission.CHEQUE_MANAGE
     override fun fingerprint() = "$scope|$chequeId|${date.epochDay}|$reason"
 }
 
 /** A received cheque paid into our bank account. */
 @IssuesDocument(DocumentSeries.CHEQUE)
 data class CollectCheque(override val commandId: GlobalId, override val scope: Scope, val chequeId: GlobalId, val bankAccountId: GlobalId, val date: BusinessDate) : Command {
-    override val requiredPermission = Permission.CHEQUE_MANAGE
+    override val requiredPermission get() = Permission.CHEQUE_MANAGE
     override fun fingerprint() = "$scope|$chequeId|$bankAccountId|${date.epochDay}"
 }
 
 /** Our cheque paid by our bank: the money leaves the bank account it was drawn on. */
 @IssuesDocument(DocumentSeries.CHEQUE)
 data class ClearIssuedCheque(override val commandId: GlobalId, override val scope: Scope, val chequeId: GlobalId, val date: BusinessDate) : Command {
-    override val requiredPermission = Permission.CHEQUE_MANAGE
+    override val requiredPermission get() = Permission.CHEQUE_MANAGE
     override fun fingerprint() = "$scope|$chequeId|${date.epochDay}"
 }
 
 /** A cheque (received or ours) that bounced: the claim or debt moves to the bounced-cheques account. */
 @IssuesDocument(DocumentSeries.CHEQUE)
 data class BounceCheque(override val commandId: GlobalId, override val scope: Scope, val chequeId: GlobalId, val date: BusinessDate, val reason: String) : Command {
-    override val requiredPermission = Permission.CHEQUE_MANAGE
+    override val requiredPermission get() = Permission.CHEQUE_MANAGE
     override fun fingerprint() = "$scope|$chequeId|${date.epochDay}|$reason"
 }
 
 /** A bounced cheque settled in money: received into [accountId] (theirs) or paid from it (ours). */
 @IssuesDocument(DocumentSeries.CHEQUE)
 data class SettleBouncedCheque(override val commandId: GlobalId, override val scope: Scope, val chequeId: GlobalId, val accountId: GlobalId, val date: BusinessDate) : Command {
-    override val requiredPermission = Permission.CHEQUE_MANAGE
+    override val requiredPermission get() = Permission.CHEQUE_MANAGE
     override fun fingerprint() = "$scope|$chequeId|$accountId|${date.epochDay}"
 }
 

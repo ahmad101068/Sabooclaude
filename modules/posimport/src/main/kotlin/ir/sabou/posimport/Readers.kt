@@ -19,6 +19,8 @@ class ImportFileException(message: String) : Exception(message)
 object Sheets {
     const val MAX_FILE_BYTES = 10L * 1024 * 1024
     const val MAX_ROWS = 50_000
+    /** Columns of a sheet read at most (a point-of-sale or bank report has a few dozen). */
+    const val MAX_COLUMNS = 512
 
     fun read(fileName: String, bytes: ByteArray): Sheet {
         if (bytes.size > MAX_FILE_BYTES) throw ImportFileException("فایل بیش از ۱۰ مگابایت است.")
@@ -100,12 +102,16 @@ internal object Xlsx {
         for (i in 0 until rowNodes.length) {
             val row = rowNodes.item(i) as Element
             val index = row.getAttribute("r").toIntOrNull()?.minus(1) ?: rows.size
+            // A row number or column far beyond any real report is a broken file, not millions of empty cells to make
+            // (SABOU-AUDIT-010).
+            if (index !in 0 until Sheets.MAX_ROWS) throw ImportFileException("شماره‌ی سطر فایل نامعتبر است.")
             while (rows.size < index) rows.add(emptyList())      // skipped (empty) rows keep their place
             val values = ArrayList<String?>()
             val cs = row.getElementsByTagNameNS("*", "c")
             for (j in 0 until cs.length) {
                 val c = cs.item(j) as Element
                 val col = column(c.getAttribute("r")) ?: values.size
+                if (col !in 0 until Sheets.MAX_COLUMNS) throw ImportFileException("شماره‌ی ستون فایل نامعتبر است.")
                 while (values.size < col) values.add(null)
                 val type = c.getAttribute("t")
                 val v = c.getElementsByTagNameNS("*", "v").item(0)?.textContent
@@ -126,6 +132,7 @@ internal object Xlsx {
     private fun column(ref: String): Int? {
         val letters = ref.takeWhile { it.isLetter() }.uppercase()
         if (letters.isEmpty()) return null
+        if (letters.length > 3 || letters.any { it !in 'A'..'Z' }) return Int.MAX_VALUE   // beyond XFD: refused by the caller
         return letters.fold(0) { acc, ch -> acc * 26 + (ch - 'A' + 1) } - 1
     }
 

@@ -115,10 +115,10 @@ class PersonnelPayTest {
         val night = day.plusDays(2)                                                       // not a Friday
         now = night.epochDay * 86_400_000L + 18 * 3_600_000L
         core.identity.login("owner", "123456".toCharArray())
-        core.shifts.punch(ClockPunch(id(), branch, ali, "2468", night, 18 * 60))
+        punchAt(ClockPunch(id(), branch, ali, "2468", night, 18 * 60))
         now += 8 * 3_600_000L
         core.identity.login("owner", "123456".toCharArray())
-        core.shifts.punch(ClockPunch(id(), branch, ali, "2468", night.plusDays(1), 2 * 60))
+        punchAt(ClockPunch(id(), branch, ali, "2468", night.plusDays(1), 2 * 60))
         core.shifts.confirmDay(ConfirmDayTime(id(), branch, night))
         assertEquals(240, core.personnel.attendanceOn(ali, night)!!.nightMinutes)        // 22:00–02:00
         val friday = generateSequence(month(7).first) { it.plusDays(1) }.first { JalaliCalendar.weekdayIndex(it) == 6 }
@@ -156,4 +156,7 @@ class PersonnelPayTest {
         assertEquals(ir.sabou.kernel.Ratio.mulDiv(120_000_000L, service, 365), lines["SANAVAT"])                     // 30 days × 4 M per year of service
         assertTrue((lines["LEAVE_PAYOUT"] ?: 0) > 0)
     }
+
+    /** A punch made at the time it states, in Iran: the main phone's clock is moved there first (SABOU-AUDIT-006). */
+    private fun punchAt(c: ClockPunch) = run { now = c.date.epochDay * 86_400_000L + (c.minute - 210) * 60_000L; core.shifts.punch(c) }
 }

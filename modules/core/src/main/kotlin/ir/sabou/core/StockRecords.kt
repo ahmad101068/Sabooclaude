@@ -28,7 +28,7 @@ data class InventoryDocView(
     val lines: List<DocLine>,
     val reversed: Boolean,
 ) {
-    val value: Long get() = lines.filter { it.quantity < 0 }.sumOf { -it.value }.takeIf { it > 0 } ?: lines.sumOf { it.value }
+    val value: Long get() = lines.filter { it.quantity < 0 }.sumOfExact { -it.value }.takeIf { it > 0 } ?: lines.sumOfExact { it.value }
 }
 
 /** A transfer between branches; [incoming] when [branch] is the receiving one. */
@@ -147,6 +147,7 @@ class StockRecords internal constructor(private val core: SabouCore) {
         ir.sabou.inventory.InventoryGateway.SHORTAGE -> "تسویه کسری مصرف"
         else -> when (m.kind) {
             MovementKind.RECEIPT -> "خرید و دریافت کالا"
+            MovementKind.REVALUATION -> "اصلاح بهای فاکتور خرید"
             MovementKind.ISSUE -> if (m.quantityDelta < 0) "مصرف فروش یا مرجوعی" else "برگشت مصرف"
             else -> m.kind.name
         }

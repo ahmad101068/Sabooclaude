@@ -98,7 +98,7 @@ data class OpenAssessmentAction(
     val cost: Long,
     val today: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.BUDGET_MANAGE
+    override val requiredPermission get() = Permission.BUDGET_MANAGE
     override fun fingerprint() = "$scope|$findingKey|$kpiId|$title|$action|$owner|${due.epochDay}|$cost|${today.epochDay}"
 }
 
@@ -112,7 +112,7 @@ data class CloseAssessmentAction(
     val note: String,
     val today: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.BUDGET_MANAGE
+    override val requiredPermission get() = Permission.BUDGET_MANAGE
     override fun fingerprint() = "$scope|$actionId|$status|$note|${today.epochDay}"
 }
 
@@ -125,7 +125,7 @@ data class MarkFalseAlarm(
     val note: String,
     val today: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.BUDGET_MANAGE
+    override val requiredPermission get() = Permission.BUDGET_MANAGE
     override fun fingerprint() = "$scope|$findingKey|$note|${today.epochDay}"
 }
 

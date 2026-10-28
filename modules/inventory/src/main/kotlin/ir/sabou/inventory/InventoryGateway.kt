@@ -9,6 +9,7 @@ import ir.sabou.kernel.Quantity
 import ir.sabou.kernel.Ratio
 import ir.sabou.kernel.Rounding
 import ir.sabou.kernel.ensure
+import ir.sabou.ledger.AccountCode
 import ir.sabou.ledger.JournalDraft
 import ir.sabou.ledger.JournalEntry
 import ir.sabou.ledger.Ledger
@@ -24,6 +25,9 @@ import ir.sabou.platform.ModuleId
 data class ReceiptLine(val itemId: GlobalId, val quantity: Quantity, val value: Money, val expiresOn: BusinessDate? = null) : java.io.Serializable
 data class IssueLine(val itemId: GlobalId, val quantity: Quantity) : java.io.Serializable
 data class IssuedCost(val itemId: GlobalId, val quantity: Quantity, val cost: Money)
+/** A change of one item's value: in stock ([stockDelta]) and in cost of sales ([costDelta]), signed Rial. */
+data class Revaluation(val itemId: GlobalId, val stockDelta: Long, val costDelta: Long)
+
 /** What a consumption took from stock at cost, and what it could not (left as open shortages, ADR-0022). */
 data class Consumption(val lines: List<IssuedCost>, val totalCost: Money, val journal: JournalEntry?, val shortages: List<StockShortage> = emptyList())
 
@@ -154,7 +158,7 @@ class InventoryGateway(
             stockOut(context, it.itemId, location, it.quantity, it.cost, MovementKind.ISSUE, date, journal?.id, SourceDocument(owner.module, sourceType, sourceId), null)
         }
         val recorded = missing.map { m ->
-            StockShortage(GlobalId.new(), m.itemId, location.id, date, sourceType, sourceId, m.quantity).also {
+            StockShortage(GlobalId.new(), m.itemId, location.id, date, sourceType, sourceId, m.quantity, recordedAt = context.nowEpochMillis).also {
                 shortages.save(it)
                 context.audit(AuditDraft("STOCK_SHORTAGE_OPEN", "STOCK_SHORTAGE", it.id.value, "item=${m.itemId};loc=${location.id};qty=${m.quantity.micros};source=$sourceType:$sourceId"))
             }
@@ -200,8 +204,10 @@ class InventoryGateway(
      * be taken from stock: it is written off at an estimated cost (COGS ← inventory variance), keeping the cost of
      * what was sold in the cost of sales. Estimate: the average cost at the location, else the last cost it came in at.
      */
-    fun writeOffShortages(context: CommandContext, location: Location, itemId: GlobalId, date: BusinessDate, sourceId: GlobalId) {
-        for (shortage in shortages.open(itemId, location.id)) {
+    fun writeOffShortages(context: CommandContext, location: Location, itemId: GlobalId, date: BusinessDate, sourceId: GlobalId, only: Set<GlobalId>? = null) {
+        // Only what was consumed before the shelf was counted is measured by the count (SABOU-AUDIT-009): [only] are the
+        // shortages open at that moment. One recorded after it stays open, to be settled by the goods that come in.
+        for (shortage in shortages.open(itemId, location.id).filter { only == null || it.id in only }) {
             val unit = unitCost(itemId, location.id)
             val cost = if (unit == null) Money.ZERO else Money.of(Ratio.mulDiv(unit, shortage.open.micros, Quantity.SCALE))
             if (!cost.isZero) ledger.post(context, capability, JournalDraft(costDate(context, shortage, date), location.scope, SHORTAGE, shortage.id, "کسری مصرف در انبارگردانی", listOf(
@@ -254,6 +260,7 @@ class InventoryGateway(
 
     fun shortagesOf(sourceType: String, sourceId: GlobalId): List<StockShortage> = shortages.ofSource(sourceType, sourceId)
     fun openShortages(locationIds: Set<GlobalId>): List<StockShortage> = shortages.openAt(locationIds)
+    fun openShortagesOf(itemId: GlobalId, locationId: GlobalId): List<StockShortage> = shortages.open(itemId, locationId)
 
     /**
      * Reverses every stock movement of one source document at its original value. Taking back a
@@ -296,13 +303,62 @@ class InventoryGateway(
         }
     }
 
+    /**
+     * Changes the value of goods in stock without moving any, and books the change (a corrected purchase price,
+     * SABOU-AUDIT-002): per item, [Revaluation.stockDelta] goes to the stock at [locationId] and the inventory account,
+     * [Revaluation.costDelta] to cost of sales (for what was already used). [counterLines] balance it — the supplier's
+     * account, an expense — in one journal of [owner].
+     */
+    fun revalue(
+        context: CommandContext, owner: PostingCapability, locationId: GlobalId?, parts: List<Revaluation>, date: BusinessDate,
+        sourceType: String, sourceId: GlobalId, description: String, scope: ir.sabou.kernel.Scope, counterLines: List<LineDraft>,
+    ): JournalEntry {
+        requireOwner(context, owner)
+        val location = locationId?.let(::location)
+        ensure(parts.none { it.stockDelta != 0L } || location != null) { DomainError.InvalidInput("location", "این فاکتور انبار ندارد.") }
+        val lines = ArrayList<LineDraft>()
+        fun signed(account: AccountCode, amount: Long, memo: String) {
+            if (amount > 0) lines += LineDraft(account, debit = Money.of(amount), memo = memo, by = capability)
+            if (amount < 0) lines += LineDraft(account, credit = Money.of(-amount), memo = memo, by = capability)
+        }
+        parts.forEach { p ->
+            signed(StandardAccounts.INVENTORY, p.stockDelta, nameOf(p.itemId))
+            signed(StandardAccounts.COGS, p.costDelta, "اصلاح بهای ${nameOf(p.itemId)} (مصرف‌شده)")
+        }
+        val journal = ledger.post(context, owner, JournalDraft(date, scope, sourceType, sourceId, description, lines + counterLines))
+        parts.filter { it.stockDelta != 0L }.forEach { p ->
+            val before = stock.balance(p.itemId, location!!.id)
+            ensure(!before.quantity.isZero && before.value.rial + p.stockDelta >= 0) { DomainError.InvalidState("STOCK", "REVALUATION_EXCEEDS_VALUE") }
+            stock.replace(before, before.copy(value = Money.of(before.value.rial + p.stockDelta)))
+            record(context, p.itemId, location, MovementKind.REVALUATION, 0, p.stockDelta, date, journal.id, SourceDocument(owner.module, sourceType, sourceId), null)
+        }
+        return journal
+    }
+
+    /**
+     * Undoes a [revalue] (its journal, and the stock values it changed) when its document is reversed — a corrected
+     * purchase invoice reversed while its goods are still in stock.
+     */
+    fun reverseRevaluation(context: CommandContext, owner: PostingCapability, sourceType: String, sourceId: GlobalId, journalId: GlobalId, date: BusinessDate, reason: String) {
+        requireOwner(context, owner)
+        val moves = stock.movementsBySource(sourceType, sourceId).filter { it.reversalOf == null && it.kind == MovementKind.REVALUATION }
+        val reversal = ledger.reverse(context, owner, setOf(capability), journalId, date, reason)
+        moves.forEach { m ->
+            val location = location(m.locationId)
+            val before = stock.balance(m.itemId, location.id)
+            ensure(before.value.rial - m.valueDelta >= 0 && !before.quantity.isZero) { DomainError.InvalidState("STOCK", "REVALUATION_EXCEEDS_VALUE") }
+            stock.replace(before, before.copy(value = Money.of(before.value.rial - m.valueDelta)))
+            record(context, m.itemId, location, MovementKind.REVALUATION, 0, -m.valueDelta, date, reversal.id, m.source, m.id)
+        }
+    }
+
     /** Goods in; [inLots] are the parts of [quantity] with a known expiry (the rest has none). */
     internal fun stockIn(
         context: CommandContext, itemId: GlobalId, location: Location, quantity: Quantity, value: Money,
         kind: MovementKind, date: BusinessDate, journalId: GlobalId?, source: SourceDocument, reversalOf: GlobalId?,
         inLots: List<LotPart> = emptyList(),
     ) {
-        ledger.requireOpenPeriod(date)   // also for moves without a journal (same-branch transfer, zero value)
+        ledger.requireDate(context, date, source.type)   // also for moves without a journal (same-branch transfer, production, zero value)
         val before = stock.balance(itemId, location.id)
         stock.replace(before, before.copy(quantity = before.quantity + quantity, value = before.value + value))
         record(context, itemId, location, kind, quantity.micros, value.rial, date, journalId, source, reversalOf)
@@ -321,7 +377,7 @@ class InventoryGateway(
         context: CommandContext, itemId: GlobalId, location: Location, quantity: Quantity, value: Money,
         kind: MovementKind, date: BusinessDate, journalId: GlobalId?, source: SourceDocument, reversalOf: GlobalId?,
     ): List<LotPart> {
-        ledger.requireOpenPeriod(date)
+        ledger.requireDate(context, date, source.type)
         val before = stock.balance(itemId, location.id)
         ensure(quantity <= before.quantity) { DomainError.InsufficientStock(itemId.value, before.quantity.micros, quantity.micros, nameOf(itemId)) }
         ensure(value <= before.value) { DomainError.InsufficientStock(itemId.value, before.value.rial, value.rial) }

@@ -73,7 +73,7 @@ data class SaveCountPlan(
     val frequency: CountFrequency,
     val isActive: Boolean = true,
 ) : Command {
-    override val requiredPermission = Permission.INVENTORY_ADJUST
+    override val requiredPermission get() = Permission.INVENTORY_ADJUST
     override fun fingerprint() = "$scope|$planId|${name.trim()}|$locationId|${itemIds.joinToString(",")}|${frequency.kind}:${frequency.day}|$isActive"
 }
 

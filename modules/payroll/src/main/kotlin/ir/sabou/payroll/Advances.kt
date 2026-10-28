@@ -47,7 +47,7 @@ data class GiveAdvance(
     val installments: Int,
     val note: String,
 ) : Command {
-    override val requiredPermission = Permission.PAYROLL_PAY
+    override val requiredPermission get() = Permission.PAYROLL_PAY
     override fun fingerprint() = "$scope|$employeeId|$treasuryAccountId|${amount.rial}|${date.epochDay}|$installments|$note"
 }
 
@@ -61,14 +61,14 @@ data class RepayAdvance(
     val amount: Money,
     val date: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.PAYROLL_PAY
+    override val requiredPermission get() = Permission.PAYROLL_PAY
     override fun fingerprint() = "$scope|$advanceId|$treasuryAccountId|${amount.rial}|${date.epochDay}"
 }
 
 /** Cancels an advance recorded by mistake, before anything of it was paid back. */
 @IssuesDocument(DocumentSeries.REVERSAL)
 data class ReverseAdvance(override val commandId: GlobalId, override val scope: Scope.Branch, val advanceId: GlobalId, val date: BusinessDate, val reason: String) : Command {
-    override val requiredPermission = Permission.PAYROLL_PAY
+    override val requiredPermission get() = Permission.PAYROLL_PAY
     override fun fingerprint() = "$scope|$advanceId|${date.epochDay}|$reason"
 }
 

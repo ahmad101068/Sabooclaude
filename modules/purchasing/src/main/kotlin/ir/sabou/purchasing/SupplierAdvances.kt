@@ -43,7 +43,7 @@ data class PaySupplierAdvance(
     val note: String,
     val cheque: ChequeDetails? = null,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_PAY
+    override val requiredPermission get() = Permission.PURCHASE_PAY
     override fun fingerprint() = "$scope|$supplierId|$treasuryAccountId|${amount.rial}|${date.epochDay}|$note|${cheque?.fingerprint()}"
 }
 
@@ -57,14 +57,14 @@ data class ApplySupplierAdvance(
     val amount: Money,
     val date: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_PAY
+    override val requiredPermission get() = Permission.PURCHASE_PAY
     override fun fingerprint() = "$scope|$advanceId|$invoiceId|${amount.rial}|${date.epochDay}"
 }
 
 /** Takes back an advance paid by mistake (none of it set against an invoice). */
 @IssuesDocument(DocumentSeries.REVERSAL)
 data class ReverseSupplierAdvance(override val commandId: GlobalId, override val scope: Scope.Branch, val advanceId: GlobalId, val date: BusinessDate, val reason: String) : Command {
-    override val requiredPermission = Permission.PURCHASE_REVERSE
+    override val requiredPermission get() = Permission.PURCHASE_REVERSE
     override fun fingerprint() = "$scope|$advanceId|${date.epochDay}|$reason"
 }
 
@@ -81,6 +81,6 @@ data class PaySupplier(
     val amount: Money,
     val date: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_PAY
+    override val requiredPermission get() = Permission.PURCHASE_PAY
     override fun fingerprint() = "$scope|$supplierId|$treasuryAccountId|${amount.rial}|${date.epochDay}"
 }

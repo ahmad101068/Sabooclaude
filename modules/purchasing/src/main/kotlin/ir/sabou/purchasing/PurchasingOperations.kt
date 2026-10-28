@@ -46,9 +46,9 @@ import ir.sabou.treasury.TreasuryGateway
 
 @NoDocument
 data class RegisterSupplier(override val commandId: GlobalId, val name: String, val phone: String) : Command {
-    override val requiredPermission = Permission.SUPPLIER_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.SUPPLIER_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$name|$phone"
 }
 
@@ -71,9 +71,9 @@ data class UpdateSupplier(
     /** Send orders by SMS to the supplier's mobile; null keeps it as it is. */
     val orderSms: Boolean? = null,
 ) : Command {
-    override val requiredPermission = Permission.SUPPLIER_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.SUPPLIER_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$supplierId|$name|$phone|$isActive|${deliveryDays.sorted()}|$cutoffMinutes|$leadDays|$note|$taxId|$address|$sheba|$orderSms"
 }
 
@@ -110,8 +110,8 @@ data class PostPurchaseInvoice(
     /** Part of [orderId] arrived: the order stays open for the rest. */
     val orderPartial: Boolean = false,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_RECORD
-    override val additionalPermissions = if (payNow != null) setOf(Permission.PURCHASE_PAY) else emptySet()
+    override val requiredPermission get() = Permission.PURCHASE_RECORD
+    override val additionalPermissions get() = if (payNow != null) setOf(Permission.PURCHASE_PAY) else emptySet()
     override fun fingerprint() = "$scope|$supplierId|$supplierInvoiceNo|$locationId|${date.epochDay}|${dueDate.epochDay}|" +
         lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}:${it.value.rial}:${it.supplierItemName}" } + "|${payNow?.fingerprint()}|" +
         accountLines.joinToString(";") { "${it.account}:${it.amount.rial}:${it.branch}:${it.memo}" } + "|" +
@@ -122,7 +122,7 @@ data class PostPurchaseInvoice(
 /** Accepts an invoice's differences from its order (or a possible duplicate) after looking at them (ADR-0029). */
 @NoDocument
 data class ReviewInvoiceMatch(override val commandId: GlobalId, override val scope: Scope.Branch, val invoiceId: GlobalId, val note: String) : Command {
-    override val requiredPermission = Permission.PURCHASE_APPROVE
+    override val requiredPermission get() = Permission.PURCHASE_APPROVE
     override fun fingerprint() = "$scope|$invoiceId|${note.trim()}"
 }
 
@@ -134,7 +134,7 @@ data class AttachToInvoice(
     val invoiceId: GlobalId,
     val attachments: List<AttachmentInput>,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_RECORD
+    override val requiredPermission get() = Permission.PURCHASE_RECORD
     override fun fingerprint() = "$scope|$invoiceId|" + attachments.joinToString(";") { it.fingerprint() }
 }
 
@@ -154,7 +154,7 @@ data class ResolveReviewLine(
     val account: AccountCode?,
     val date: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_RECORD
+    override val requiredPermission get() = Permission.PURCHASE_RECORD
     override fun fingerprint() = "$scope|$invoiceId|$index|$itemId|${quantity?.micros}|$locationId|$account|${date.epochDay}"
 }
 
@@ -169,7 +169,7 @@ data class PaySupplierInvoice(
     val cheque: ChequeDetails? = null,
     val chequeId: GlobalId? = null,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_PAY
+    override val requiredPermission get() = Permission.PURCHASE_PAY
     override fun fingerprint() = "$scope|$invoiceId|$treasuryAccountId|${amount.rial}|${date.epochDay}|${cheque?.fingerprint()}|$chequeId"
 }
 
@@ -181,7 +181,7 @@ data class ReverseSupplierPayment(
     val date: BusinessDate,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_REVERSE
+    override val requiredPermission get() = Permission.PURCHASE_REVERSE
     override fun fingerprint() = "$scope|$paymentId|${date.epochDay}|$reason"
 }
 
@@ -194,9 +194,36 @@ data class ReversePurchaseInvoice(
     val date: BusinessDate,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_REVERSE
+    override val requiredPermission get() = Permission.PURCHASE_REVERSE
     override fun fingerprint() = "$scope|$invoiceId|${date.epochDay}|$reason"
 }
+
+/**
+ * Corrects the amounts of a recorded invoice (SABOU-AUDIT-002): the corrected value of goods items ([items]: the whole
+ * value of that item on the invoice) and of account lines ([accounts]: by index). Works whether or not the goods are
+ * still in stock — the share in stock changes the stock's value, the share already used changes cost of sales — and
+ * after payments, as long as what was already paid or credited does not exceed the corrected amount.
+ */
+@IssuesDocument(DocumentSeries.PURCHASE_CORRECTION)
+data class CorrectPurchaseInvoice(
+    override val commandId: GlobalId,
+    override val scope: Scope.Branch,
+    val invoiceId: GlobalId,
+    val items: List<InvoiceLineValue>,
+    val date: BusinessDate,
+    val reason: String,
+    val accounts: List<AccountLineValue> = emptyList(),
+) : Command {
+    override val requiredPermission get() = Permission.PURCHASE_REVERSE
+    override fun fingerprint() = "$scope|$invoiceId|${items.joinToString(",") { "${it.itemId}=${it.value.rial}" }}|" +
+        "${accounts.joinToString(",") { "${it.index}=${it.amount.rial}" }}|${date.epochDay}|$reason"
+}
+
+/** The corrected value of an item on an invoice (all its lines together). */
+data class InvoiceLineValue(val itemId: GlobalId, val value: Money) : java.io.Serializable
+
+/** The corrected amount of an invoice's account line [index]. */
+data class AccountLineValue(val index: Int, val amount: Money) : java.io.Serializable
 
 /**
  * Goods sent back to the supplier, credited at the invoice price. The credit settles this invoice
@@ -212,7 +239,7 @@ data class ReturnToSupplier(
     val date: BusinessDate,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_REVERSE
+    override val requiredPermission get() = Permission.PURCHASE_REVERSE
     override fun fingerprint() = "$scope|$invoiceId|${date.epochDay}|$reason|" + lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}" }
 }
 
@@ -225,7 +252,7 @@ data class ApplySupplierCredit(
     val amount: Money,
     val date: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_PAY
+    override val requiredPermission get() = Permission.PURCHASE_PAY
     override fun fingerprint() = "$scope|$invoiceId|${amount.rial}|${date.epochDay}"
 }
 
@@ -239,7 +266,7 @@ data class ReleaseCreditAllocation(
     /** When an advance's allocation is taken back, the date of that correction (default: the allocation's). */
     val date: BusinessDate? = null,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_PAY
+    override val requiredPermission get() = Permission.PURCHASE_PAY
     override fun fingerprint() = "$scope|$allocationId|$reason|${date?.epochDay}"
 }
 
@@ -254,8 +281,8 @@ data class ReceiveSupplierRefund(
     val date: BusinessDate,
     val cheque: ChequeDetails? = null,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_PAY
-    override val additionalPermissions = setOf(Permission.TREASURY_RECEIPT)
+    override val requiredPermission get() = Permission.PURCHASE_PAY
+    override val additionalPermissions get() = setOf(Permission.TREASURY_RECEIPT)
     override fun fingerprint() = "$scope|$supplierId|$treasuryAccountId|${amount.rial}|${date.epochDay}|${cheque?.fingerprint()}"
 }
 
@@ -267,7 +294,7 @@ data class ReverseSupplierRefund(
     val date: BusinessDate,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.PURCHASE_REVERSE
+    override val requiredPermission get() = Permission.PURCHASE_REVERSE
     override fun fingerprint() = "$scope|$refundId|${date.epochDay}|$reason"
 }
 
@@ -285,7 +312,7 @@ data class RecordSupplierOpeningBalance(
     val date: BusinessDate,
     val dueDate: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.JOURNAL_MANUAL_POST
+    override val requiredPermission get() = Permission.JOURNAL_MANUAL_POST
     override fun fingerprint() = "$scope|$supplierId|$reference|${amount.rial}|${date.epochDay}|${dueDate.epochDay}"
 }
 
@@ -316,7 +343,7 @@ class PurchasingOperations(
 
     /** Return credit of a supplier in a branch not yet set against any invoice. */
     fun unappliedCredit(supplierId: GlobalId, scope: Scope.Branch): Money {
-        val returned = purchases.invoices().filter { it.supplierId == supplierId && it.scope == scope }
+        val returned = purchases.invoicesOf(supplierId).filter { it.scope == scope }
             .sumOfExact { inv -> purchases.returns(inv.id).sumOfExact { it.credit.rial } }
         val allocated = purchases.allocationsOf(supplierId, scope).filter { !it.released && it.advanceId == null }.sumOfExact { it.amount.rial }
         val refunded = purchases.refundsOf(supplierId, scope).filter { !it.reversed }.sumOfExact { it.amount.rial }
@@ -325,8 +352,8 @@ class PurchasingOperations(
 
     /** Supplier sub-ledger balance (owed minus unapplied credit); equals GL 2101 for that supplier. */
     fun supplierBalance(supplierId: GlobalId, scope: Scope.Branch? = null): SignedAmount {
-        val scopes = purchases.invoices().filter { it.supplierId == supplierId && (scope == null || it.scope == scope) }.map { it.scope }.distinct()
-        val owed = purchases.invoices().filter { it.supplierId == supplierId && (scope == null || it.scope == scope) }.sumOfExact { outstanding(it.id).rial }
+        val scopes = purchases.invoicesOf(supplierId).filter { scope == null || it.scope == scope }.map { it.scope }.distinct()
+        val owed = purchases.invoicesOf(supplierId).filter { scope == null || it.scope == scope }.sumOfExact { outstanding(it.id).rial }
         val ahead = advances.of(supplierId).filter { !it.reversed && (scope == null || it.scope == scope) }.sumOfExact { advanceLeft(it.id).rial }
         return SignedAmount(owed - scopes.sumOfExact { unappliedCredit(supplierId, it).rial } - ahead)
     }
@@ -402,8 +429,8 @@ class PurchasingOperations(
     /** One payment document per invoice, oldest due first, until [PaySupplier.amount] is used. */
     fun paySupplier(c: PaySupplier): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
         ensure(!cmd.amount.isZero) { DomainError.InvalidInput("amount", "مبلغ باید بیشتر از صفر باشد.") }
-        val payable = purchases.invoices().filter {
-            it.supplierId == cmd.supplierId && it.scope == cmd.scope && it.status == InvoiceStatus.POSTED && it.approved && !it.needsMatchReview && it.date <= cmd.date
+        val payable = purchases.invoicesOf(cmd.supplierId).filter {
+            it.scope == cmd.scope && it.status == InvoiceStatus.POSTED && it.approved && !it.needsMatchReview && it.date <= cmd.date
         }.sortedWith(compareBy({ it.dueDate }, { it.date })).map { it to outstanding(it.id) }.filter { !it.second.isZero }
         ensure(cmd.amount.rial <= payable.sumOfExact { it.second.rial }) { DomainError.InvalidState("SUPPLIER", "PAYMENT_EXCEEDS_PAYABLE") }
         var left = cmd.amount
@@ -522,7 +549,7 @@ class PurchasingOperations(
         cmd.lines.filter { it.supplierItemName.isNotBlank() }.forEach { suppliers.saveAlias(supplier.id, SupplierNames.normalize(it.supplierItemName), it.itemId) }
         order?.let {
             val received = receivedOf(it).toMutableMap().apply { lines.forEach { l -> merge(l.itemId, l.quantity.micros, Long::plus) } }
-            val complete = !cmd.orderPartial || it.lines.groupBy { l -> l.itemId }.all { (item, l) -> (received[item] ?: 0L) >= l.sumOf { x -> x.quantity.micros } }
+            val complete = !cmd.orderPartial || it.lines.groupBy { l -> l.itemId }.all { (item, l) -> (received[item] ?: 0L) >= l.sumOfExact { x -> x.quantity.micros } }
             purchases.saveOrder(it.copy(status = if (complete) OrderStatus.RECEIVED else OrderStatus.OPEN, invoiceId = invoice.id, invoiceIds = it.invoiceIds + invoice.id))
             ctx.audit(AuditDraft("PURCHASE_ORDER_RECEIVE", "PURCHASE_ORDER", it.id.value, "invoice=${invoice.id};complete=$complete"))
         }
@@ -616,6 +643,10 @@ class PurchasingOperations(
         ensure(purchases.payments(invoice.id).none { !it.reversed }) { DomainError.InvalidState("PURCHASE_INVOICE", "HAS_ACTIVE_PAYMENTS") }
         ensure(purchases.returns(invoice.id).isEmpty()) { DomainError.InvalidState("PURCHASE_INVOICE", "HAS_RETURNS") }
         ensure(purchases.allocationsTo(invoice.id).none { !it.released }) { DomainError.InvalidState("PURCHASE_INVOICE", "HAS_CREDITS") }
+        // Its corrections are undone first (newest first), so the goods leave stock at the value they came in with.
+        invoice.corrections.reversed().forEach { c ->
+            c.journalId?.let { inventory.reverseRevaluation(ctx, capability, CORRECTION, c.id, it, cmd.date, cmd.reason) }
+        }
         if (invoice.lines.isNotEmpty()) inventory.reverseDocument(ctx, capability, INVOICE, invoice.id, cmd.date, cmd.reason)
         // Lines assigned after recording go back too: the goods leave stock (they must still be there), or the expense is reversed.
         invoice.reviewLines.mapNotNull { it.resolution }.forEach { r ->
@@ -634,6 +665,60 @@ class PurchasingOperations(
         invoice.id
     }
 
+    fun correctInvoice(c: CorrectPurchaseInvoice): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
+        val invoice = requireInvoice(cmd.invoiceId, cmd.scope)
+        ensure(!invoice.opening) { DomainError.InvalidState("PURCHASE_INVOICE", "OPENING_BALANCE") }
+        ensure(cmd.reason.trim().length in 3..300) { DomainError.InvalidInput("reason", "دلیل اصلاح الزامی است.") }
+        ensure(cmd.date >= invoice.date) { DomainError.InvalidInput("date", "تاریخ اصلاح قبل از تاریخ فاکتور است.") }
+        ensure(cmd.items.map { it.itemId }.distinct().size == cmd.items.size && cmd.accounts.map { it.index }.distinct().size == cmd.accounts.size) {
+            DomainError.InvalidInput("lines", "هر ردیف فقط یک‌بار بیاید.")
+        }
+        val itemChanges = cmd.items.map { v ->
+            ensure(invoice.lines.any { it.itemId == v.itemId }) { DomainError.InvalidInput("item", "این کالا در فاکتور نیست.") }
+            ItemChange(v.itemId, Math.subtractExact(v.value.rial, invoice.itemValue(v.itemId)))
+        }.filter { it.delta != 0L }
+        val accountChanges = cmd.accounts.map { v ->
+            ensure(v.index in invoice.accountLines.indices) { DomainError.InvalidInput("account", "این ردیف در فاکتور نیست.") }
+            val line = invoice.accountLines[v.index]
+            // A line booked to another branch belongs to that branch's journal: correct it there (reverse and record again).
+            ensure(line.branch == null || line.branch == invoice.scope) { DomainError.InvalidState("PURCHASE_INVOICE", "ACCOUNT_LINE_OTHER_BRANCH") }
+            AccountChange(v.index, Math.subtractExact(v.amount.rial, invoice.accountValue(v.index)))
+        }.filter { it.delta != 0L }
+        ensure(itemChanges.isNotEmpty() || accountChanges.isNotEmpty()) { DomainError.InvalidInput("lines", "مبلغی تغییر نکرده است.") }
+        val change = itemChanges.sumOfExact { it.delta } + accountChanges.sumOfExact { it.delta }
+        // What was paid or credited must still fit: a corrected amount below it would leave a negative debt.
+        ensure(outstanding(invoice.id).rial + change >= 0) { DomainError.InvalidState("PURCHASE_INVOICE", "CORRECTION_BELOW_PAID") }
+
+        // Goods: the share of the item still in stock (of what this invoice brought and was not returned) changes the
+        // stock's value; the rest was used and changes cost of sales. Stock value never goes below zero.
+        val returnedQty = purchases.returns(invoice.id).flatMap { it.lines }.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOfExact { it.quantity.micros } }
+        val parts = itemChanges.map { ch ->
+            val bought = invoice.lines.filter { it.itemId == ch.itemId }.sumOfExact { it.quantity.micros } - (returnedQty[ch.itemId] ?: 0L)
+            val balance = invoice.locationId?.let { inventory.balance(ch.itemId, it) }
+            val onHand = minOf(balance?.quantity?.micros ?: 0L, bought.coerceAtLeast(0L))
+            var inStock = if (bought <= 0L || onHand <= 0L) 0L else Ratio.mulDivSigned(ch.delta, onHand, bought)
+            if (inStock < 0 && -inStock > (balance?.value?.rial ?: 0L)) inStock = -(balance?.value?.rial ?: 0L)
+            ir.sabou.inventory.Revaluation(ch.itemId, inStock, ch.delta - inStock)
+        }
+        val counter = ArrayList<LineDraft>()
+        if (change > 0) counter += LineDraft(StandardAccounts.PAYABLE, credit = Money.of(change), memo = "اصلاح فاکتور ${invoice.supplierInvoiceNo}", by = capability)
+        if (change < 0) counter += LineDraft(StandardAccounts.PAYABLE, debit = Money.of(-change), memo = "اصلاح فاکتور ${invoice.supplierInvoiceNo}", by = capability)
+        accountChanges.forEach { a ->
+            val account = invoice.accountLines[a.index].account
+            if (a.delta > 0) counter += LineDraft(account, debit = Money.of(a.delta), memo = cmd.reason.trim(), by = capability)
+            if (a.delta < 0) counter += LineDraft(account, credit = Money.of(-a.delta), memo = cmd.reason.trim(), by = capability)
+        }
+        val correctionId = GlobalId.new()
+        ctx.number(DocumentSeries.PURCHASE_CORRECTION, cmd.date, correctionId)
+        val journal = inventory.revalue(ctx, capability, invoice.locationId, parts, cmd.date, CORRECTION, correctionId,
+            "اصلاح فاکتور ${invoice.supplierInvoiceNo}: ${cmd.reason.trim()}", invoice.scope, counter)
+        purchases.saveInvoice(invoice.copy(total = Money.of(Math.addExact(invoice.total.rial, change)), corrections = invoice.corrections +
+            InvoiceCorrection(correctionId, cmd.date, itemChanges, accountChanges, cmd.reason.trim(), journal.id)))
+        ctx.audit(AuditDraft("PURCHASE_INVOICE_CORRECT", "PURCHASE_INVOICE", invoice.id.value,
+            "correction=$correctionId;change=$change;items=${itemChanges.size};accounts=${accountChanges.size}"))
+        correctionId
+    }
+
     fun returnGoods(c: ReturnToSupplier): CommandOutcome = bus.execute(ModuleId.PURCHASING, c) { cmd, ctx ->
         val invoice = requireInvoice(cmd.invoiceId, cmd.scope)
         ensure(cmd.reason.trim().length in 3..300) { DomainError.InvalidInput("reason", "دلیل مرجوعی الزامی است.") }
@@ -643,13 +728,14 @@ class PurchasingOperations(
         }
         val locationId = invoice.locationId ?: throw DomainException(DomainError.InvalidInput("item", "این فاکتور کالایی ندارد."))
         // An item may appear on several invoice lines: price it per item over the whole invoice.
-        val boughtQty = invoice.lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } }
-        val boughtValue = invoice.lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOfExact { it.value.rial } }
+        val boughtQty = invoice.lines.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOfExact { it.quantity.micros } }
+        // After a correction, goods are returned at their corrected value (SABOU-AUDIT-002).
+        val boughtValue = invoice.lines.map { it.itemId }.distinct().associateWith { invoice.itemValue(it) }
         val previous = purchases.returns(invoice.id).flatMap { it.lines }.groupBy { it.itemId }
         val priced = cmd.lines.map { line ->
             val qty = boughtQty[line.itemId] ?: throw DomainException(DomainError.InvalidInput("item", "این کالا در فاکتور نیست."))
             val value = boughtValue.getValue(line.itemId)
-            val returnedQty = previous[line.itemId].orEmpty().sumOf { it.quantity.micros }
+            val returnedQty = previous[line.itemId].orEmpty().sumOfExact { it.quantity.micros }
             val returnedValue = previous[line.itemId].orEmpty().sumOfExact { it.value.rial }
             val remaining = qty - returnedQty
             ensure(!line.quantity.isZero && line.quantity.micros <= remaining) { DomainError.InvalidInput("quantity", "مقدار مرجوعی از مقدار خریداری‌شده بیشتر است.") }
@@ -669,8 +755,8 @@ class PurchasingOperations(
         purchases.saveReturn(PurchaseReturn(returnId, invoice.id, priced, credit, cmd.date))
         // Settle this invoice first, then the supplier's other open invoices here, oldest due first.
         var left = credit
-        val targets = listOf(invoice) + purchases.invoices()
-            .filter { it.id != invoice.id && it.supplierId == invoice.supplierId && it.scope == invoice.scope && it.status == InvoiceStatus.POSTED }
+        val targets = listOf(invoice) + purchases.invoicesOf(invoice.supplierId)
+            .filter { it.id != invoice.id && it.scope == invoice.scope && it.status == InvoiceStatus.POSTED }
             .sortedWith(compareBy({ it.dueDate }, { it.date }))
         for (target in targets) {
             if (left.isZero) break
@@ -752,8 +838,8 @@ class PurchasingOperations(
      */
     private fun possibleDuplicates(supplierId: GlobalId, number: String, total: Money, date: BusinessDate): List<Discrepancy> {
         val key = InvoiceMatching.numberKey(number)
-        return purchases.invoices().filter {
-            it.supplierId == supplierId && it.status == InvoiceStatus.POSTED && it.total == total &&
+        return purchases.invoicesOf(supplierId).filter {
+            it.status == InvoiceStatus.POSTED && it.total == total &&
                 (it.date == date || (key.isNotEmpty() && InvoiceMatching.numberKey(it.supplierInvoiceNo) == key))
         }.map { Discrepancy(Discrepancy.Kind.POSSIBLE_DUPLICATE, null, null, it.date.epochDay) }.take(1)
     }
@@ -810,7 +896,7 @@ class PurchasingOperations(
      */
     /** Quantities of [order] already invoiced (by posted invoices). */
     private fun receivedOf(order: PurchaseOrder): Map<GlobalId, Long> = order.invoiceIds.mapNotNull { purchases.invoice(it) }
-        .filter { it.status == InvoiceStatus.POSTED }.flatMap { it.lines }.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } }
+        .filter { it.status == InvoiceStatus.POSTED }.flatMap { it.lines }.groupBy { it.itemId }.mapValues { (_, l) -> l.sumOfExact { it.quantity.micros } }
 
     /** Adds [delta] Rial (freight − discount) to [lines] in proportion to their value; the rounding rest goes to the largest. */
     private fun spread(lines: List<InvoiceLine>, delta: Long): List<InvoiceLine> {
@@ -874,6 +960,7 @@ class PurchasingOperations(
         const val INVOICE = "PURCHASE_INVOICE"
         const val PAYMENT = "SUPPLIER_PAYMENT"
         const val RETURN = "PURCHASE_RETURN"
+        const val CORRECTION = "PURCHASE_CORRECTION"
         const val REVIEW = "PURCHASE_REVIEW"
         const val OPENING = "PURCHASE_OPENING_BALANCE"
         const val ADVANCE = "SUPPLIER_ADVANCE"

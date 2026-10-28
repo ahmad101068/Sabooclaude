@@ -32,6 +32,8 @@ enum class DocumentSeries(val code: String, val title: String, val perBranch: Bo
     DEPRECIATION("اس", "استهلاک", true),
     ASSET_DISPOSAL("کد", "واگذاری دارایی", true),
     REVERSAL("بر", "سند برگشت", true),
+    /** A corrected purchase invoice amount (SABOU-AUDIT-002). */
+    PURCHASE_CORRECTION("اف", "اصلاح فاکتور خرید", true),
 }
 
 /** «فخ-1405-00012»: series code, fiscal year, sequence. The UI shows it with Persian digits. */

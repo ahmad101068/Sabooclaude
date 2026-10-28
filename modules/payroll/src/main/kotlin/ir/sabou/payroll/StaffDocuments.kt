@@ -98,7 +98,7 @@ data class AddStaffDocument(
     val note: String,
     val files: List<AttachmentInput>,
 ) : Command {
-    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override val requiredPermission get() = Permission.PERSONNEL_MANAGE
     override fun fingerprint() = "$scope|$employeeId|$kind|$title|${expiresOn?.epochDay}|$note|" + files.joinToString(";") { it.fingerprint() }
 }
 
@@ -114,20 +114,20 @@ data class CorrectStaffDocument(
     val note: String,
     val files: List<AttachmentInput>,
 ) : Command {
-    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override val requiredPermission get() = Permission.PERSONNEL_MANAGE
     override fun fingerprint() = "$scope|$documentId|$kind|$title|${expiresOn?.epochDay}|$note|" + files.joinToString(";") { it.fingerprint() }
 }
 
 /** Removes a document entered by mistake; it stays in the history with the reason. */
 @NoDocument
 data class RemoveStaffDocument(override val commandId: GlobalId, override val scope: Scope.Branch, val documentId: GlobalId, val reason: String) : Command {
-    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override val requiredPermission get() = Permission.PERSONNEL_MANAGE
     override fun fingerprint() = "$scope|$documentId|$reason"
 }
 
 @NoDocument
 data class SetEmployeePhoto(override val commandId: GlobalId, override val scope: Scope.Branch, val employeeId: GlobalId, val photo: AttachmentInput) : Command {
-    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override val requiredPermission get() = Permission.PERSONNEL_MANAGE
     override fun fingerprint() = "$scope|$employeeId|${photo.fingerprint()}"
 }
 

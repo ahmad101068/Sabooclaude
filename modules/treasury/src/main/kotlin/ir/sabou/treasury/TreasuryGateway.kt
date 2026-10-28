@@ -109,7 +109,7 @@ class TreasuryGateway(
         context.requireScope(account.scope)
         requireCashDayOpen(account, date)
         val chequeStep = prepareCheque(account, direction, amount, cheque)
-        if (direction == Direction.PAYMENT) requireFunds(account, amount)
+        if (direction == Direction.PAYMENT) requireFunds(account, amount, date)
         val counterDebit = Money.sum(counterLines.map { it.debit })
         val counterCredit = Money.sum(counterLines.map { it.credit })
         val treasuryLine = when (direction) {
@@ -163,7 +163,7 @@ class TreasuryGateway(
             context.requireScope(account.scope)
             requireCashDayOpen(account, date)
             val outflow = rows.fold(0L) { acc, m -> if (m.direction == Direction.RECEIPT) acc + m.amount.rial else acc - m.amount.rial }
-            if (outflow > 0) requireFunds(account, Money.of(outflow))
+            if (outflow > 0) requireFunds(account, Money.of(outflow), date)
         }
         // Cheques touched by this document go back one step; refused if they have moved on since.
         originals.mapNotNull { it.chequeId }.distinct().forEach { chequeId ->
@@ -191,7 +191,11 @@ class TreasuryGateway(
         }
     }
 
-    /** A cash box counted at a day's close is not changed afterwards on that day (reopen the day first). */
+    /**
+     * A cash box counted at a day's close is not changed afterwards on that day — nor on any day before it, which would
+     * change the balance that was counted (SABOU-AUDIT-004). Reopen the closed days first. [cashDayClosed] answers for
+     * "this day or a later one".
+     */
     private fun requireCashDayOpen(account: TreasuryAccount, date: BusinessDate) {
         ensure(!(account.kind == TreasuryKind.CASH || account.kind == TreasuryKind.PETTY_CASH) || !cashDayClosed(account.scope, date)) {
             DomainError.InvalidState("SALES_DAY", "CLOSED")
@@ -208,7 +212,7 @@ class TreasuryGateway(
         sourceId: GlobalId,
         description: String,
     ): JournalEntry {
-        requireFunds(from, amount)
+        requireFunds(from, amount, date)
         requireCashDayOpen(from, date); requireCashDayOpen(to, date)
         val journal = ledger.post(
             context, capability,
@@ -255,7 +259,7 @@ class TreasuryGateway(
         val cheque = cheque(chequeId)
         val chequeSide = if (cheque.direction == ChequeDirection.RECEIVED) from else to
         val step = prepareCheque(chequeSide, if (chequeSide == from) Direction.PAYMENT else Direction.RECEIPT, cheque.amount, ChequeInstruction.Move(chequeId, target))!!
-        requireFunds(from, cheque.amount)
+        requireFunds(from, cheque.amount, date)
         val journal = ledger.post(
             context, owner,
             JournalDraft(date, from.scope, sourceType, sourceId, description, listOf(
@@ -345,9 +349,21 @@ class TreasuryGateway(
             }
         }
 
-    private fun requireFunds(account: TreasuryAccount, amount: Money) {
+    /**
+     * The money must be there on the payment's date and stay enough on every later date already recorded
+     * (SABOU-AUDIT-004): a back-dated payment may not make an earlier balance negative.
+     */
+    private fun requireFunds(account: TreasuryAccount, amount: Money, date: BusinessDate) {
         if (account.allowOverdraft) return
-        val available = movements.balance(account.id)
+        val all = movements.byAccount(account.id)
+        var running = 0L
+        var available = Long.MAX_VALUE
+        all.sortedWith(compareBy({ it.date }, { it.recordedAtEpochMillis })).forEach { m ->
+            running = if (m.direction == Direction.RECEIPT) Math.addExact(running, m.amount.rial) else Math.subtractExact(running, m.amount.rial)
+            if (m.date >= date) available = minOf(available, running)
+        }
+        val atDate = movements.balanceAsOf(account.id, date)
+        available = minOf(available, atDate, movements.balance(account.id))
         ensure(available >= amount.rial) { DomainError.InsufficientFunds(account.name, available, amount.rial) }
     }
 }

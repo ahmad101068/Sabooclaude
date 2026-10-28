@@ -1,5 +1,6 @@
 package ir.sabou.inventory.memory
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.inventory.Item
 import ir.sabou.inventory.ItemStore
 import ir.sabou.inventory.Location
@@ -62,7 +63,7 @@ class InMemoryStockStore : StockStore, Transactional {
         movements.filter { it.locationId == locationId && it.date >= from && it.date <= to }
     override fun totalsBefore(locationId: GlobalId, date: ir.sabou.kernel.BusinessDate) =
         movements.filter { it.locationId == locationId && it.date < date }.groupBy { it.itemId }
-            .map { (item, l) -> ir.sabou.inventory.MovementTotal(item, l.sumOf { it.quantityDelta }, l.sumOf { it.valueDelta }) }
+            .map { (item, l) -> ir.sabou.inventory.MovementTotal(item, l.sumOfExact { it.quantityDelta }, l.sumOfExact { it.valueDelta }) }
 
     override fun snapshot(): Any = LinkedHashMap(balances) to movements.toList()
     @Suppress("UNCHECKED_CAST")

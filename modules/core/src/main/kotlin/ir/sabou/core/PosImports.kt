@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.inventory.MenuItem
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
@@ -134,26 +135,26 @@ class PosImports internal constructor(private val core: SabouCore) {
         lines.filter { it.menuItem != null }.groupBy { it.menuItem!!.id }.values.filter { it.size > 1 }
             .forEach { same -> problems += "چند نام صندوق به «${same.first().menuItem!!.name}» وصل شده‌اند: ${same.joinToString("، ") { it.name }}" }
 
-        val gross = lines.sumOf { it.gross }
-        val itemDiscount = items?.lines.orEmpty().sumOf { it.discount } * f
-        val itemTax = items?.lines.orEmpty().sumOf { it.tax } * f
+        val gross = lines.sumOfExact { it.gross }
+        val itemDiscount = items?.lines.orEmpty().sumOfExact { it.discount } * f
+        val itemTax = items?.lines.orEmpty().sumOfExact { it.tax } * f
         val counted = invoices?.counted.orEmpty()
         val customers = core.customers.all().filter { it.isActive && it.registeredIn == branch }
         val credits = counted.filter { (it.credit ?: 0) != 0L }.groupBy { Text.key(it.customer) }.map { (key, bills) ->
             val name = bills.first().customer.orEmpty()
             val chosen = choices.customers[key]?.let { id -> customers.firstOrNull { it.id == id } } ?: customers.firstOrNull { Text.key(it.name) == key && key.isNotEmpty() }
-            PosCredit(name, key, bills.sumOf { it.credit ?: 0 } * f, chosen)
+            PosCredit(name, key, bills.sumOfExact { it.credit ?: 0 } * f, chosen)
         }
         val (discount, service, tax, payable) = if (invoices != null) {
-            val total = counted.sumOf { it.total } * f
+            val total = counted.sumOfExact { it.total } * f
             if (items != null && total != gross) problems += "جمع فروش کالا (${Fa.rial(gross)} ریال) با جمع فاکتورها پیش از تخفیف (${Fa.rial(total)} ریال) برابر نیست؛ دو گزارش باید از یک روز و یک صندوق باشند."
-            listOf(counted.sumOf { it.discount } * f, counted.sumOf { it.service } * f, counted.sumOf { it.tax } * f, counted.sumOf { it.payable } * f)
+            listOf(counted.sumOfExact { it.discount } * f, counted.sumOfExact { it.service } * f, counted.sumOfExact { it.tax } * f, counted.sumOfExact { it.payable } * f)
         } else listOf(itemDiscount, 0L, itemTax, gross - itemDiscount + itemTax)
-        val cash = counted.sumOf { it.cash ?: 0 } * f
-        val card = counted.sumOf { it.card ?: 0 } * f
+        val cash = counted.sumOfExact { it.cash ?: 0 } * f
+        val card = counted.sumOfExact { it.card ?: 0 } * f
         if (invoices != null) {
             if (cash < 0 || card < 0) problems += "جمع نقد یا کارت این روز منفی است؛ برگشت‌ها بیش از فروش است."
-            if (cash + card + credits.sumOf { it.amount } != payable) problems += "روش‌های پرداخت فاکتورها با جمع قابل پرداخت برابر نیست."
+            if (cash + card + credits.sumOfExact { it.amount } != payable) problems += "روش‌های پرداخت فاکتورها با جمع قابل پرداخت برابر نیست."
             credits.filter { it.name.isBlank() }.forEach { _ -> problems += "فاکتور نسیه بدون نام مشتری هست." }
             credits.filter { it.name.isNotBlank() && it.customer == null }.forEach { problems += "مشتری اعتباری «${it.name}» در این شعبه پیدا نشد؛ آن را انتخاب یا تعریف کنید." }
         }
@@ -202,7 +203,7 @@ class PosImports internal constructor(private val core: SabouCore) {
     /** Net sales of the counted bills by channel; a channel whose returns outweigh its sales is left out. */
     private fun channelsOf(counted: List<ir.sabou.posimport.PosInvoice>, f: Long): List<ir.sabou.sales.ChannelShare> =
         counted.mapNotNull { b -> channelOf(b.saleType)?.let { it to b } }.groupBy({ it.first }, { it.second }).mapNotNull { (channel, bills) ->
-            val net = bills.sumOf { it.total - it.discount } * f
+            val net = bills.sumOfExact { it.total - it.discount } * f
             if (net <= 0) null else ir.sabou.sales.ChannelShare(channel, Money.of(net), bills.count { it.status == InvoiceStatus.NORMAL })
         }.sortedBy { it.channel.ordinal }
 

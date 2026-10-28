@@ -99,10 +99,10 @@ class ProfitBridges internal constructor(private val core: SabouCore) {
             Row(id, a?.q ?: 0L, b?.q ?: 0L, p0, p1, c0, c1)
         }
         fun r(q: Long, perPortion: Long) = Ratio.mulDivSigned(q, perPortion, Quantity.SCALE)
-        val q0 = rows.sumOf { it.q0 }; val q1 = rows.sumOf { it.q1 }
-        val margin0 = rows.sumOf { r(it.q0, it.m0) }                    // base dish margin at base mix and margins
-        val atBase = rows.sumOf { r(it.q1, it.m0) }                     // current portions at base margins
-        val margin1 = rows.sumOf { r(it.q1, it.m1) }
+        val q0 = rows.sumOfExact { it.q0 }; val q1 = rows.sumOfExact { it.q1 }
+        val margin0 = rows.sumOfExact { r(it.q0, it.m0) }                    // base dish margin at base mix and margins
+        val atBase = rows.sumOfExact { r(it.q1, it.m0) }                     // current portions at base margins
+        val margin1 = rows.sumOfExact { r(it.q1, it.m1) }
         val volume = if (q0 > 0) Ratio.mulDivSigned(margin0, q1 - q0, q0) else atBase - margin0
         val mix = atBase - margin0 - volume
         val prices = rows.map { it to r(it.q1, it.p1 - it.p0) }
@@ -114,7 +114,7 @@ class ProfitBridges internal constructor(private val core: SabouCore) {
             (p.revenue.map { it.account.code to (it.account.name to it.amount) } +
                 (p.costOfSales + p.expenses).map { it.account.code to (it.account.name to -it.amount) }).toMap()   // + raises profit
         val a0 = accounts(p0); val a1 = accounts(p1)
-        fun delta(codes: Collection<AccountCode>) = codes.sumOf { (a1[it]?.second ?: 0L) - (a0[it]?.second ?: 0L) }
+        fun delta(codes: Collection<AccountCode>) = codes.sumOfExact { (a1[it]?.second ?: 0L) - (a0[it]?.second ?: 0L) }
         fun details(codes: Collection<AccountCode>) = codes.map { c -> BridgeDetail((a1[c] ?: a0[c])!!.first, (a1[c]?.second ?: 0L) - (a0[c]?.second ?: 0L)) }
             .filter { it.amount != 0L }.sortedByDescending { kotlin.math.abs(it.amount) }
         val all = a0.keys + a1.keys
@@ -128,18 +128,18 @@ class ProfitBridges internal constructor(private val core: SabouCore) {
         // Dish margin in the books against the dish lines: discounts, then cost the lines do not explain.
         val dishBook = delta(food)                                       // Δ(food sales − cost of sales)
         val discounts = -(discountOf(branch, from, to) - discountOf(branch, baseFrom, baseTo))
-        fun traced(cost: (Row) -> Long, q: (Row) -> Long) = rows.sumOf { r(q(it), cost(it)) }
+        fun traced(cost: (Row) -> Long, q: (Row) -> Long) = rows.sumOfExact { r(q(it), cost(it)) }
         val cogs0 = -(a0[StandardAccounts.COGS]?.second ?: 0L); val cogs1 = -(a1[StandardAccounts.COGS]?.second ?: 0L)
         val untraced = -((cogs1 - traced({ it.c1 }, { it.q1 })) - (cogs0 - traced({ it.c0 }, { it.q0 })))
-        val rounding = dishBook - (volume + mix + prices.sumOf { it.second } + costs.sumOf { it.second } + discounts + untraced)
+        val rounding = dishBook - (volume + mix + prices.sumOfExact { it.second } + costs.sumOfExact { it.second } + discounts + untraced)
 
         fun top(list: List<Pair<Row, Long>>) = list.filter { it.second != 0L }.sortedByDescending { kotlin.math.abs(it.second) }.take(TOP)
             .map { BridgeDetail(names[it.first.id].orEmpty(), it.second) }
         val steps = listOf(
             BridgeStep(BridgeStep.Kind.VOLUME, volume),
             BridgeStep(BridgeStep.Kind.MIX, mix, top(mixBy)),
-            BridgeStep(BridgeStep.Kind.PRICES, prices.sumOf { it.second }, top(prices)),
-            BridgeStep(BridgeStep.Kind.INGREDIENT_COSTS, costs.sumOf { it.second }, top(costs)),
+            BridgeStep(BridgeStep.Kind.PRICES, prices.sumOfExact { it.second }, top(prices)),
+            BridgeStep(BridgeStep.Kind.INGREDIENT_COSTS, costs.sumOfExact { it.second }, top(costs)),
             BridgeStep(BridgeStep.Kind.DISCOUNTS, discounts),
             BridgeStep(BridgeStep.Kind.UNTRACED_COST, untraced),
             BridgeStep(BridgeStep.Kind.FOOD_LOSSES, delta(losses), details(losses)),
@@ -149,7 +149,7 @@ class ProfitBridges internal constructor(private val core: SabouCore) {
             BridgeStep(BridgeStep.Kind.ROUNDING, rounding),
         )
         fun period(p: ProfitAndLoss, d: Map<GlobalId, Dish>) = BridgePeriod(p.from, p.to, p.totals.profit, p.ratios.sales,
-            Quantity.of(d.values.sumOf { it.q }), d.values.sumOf { it.q }.takeIf { it > 0 }?.let { q -> Ratio.mulDiv(d.values.sumOf { it.costedQ }, 10_000, q) })
+            Quantity.of(d.values.sumOfExact { it.q }), d.values.sumOfExact { it.q }.takeIf { it > 0 }?.let { q -> Ratio.mulDiv(d.values.sumOfExact { it.costedQ }, 10_000, q) })
         val base = period(p0, d0); val current = period(p1, d1)
         val provisional = p0.provisional || p1.provisional
         val name = core.branches.all().firstOrNull { it.id == branch.branchId }?.name ?: "شعبه"

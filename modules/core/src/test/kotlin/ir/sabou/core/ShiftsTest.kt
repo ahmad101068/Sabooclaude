@@ -33,7 +33,8 @@ class ShiftsTest {
     private val dir = Files.createTempDirectory("shifts")
     private val db = DevDatabases.open(dir.resolve("s.db"))
     private val day = JalaliCalendar.date(1405, 7, 20)
-    private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { day.epochDay * 86_400_000L + 9 * 3_600_000L })
+    private var now = day.epochDay * 86_400_000L + 9 * 3_600_000L
+    private val core = SabouCore.open(db, InMemoryAnchorStore(), Clock { now })
     private fun id() = GlobalId.new()
     private fun code(block: () -> Unit) = assertFailsWith<DomainException> { block() }.error.code
 
@@ -65,11 +66,11 @@ class ShiftsTest {
         core.shifts.setPin(SetClockPin(id(), branch, ali, "۲۴۶۸"))
         core.shifts.setPin(SetClockPin(id(), branch, sara, "1357"))
         assertEquals(listOf("سارا", "علی"), core.labor.clockList(branch, day).map { it.second })
-        repeat(5) { assertEquals("INVALID_INPUT:pin", code { core.shifts.punch(ClockPunch(id(), branch, sara, "0000", day, 18 * 60)) }) }
-        assertTrue(code { core.shifts.punch(ClockPunch(id(), branch, sara, "1357", day, 18 * 60)) }.startsWith("INVALID_STATE:CLOCK_PIN:LOCKED"))
-        core.shifts.punch(ClockPunch(id(), branch, ali, "2468", day, 9 * 60 + 20))
+        repeat(5) { assertEquals("INVALID_INPUT:pin", code { punchAt(ClockPunch(id(), branch, sara, "0000", day, 18 * 60)) }) }
+        assertTrue(code { punchAt(ClockPunch(id(), branch, sara, "1357", day, 18 * 60)) }.startsWith("INVALID_STATE:CLOCK_PIN:LOCKED"))
+        punchAt(ClockPunch(id(), branch, ali, "2468", day, 9 * 60 + 20))
         assertEquals("INVALID_STATE:PUNCH:OPEN:1", code { core.shifts.confirmDay(ConfirmDayTime(id(), branch, day)) })
-        core.shifts.punch(ClockPunch(id(), branch, ali, "2468", day, 18 * 60))
+        punchAt(ClockPunch(id(), branch, ali, "2468", day, 18 * 60))
         assertEquals("INVALID_INPUT:date", code { core.shifts.punch(ClockPunch(id(), branch, ali, "2468", day.plusDays(-5), 9 * 60)) })
 
         val row = core.labor.day(branch, day).single { it.employee.name == "علی" }
@@ -81,4 +82,7 @@ class ShiftsTest {
         assertEquals(420, attendance.workedMinutes); assertEquals(40, attendance.overtimeMinutes); assertEquals(0, attendance.absentMinutes)
         assertEquals(480, core.personnel.attendanceOn(sara, day)!!.absentMinutes)   // planned, never clocked in
     }
+
+    /** A punch made at the time it states, in Iran: the main phone's clock is moved there first (SABOU-AUDIT-006). */
+    private fun punchAt(c: ClockPunch) = run { now = c.date.epochDay * 86_400_000L + (c.minute - 210) * 60_000L; core.shifts.punch(c) }
 }

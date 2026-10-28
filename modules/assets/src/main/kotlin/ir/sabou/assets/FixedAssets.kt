@@ -120,7 +120,7 @@ sealed interface Funding : java.io.Serializable {
 /** Renames an asset or changes its group (its cost and depreciation never change). */
 @NoDocument
 data class UpdateAsset(override val commandId: GlobalId, override val scope: Scope.Branch, val assetId: GlobalId, val name: String, val category: String) : Command {
-    override val requiredPermission = Permission.ASSET_MANAGE
+    override val requiredPermission get() = Permission.ASSET_MANAGE
     override fun fingerprint() = "$scope|$assetId|$name|$category"
 }
 
@@ -130,7 +130,7 @@ data class UpdateAsset(override val commandId: GlobalId, override val scope: Sco
  */
 @IssuesDocument(DocumentSeries.ASSET)
 data class TransferAsset(override val commandId: GlobalId, override val scope: Scope.Branch, val assetId: GlobalId, val to: Scope.Branch, val date: BusinessDate) : Command {
-    override val requiredPermission = Permission.ASSET_MANAGE
+    override val requiredPermission get() = Permission.ASSET_MANAGE
     override fun fingerprint() = "$scope|$assetId|$to|${date.epochDay}"
 }
 
@@ -148,8 +148,8 @@ data class AcquireAsset(
     val rateBp: Long?,
     val funding: Funding,
 ) : Command {
-    override val requiredPermission = Permission.ASSET_MANAGE
-    override val additionalPermissions = if (funding is Funding.Paid) setOf(Permission.TREASURY_PAYMENT) else emptySet()
+    override val requiredPermission get() = Permission.ASSET_MANAGE
+    override val additionalPermissions get() = if (funding is Funding.Paid) setOf(Permission.TREASURY_PAYMENT) else emptySet()
     override fun fingerprint() = "$scope|$name|$category|${cost.rial}|${salvage.rial}|${date.epochDay}|$method|$usefulLifeMonths|$rateBp|" + when (funding) {
         is Funding.Paid -> "paid:${funding.treasuryAccountId}:${funding.cheque?.fingerprint()}:${funding.chequeId}"
         is Funding.Existing -> "existing:${funding.accumulatedSoFar.rial}:${funding.depreciatedThrough?.epochDay}"
@@ -160,14 +160,14 @@ data class AcquireAsset(
 /** Books depreciation for every active asset of the branch up to [through] (one journal). */
 @IssuesDocument(DocumentSeries.DEPRECIATION)
 data class RunDepreciation(override val commandId: GlobalId, override val scope: Scope.Branch, val through: BusinessDate) : Command {
-    override val requiredPermission = Permission.ASSET_MANAGE
+    override val requiredPermission get() = Permission.ASSET_MANAGE
     override fun fingerprint() = "$scope|${through.epochDay}"
 }
 
 /** Takes back the latest depreciation run of a branch (e.g. it was run for the wrong month). */
 @IssuesDocument(DocumentSeries.REVERSAL)
 data class ReverseDepreciationRun(override val commandId: GlobalId, override val scope: Scope.Branch, val runId: GlobalId, val date: BusinessDate, val reason: String) : Command {
-    override val requiredPermission = Permission.ASSET_MANAGE
+    override val requiredPermission get() = Permission.ASSET_MANAGE
     override fun fingerprint() = "$scope|$runId|${date.epochDay}|$reason"
 }
 
@@ -182,8 +182,8 @@ data class DisposeAsset(
     val treasuryAccountId: GlobalId?,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.ASSET_MANAGE
-    override val additionalPermissions = if (!proceeds.isZero) setOf(Permission.TREASURY_RECEIPT) else emptySet()
+    override val requiredPermission get() = Permission.ASSET_MANAGE
+    override val additionalPermissions get() = if (!proceeds.isZero) setOf(Permission.TREASURY_RECEIPT) else emptySet()
     override fun fingerprint() = "$scope|$assetId|${date.epochDay}|${proceeds.rial}|$treasuryAccountId|$reason"
 }
 

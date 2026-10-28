@@ -322,6 +322,7 @@ class SqlStockCountStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.Sto
         d.strOr("note", ""), ir.sabou.inventory.CountStatus.valueOf(d.str("status")), Codec.id(d.str("countedBy")), d.str("countedByName"), d.long("countedAt"),
         Codec.idOrNull(d.strOrNull("reviewedBy")), d.strOrNull("reviewedByName"), d.longOrNull("reviewedAt"), d.strOrNull("rejectReason"),
         Codec.idOrNull(d.strOrNull("plan")),
+        if (d.has("shortagesAtCount")) d.strs("shortagesAtCount").map(Codec::id) else null,
     )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM stock_counts WHERE id = ?", id.value)?.let(::read)
     override fun all() = docs("SELECT doc FROM stock_counts ORDER BY rowid DESC").map(::read)
@@ -338,6 +339,7 @@ class SqlStockCountStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.Sto
                 "note" to count.note, "status" to count.status.name, "countedBy" to count.countedBy.value, "countedByName" to count.countedByName,
                 "countedAt" to count.countedAt, "reviewedBy" to count.reviewedBy?.value, "reviewedByName" to count.reviewedByName,
                 "reviewedAt" to count.reviewedAt, "rejectReason" to count.rejectReason, "plan" to count.planId?.value,
+                "shortagesAtCount" to count.shortagesAtCount?.map { it.value },
             )),
         ),
     )
@@ -349,6 +351,7 @@ class SqlShortageStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.Short
         Codec.id(d.str("id")), Codec.id(d.str("item")), Codec.id(d.str("location")), Codec.date(d.long("date")),
         d.str("sourceType"), Codec.id(d.str("sourceId")), Codec.qty(d.long("qty")), Codec.qty(d.long("settled")), Codec.money(d.long("settledCost")),
         Codec.qty(d.long("taken")), Codec.money(d.long("takenCost")), ir.sabou.inventory.StockShortage.Status.valueOf(d.str("status")),
+        d.longOr("recordedAt", 0L),
     )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM stock_shortages WHERE id = ?", id.value)?.let(::read)
     override fun ofSource(sourceType: String, sourceId: GlobalId) =
@@ -366,7 +369,7 @@ class SqlShortageStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.Short
                 "id" to shortage.id.value, "item" to shortage.itemId.value, "location" to shortage.locationId.value, "date" to shortage.date.epochDay,
                 "sourceType" to shortage.sourceType, "sourceId" to shortage.sourceId.value, "qty" to shortage.quantity.micros,
                 "settled" to shortage.settled.micros, "settledCost" to shortage.settledCost.rial, "taken" to shortage.takenFromStock.micros,
-                "takenCost" to shortage.takenCost.rial, "status" to shortage.status.name,
+                "takenCost" to shortage.takenCost.rial, "status" to shortage.status.name, "recordedAt" to shortage.recordedAt,
             )),
         ),
     )

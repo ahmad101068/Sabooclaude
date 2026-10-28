@@ -53,7 +53,7 @@ data class ReceiveTransfer(
     val date: BusinessDate,
     val note: String = "",
 ) : Command {
-    override val requiredPermission = Permission.INVENTORY_TRANSFER
+    override val requiredPermission get() = Permission.INVENTORY_TRANSFER
     override fun fingerprint() = "$scope|$transferId|${date.epochDay}|$note|" + received.joinToString(";") { "${it.itemId}:${it.quantity.micros}" }
 }
 
@@ -97,20 +97,20 @@ data class RequestStock(
     val note: String,
     val date: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.INVENTORY_VIEW
+    override val requiredPermission get() = Permission.INVENTORY_VIEW
     override fun fingerprint() = "$scope|$fromLocationId|$toLocationId|${date.epochDay}|$note|" + lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}" }
 }
 
 /** Sends a request: a transfer of [lines] (what is actually given, which may differ from what was asked). [scope] is the sender's. */
 @IssuesDocument(DocumentSeries.STOCK_TRANSFER)
 data class FulfilStockRequest(override val commandId: GlobalId, override val scope: Scope.Branch, val requestId: GlobalId, val lines: List<IssueLine>, val date: BusinessDate) : Command {
-    override val requiredPermission = Permission.INVENTORY_TRANSFER
+    override val requiredPermission get() = Permission.INVENTORY_TRANSFER
     override fun fingerprint() = "$scope|$requestId|${date.epochDay}|" + lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}" }
 }
 
 /** The sender refuses a request (with a reason; [scope] the sender's), or the requester withdraws it ([cancel]; [scope] the requester's). */
 @NoDocument
 data class CloseStockRequest(override val commandId: GlobalId, override val scope: Scope.Branch, val requestId: GlobalId, val reason: String, val cancel: Boolean = false) : Command {
-    override val requiredPermission = Permission.INVENTORY_VIEW
+    override val requiredPermission get() = Permission.INVENTORY_VIEW
     override fun fingerprint() = "$scope|$requestId|$reason|$cancel"
 }

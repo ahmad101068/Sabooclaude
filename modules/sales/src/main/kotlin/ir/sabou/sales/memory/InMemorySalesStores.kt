@@ -38,6 +38,8 @@ class InMemorySalesStore : SalesStore, Transactional {
     override fun saveCollection(collection: Collection) { collections[collection.id] = collection }
     override fun day(scope: Scope.Branch, date: BusinessDate) = days[scope to date.epochDay]
     override fun saveDay(day: SalesDay) { days[day.scope to day.date.epochDay] = day }
+    override fun closedOnOrAfter(scope: Scope.Branch, date: BusinessDate) =
+        days.values.filter { it.scope == scope && it.closed && it.date >= date }.maxOfOrNull { it.date }
 
     override fun snapshot(): Any = listOf(LinkedHashMap(sales), LinkedHashMap(receivables), LinkedHashMap(collections), LinkedHashMap(days))
     @Suppress("UNCHECKED_CAST")

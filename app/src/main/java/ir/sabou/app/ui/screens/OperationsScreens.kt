@@ -923,8 +923,12 @@ object OperationsScreens {
                                         style = SabouType.caption, color = Sabou.colors.muted)
                                     val unpaid = d.unpaid[run.id]?.get(p.employeeId)
                                     if (unpaid != null && !unpaid.isZero && session.can(Permission.PAYROLL_PAY)) {
+                                        // One id per person and run until the payment succeeds (SABOU-AUDIT-011).
+                                        val payId = ir.sabou.app.ui.rememberCommandId(run.id, p.employeeId)
                                         SecondaryButton("پرداخت ${Fa.rial(unpaid)} ریال", {
-                                            action.run({ payroll.pay(PaySalary(GlobalId.new(), branch, run.id, p.employeeId, payAccount!!, unpaid, session.today)) })
+                                            action.run({ payroll.pay(PaySalary(payId.value, branch, run.id, p.employeeId, payAccount!!, unpaid, session.today)) }) {
+                                                payId.value = GlobalId.new()
+                                            }
                                         }, enabled = payAccount != null && !action.busy)
                                     }
                                 }
@@ -954,12 +958,19 @@ object OperationsScreens {
                                 KeyValue("بیمه", Fa.rial(d.insurance) + " ریال")
                                 KeyValue("مالیات حقوق", Fa.rial(d.tax) + " ریال")
                                 if (session.can(Permission.PAYROLL_PAY)) {
+                                    // Kept until each payment succeeds (SABOU-AUDIT-011).
+                                    val insuranceId = ir.sabou.app.ui.rememberCommandId(branch, "insurance")
+                                    val taxId = ir.sabou.app.ui.rememberCommandId(branch, "tax")
                                     if (!d.insurance.isZero) SecondaryButton("پرداخت بیمه", {
-                                        action.run({ payroll.remit(RemitLiability(GlobalId.new(), branch, LiabilityKind.INSURANCE, payAccount!!, d.insurance, session.today)) })
-                                    }, enabled = payAccount != null)
+                                        action.run({ payroll.remit(RemitLiability(insuranceId.value, branch, LiabilityKind.INSURANCE, payAccount!!, d.insurance, session.today)) }) {
+                                            insuranceId.value = GlobalId.new()
+                                        }
+                                    }, enabled = payAccount != null && !action.busy)
                                     if (!d.tax.isZero) SecondaryButton("پرداخت مالیات", {
-                                        action.run({ payroll.remit(RemitLiability(GlobalId.new(), branch, LiabilityKind.INCOME_TAX, payAccount!!, d.tax, session.today)) })
-                                    }, enabled = payAccount != null)
+                                        action.run({ payroll.remit(RemitLiability(taxId.value, branch, LiabilityKind.INCOME_TAX, payAccount!!, d.tax, session.today)) }) {
+                                            taxId.value = GlobalId.new()
+                                        }
+                                    }, enabled = payAccount != null && !action.busy)
                                 }
                             }
                         }

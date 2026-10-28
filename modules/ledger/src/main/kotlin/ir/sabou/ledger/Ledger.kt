@@ -81,6 +81,8 @@ class Ledger(
         reason: String,
     ): JournalEntry {
         requireOwner(context, owner)
+        // A reversal is a document of its own date: the same date rule as any other (SABOU-AUDIT-003).
+        datePolicy?.check(context, date, REVERSAL_SOURCE)
         val original = journals.byId(entryId) ?: throw ir.sabou.kernel.DomainException(DomainError.NotFound("JOURNAL"))
         ensure(original.source.module == owner.module) { DomainError.OwnedByAnotherModule(original.source.module.name) }
         ensure(original.reversalOf == null) { DomainError.InvalidState("JOURNAL", "IS_REVERSAL") }
@@ -117,6 +119,15 @@ class Ledger(
     fun balance(account: AccountCode, scope: Scope? = null, upTo: BusinessDate? = null): SignedAmount =
         SignedAmount(journals.netDebit(account, scope, upTo))
 
+    /**
+     * The document date rule for what does not post a journal itself — a stock movement with no value, a same-branch
+     * transfer, a production (SABOU-AUDIT-003); journals are checked in [post] and [reverse].
+     */
+    fun requireDate(context: CommandContext, date: BusinessDate, sourceType: String) {
+        requireOpenPeriod(date)
+        datePolicy?.check(context, date, sourceType)
+    }
+
     fun requireOpenPeriod(date: BusinessDate) {
         ensure(periods.closedLockCovering(date) == null) { DomainError.PeriodClosed(date.epochDay) }
     }
@@ -124,5 +135,10 @@ class Ledger(
     private fun requireOwner(context: CommandContext, owner: PostingCapability) {
         ensure(registry.isGenuine(owner)) { DomainError.IntegrityViolation("FORGED_CAPABILITY") }
         ensure(owner.module == context.module) { DomainError.OwnedByAnotherModule(owner.module.name) }
+    }
+
+    companion object {
+        /** Source type the date rule sees for reversals. */
+        const val REVERSAL_SOURCE = "REVERSAL"
     }
 }

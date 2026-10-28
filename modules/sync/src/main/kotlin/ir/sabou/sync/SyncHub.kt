@@ -63,6 +63,9 @@ class SyncHub(
     private val sessions = ConcurrentHashMap<String, RemoteSession>()
     private val random = SecureRandom()
     private val slots = java.util.concurrent.Semaphore(MAX_CONNECTIONS)
+    /** Connections still proving the key (or pairing), and connections per network address (SABOU-AUDIT-007). */
+    private val handshakes = java.util.concurrent.Semaphore(MAX_HANDSHAKES)
+    private val perAddress = ConcurrentHashMap<String, Int>()
 
     private class RemoteSession(val userId: GlobalId, val deviceId: String, @Volatile var lastUse: Long)
 
@@ -98,34 +101,54 @@ class SyncHub(
     private fun acceptLoop(s: ServerSocket) {
         while (!s.isClosed) {
             val socket = try { s.accept() } catch (_: IOException) { break }
-            // Bounded (audit F11): a flood of connections from the network cannot exhaust the phone. Paired phones use
-            // two connections each; anything beyond the limit is closed at once, before any work is done for it.
-            if (!slots.tryAcquire()) { runCatching { socket.close() }; continue }
+            // Bounded (audit F11, SABOU-AUDIT-007): a connection that has not proved the pairing key holds one of a few
+            // handshake places (separate from the sessions of paired phones), at most PER_ADDRESS from one address, for
+            // a short time; anything beyond is closed at once. Strangers cannot crowd out the second phone.
+            val address = socket.inetAddress?.hostAddress.orEmpty()
+            if (perAddress.merge(address, 1, Int::plus)!! > PER_ADDRESS || !handshakes.tryAcquire()) {
+                perAddress.computeIfPresent(address) { _, n -> (n - 1).takeIf { it > 0 } }
+                runCatching { socket.close() }; continue
+            }
             connections += socket
-            if (s.isClosed) { connections -= socket; slots.release(); runCatching { socket.close() }; break }
+            val done = {
+                connections -= socket
+                perAddress.computeIfPresent(address) { _, n -> (n - 1).takeIf { it > 0 } }
+            }
+            if (s.isClosed) { done(); handshakes.release(); runCatching { socket.close() }; break }
             try {
-                Thread({ try { serve(socket) } finally { slots.release() } }, "sabou-sync-conn").apply { isDaemon = true }.start()
+                Thread({ try { serve(socket) } finally { done() } }, "sabou-sync-conn").apply { isDaemon = true }.start()
             } catch (e: Throwable) {
-                connections -= socket; slots.release(); runCatching { socket.close() }
+                done(); handshakes.release(); runCatching { socket.close() }
             }
         }
     }
 
+    /**
+     * Moves an authenticated connection from a handshake place to a session place; false when every session place is
+     * taken (the connection is then closed). Called once per connection, on the connection's own thread.
+     */
+    private fun authenticated(held: java.util.concurrent.atomic.AtomicBoolean): Boolean {
+        if (!slots.tryAcquire()) return false
+        held.set(true); handshakes.release()
+        return true
+    }
+
     private fun serve(socket: Socket) {
+        val session = java.util.concurrent.atomic.AtomicBoolean(false)
         try {
             socket.tcpNoDelay = true
-            socket.soTimeout = HANDSHAKE_TIMEOUT_MS
+            socket.soTimeout = PRE_AUTH_TIMEOUT_MS
             val input = DataInputStream(BufferedInputStream(socket.getInputStream()))
             val output = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
             if (!input.readBytes(MAGIC.size).contentEquals(MAGIC)) return
             when (input.readUnsignedByte()) {
                 MODE_PAIR -> pair(socket, input, output)
-                MODE_SESSION -> session(socket, input, output)
+                MODE_SESSION -> session(socket, input, output, session)
             }
         } catch (_: IOException) {
             // A dropped connection, a stranger or a failed authentication: nothing to tell anyone.
         } finally {
-            connections -= socket
+            if (session.get()) slots.release() else handshakes.release()
             runCatching { socket.close() }
         }
     }
@@ -169,7 +192,7 @@ class SyncHub(
         output.writeShortBytes(mine.publicKey); output.write(serverNonce); output.writeShortBytes(hubName.toByteArray(Charsets.UTF_8)); output.flush()
         val (key, code) = Crypto.pairing(mine.agree(clientPub), clientPub, mine.publicKey, clientNonce, serverNonce)
         val (c2s, s2c) = Crypto.sessionKeys(key, clientNonce, serverNonce)
-        val channel = SecureChannel(input, output, s2c, c2s)
+        val channel = SecureChannel(input, output, s2c, c2s, maxFrame = SecureChannel.PRE_AUTH_MAX_FRAME)
         window.listener.onCode(code, deviceName)
         // The second phone confirms on its side by sending an encrypted frame (it also proves the same key).
         socket.soTimeout = (window.until - clock()).coerceAtLeast(1_000L).toInt()
@@ -191,15 +214,18 @@ class SyncHub(
 
     // ------------------------------------------------------------------ sessions
 
-    private fun session(socket: Socket, input: DataInputStream, output: DataOutputStream) {
+    private fun session(socket: Socket, input: DataInputStream, output: DataOutputStream, held: java.util.concurrent.atomic.AtomicBoolean) {
         val deviceId = String(input.readShortBytes(), Charsets.UTF_8)
         val clientNonce = input.readBytes(32)
         val peer = peers.all().firstOrNull { it.deviceId == deviceId } ?: return
         val serverNonce = Crypto.randomBytes(32)
         output.write(serverNonce); output.flush()
         val (c2s, s2c) = Crypto.sessionKeys(peer.key, clientNonce, serverNonce)
-        val channel = SecureChannel(input, output, s2c, c2s)
+        val channel = SecureChannel(input, output, s2c, c2s, maxFrame = SecureChannel.PRE_AUTH_MAX_FRAME)
         val hello = channel.receive() as? Message.Hello ?: return
+        // The Hello decrypted with the pairing key: the peer is the paired phone. Only now large frames and a session place.
+        if (!authenticated(held)) return
+        channel.maxFrame = SecureChannel.MAX_FRAME
         if (hello.appVersion != appVersion) { channel.send(Message.Failure(SyncErrors.VERSION)); return }
         val c = core() ?: run { channel.send(Message.Failure(SyncErrors.HUB_NOT_READY)); return }
         channel.send(Message.HelloOk(c.epoch))
@@ -328,6 +354,12 @@ class SyncHub(
         internal const val MODE_SESSION = 2
         const val PAIRING_WINDOW_MS = 5 * 60_000L
         internal const val HANDSHAKE_TIMEOUT_MS = 15_000
+        /** Time a connection has to send its first authenticated frame. */
+        internal const val PRE_AUTH_TIMEOUT_MS = 3_000
+        /** Connections still proving the key, at once (a paired phone opens two). */
+        const val MAX_HANDSHAKES = 6
+        /** Connections from one network address, at once. */
+        const val PER_ADDRESS = 4
         internal const val IDLE_TIMEOUT_MS = 10 * 60_000
         /** Like the sign-in on the phone itself: 30 minutes without a command ends the person's session. */
         const val SESSION_IDLE_MS = 30 * 60_000L

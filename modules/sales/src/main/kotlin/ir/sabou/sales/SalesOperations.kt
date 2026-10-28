@@ -41,7 +41,7 @@ data class RegisterCustomer(
     val phone: String,
     val creditLimit: Money,
 ) : Command {
-    override val requiredPermission = Permission.CUSTOMER_MANAGE
+    override val requiredPermission get() = Permission.CUSTOMER_MANAGE
     override fun fingerprint() = "$scope|$name|$type|$phone|${creditLimit.rial}"
 }
 
@@ -71,7 +71,7 @@ data class SaveSaleDraft(
      */
     val channels: List<ChannelShare> = emptyList(),
 ) : Command {
-    override val requiredPermission = Permission.SALES_RECORD
+    override val requiredPermission get() = Permission.SALES_RECORD
     override fun fingerprint() = "$saleId|$scope|${date.epochDay}|$kitchenLocationId|${discount.rial}|$discountReason|${serviceCharge.rial}|${tax.rial}|$guests|$transactions|" +
         channels.joinToString(";") { "${it.channel}:${it.amount.rial}:${it.transactions}" } + "|" +
         lines.joinToString(";") { "${it.menuItemId}:${it.portions.micros}:${it.unitPrice?.rial}:${it.overrideReason}" } + "|" +
@@ -93,24 +93,24 @@ data class SetMenuPrice(
     val effectiveFrom: BusinessDate,
     val unitPrice: Money?,
 ) : Command {
-    override val requiredPermission = Permission.MENU_PRICE_MANAGE
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.MENU_PRICE_MANAGE
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$scope|$menuItemId|${effectiveFrom.epochDay}|${unitPrice?.rial}"
 }
 
 /** Drops a draft that will not be posted; it stays on record as DISCARDED. */
 @NoDocument
 data class DiscardSaleDraft(override val commandId: GlobalId, override val scope: Scope.Branch, val saleId: GlobalId) : Command {
-    override val requiredPermission = Permission.SALES_RECORD
+    override val requiredPermission get() = Permission.SALES_RECORD
     override fun fingerprint() = "$scope|$saleId"
 }
 
 /** The target food cost of the menu (basis points of the price), or null to clear it (ADR-0028). */
 @NoDocument
 data class SetFoodCostTarget(override val commandId: GlobalId, val targetBp: Long?) : Command {
-    override val requiredPermission = Permission.MENU_PRICE_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.MENU_PRICE_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$targetBp"
 }
 
@@ -130,14 +130,14 @@ data class ImportPosSale(
     /** POS item name (normalized key) → menu item, remembered for the next import. */
     val aliases: Map<String, GlobalId> = emptyMap(),
 ) : Command {
-    override val requiredPermission = Permission.SALES_POST
+    override val requiredPermission get() = Permission.SALES_POST
     override fun fingerprint() = "$scope|$pos|${fileHashes.joinToString(",")}|${invoiceKeys.size}|${sale.fingerprint()}|" +
         aliases.entries.sortedBy { it.key }.joinToString(";") { "${it.key}=${it.value}" }
 }
 
 @IssuesDocument(DocumentSeries.DAILY_SALE)
 data class PostDailySale(override val commandId: GlobalId, override val scope: Scope.Branch, val saleId: GlobalId) : Command {
-    override val requiredPermission = Permission.SALES_POST
+    override val requiredPermission get() = Permission.SALES_POST
     override fun fingerprint() = "$scope|$saleId"
 }
 
@@ -149,7 +149,7 @@ data class ReverseDailySale(
     val date: BusinessDate,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.SALES_REVERSE
+    override val requiredPermission get() = Permission.SALES_REVERSE
     override fun fingerprint() = "$scope|$saleId|${date.epochDay}|$reason"
 }
 
@@ -164,7 +164,7 @@ data class CollectReceivable(
     /** The customer's cheque, when collected into a cheque box. */
     val cheque: ir.sabou.treasury.ChequeDetails? = null,
 ) : Command {
-    override val requiredPermission = Permission.RECEIVABLE_COLLECT
+    override val requiredPermission get() = Permission.RECEIVABLE_COLLECT
     override fun fingerprint() = "$scope|$receivableId|$treasuryAccountId|${amount.rial}|${date.epochDay}|${cheque?.fingerprint()}"
 }
 
@@ -176,7 +176,7 @@ data class ReverseCollection(
     val date: BusinessDate,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.RECEIVABLE_REVERSE
+    override val requiredPermission get() = Permission.RECEIVABLE_REVERSE
     override fun fingerprint() = "$scope|$collectionId|${date.epochDay}|$reason"
 }
 
@@ -194,7 +194,7 @@ data class CloseSalesDay(
     /** What each card terminal's settlement report shows for the day, to compare with the card sales recorded. */
     val terminalTotals: Map<GlobalId, Money> = emptyMap(),
 ) : Command {
-    override val requiredPermission = Permission.SALES_DAY_CLOSE
+    override val requiredPermission get() = Permission.SALES_DAY_CLOSE
     override fun fingerprint() = "$scope|${date.epochDay}|$cashAccountId|${countedCash.rial}|" +
         terminalTotals.entries.sortedBy { it.key.value.toString() }.joinToString(",") { "${it.key}=${it.value.rial}" }
 }
@@ -211,16 +211,16 @@ data class UpdateCustomer(
     val creditLimit: Money,
     val isActive: Boolean,
 ) : Command {
-    override val requiredPermission = Permission.CUSTOMER_MANAGE
+    override val requiredPermission get() = Permission.CUSTOMER_MANAGE
     override fun fingerprint() = "$scope|$customerId|$name|$type|$phone|${creditLimit.rial}|$isActive"
 }
 
 /** The service charge added to sales, basis points of the food after discount, or null for none. */
 @NoDocument
 data class SetServiceCharge(override val commandId: GlobalId, val bp: Long?) : Command {
-    override val requiredPermission = Permission.MENU_PRICE_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.MENU_PRICE_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$bp"
 }
 
@@ -238,7 +238,7 @@ data class PaySalesTax(
     val note: String,
     val inputCredit: Money = Money.ZERO,
 ) : Command {
-    override val requiredPermission = Permission.TREASURY_PAYMENT
+    override val requiredPermission get() = Permission.TREASURY_PAYMENT
     override fun fingerprint() = "$scope|$treasuryAccountId|${amount.rial}|${inputCredit.rial}|${date.epochDay}|$note"
 }
 
@@ -252,7 +252,7 @@ data class WriteOffReceivable(
     val date: BusinessDate,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.CREDIT_OVERRIDE
+    override val requiredPermission get() = Permission.CREDIT_OVERRIDE
     override fun fingerprint() = "$scope|$receivableId|${amount.rial}|${date.epochDay}|$reason"
 }
 
@@ -266,20 +266,20 @@ data class RecordCustomerOpeningBalance(
     val date: BusinessDate,
     val dueDate: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.JOURNAL_MANUAL_POST
+    override val requiredPermission get() = Permission.JOURNAL_MANUAL_POST
     override fun fingerprint() = "$scope|$customerId|${amount.rial}|${date.epochDay}|${dueDate.epochDay}"
 }
 
 /** Takes back an opening balance entered by mistake (nothing collected or written off yet). */
 @NoDocument
 data class ReverseCustomerOpeningBalance(override val commandId: GlobalId, override val scope: Scope.Branch, val receivableId: GlobalId, val date: BusinessDate, val reason: String) : Command {
-    override val requiredPermission = Permission.JOURNAL_MANUAL_REVERSE
+    override val requiredPermission get() = Permission.JOURNAL_MANUAL_REVERSE
     override fun fingerprint() = "$scope|$receivableId|${date.epochDay}|$reason"
 }
 
 @NoDocument
 data class ReopenSalesDay(override val commandId: GlobalId, override val scope: Scope.Branch, val date: BusinessDate, val reason: String) : Command {
-    override val requiredPermission = Permission.SALES_DAY_REOPEN
+    override val requiredPermission get() = Permission.SALES_DAY_REOPEN
     override fun fingerprint() = "$scope|${date.epochDay}|$reason"
 }
 
@@ -295,6 +295,8 @@ class SalesOperations(
     private val prices: MenuPriceStore,
     private val imports: PosImportStore = ir.sabou.sales.memory.InMemoryPosImportStore(),
     private val deposits: DepositStore = ir.sabou.sales.memory.InMemoryDepositStore(),
+    /** Whether a sale has an original tax invoice that still stands (ready, sent or accepted; SABOU-AUDIT-005). */
+    private val liveTaxInvoice: (GlobalId) -> Boolean = { false },
 ) {
     val priceList = PriceList(prices)
 
@@ -390,7 +392,7 @@ class SalesOperations(
     internal fun lineCosts(lines: List<SaleLine>, perLine: List<List<IssueLine>?>, consumption: ir.sabou.inventory.Consumption): List<SaleLine> {
         val cost = LongArray(lines.size)
         consumption.lines.groupBy { it.itemId }.forEach { (itemId, issued) ->
-            val weights = perLine.map { reqs -> reqs?.filter { it.itemId == itemId }?.sumOf { it.quantity.micros.coerceAtLeast(0) } ?: 0L }
+            val weights = perLine.map { reqs -> reqs?.filter { it.itemId == itemId }?.sumOfExact { it.quantity.micros.coerceAtLeast(0) } ?: 0L }
             Ratio.allocate(issued.sumOfExact { it.cost.rial }, weights).forEachIndexed { i, v -> cost[i] = Math.addExact(cost[i], v) }
         }
         val short = consumption.shortages.map { it.itemId }.toSet()
@@ -519,6 +521,8 @@ class SalesOperations(
     fun reverse(c: ReverseDailySale): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
         val sale = requireSale(cmd.saleId, cmd.scope)
         ensure(sale.status == SaleStatus.POSTED) { DomainError.InvalidState("DAILY_SALE", sale.status.name) }
+        // A sale the tax system knows of (or will) is not taken out of the books behind its back (SABOU-AUDIT-005).
+        ensure(!liveTaxInvoice(sale.id)) { DomainError.InvalidState("DAILY_SALE", "HAS_TAX_INVOICE") }
         requireDayOpen(sale.scope, sale.date)
         requireDayOpen(sale.scope, cmd.date)
         val receivables = sales.receivablesOfSale(sale.id)

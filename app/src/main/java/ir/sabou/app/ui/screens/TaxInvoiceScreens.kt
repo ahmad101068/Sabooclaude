@@ -116,10 +116,16 @@ object TaxInvoiceScreens {
                                 TaxInvoiceStatus.ACCEPTED -> Chip("پذیرفته شد", ChipKind.PRIMARY)
                                 TaxInvoiceStatus.REJECTED -> Chip("رد شد", ChipKind.DANGER)
                                 TaxInvoiceStatus.CANCELLED -> Chip("ابطال شد", ChipKind.NEUTRAL)
+                                TaxInvoiceStatus.WITHDRAWN -> Chip("پس گرفته شد", ChipKind.NEUTRAL)
                             }
                             inv.messages.forEach { Text("• $it", style = SabouType.caption, color = if (inv.status == TaxInvoiceStatus.REJECTED) Sabou.colors.danger else Sabou.colors.muted) }
+                            // Never sent: it can be taken back (before reversing its sale, or to issue it anew).
+                            if (inv.status == TaxInvoiceStatus.READY) {
+                                SecondaryButton("پس گرفتن (ارسال نشده)", { action.run({ taxInvoices.withdraw(ir.sabou.sales.WithdrawTaxInvoice(GlobalId.new(), inv.scope, inv.id, "پس گرفته شد پیش از ارسال")) }) },
+                                    enabled = !action.busy)
+                            }
                             if (inv.kind == TaxInvoiceKind.ORIGINAL && inv.status == TaxInvoiceStatus.ACCEPTED &&
-                                invoices.none { it.invoice.refTaxId == inv.taxId && it.invoice.status != TaxInvoiceStatus.REJECTED }) {
+                                invoices.none { it.invoice.refTaxId == inv.taxId && it.invoice.status.live }) {
                                 SecondaryButton("ابطال", { cancelling = inv.id }, danger = true, enabled = !action.busy)
                             }
                             Divider()

@@ -202,7 +202,7 @@ class Buying internal constructor(private val core: SabouCore) {
         val changes = ArrayList<PriceChange>()
         postedInOrder(a).forEach { inv ->
             inv.lines.filter { !it.quantity.isZero }.groupBy { it.itemId }.forEach { (itemId, lines) ->
-                val price = Ratio.mulDiv(lines.sumOfExact { it.value.rial }, Quantity.SCALE, lines.sumOf { it.quantity.micros })
+                val price = Ratio.mulDiv(lines.sumOfExact { it.value.rial }, Quantity.SCALE, lines.sumOfExact { it.quantity.micros })
                 val previous = last[itemId]
                 if (previous != null && inv.date >= from && inv.date <= to) {
                     val change = PriceChange(items[itemId] ?: return@forEach, names[inv.supplierId].orEmpty(), inv.id, inv.date, previous.date, previous.price, price, previous.supplier)
@@ -326,9 +326,9 @@ class Buying internal constructor(private val core: SabouCore) {
         if (places.isEmpty()) return emptyList()
         val items = core.items.all().filter { it.isActive && !it.prepared }
         val suppliers = core.suppliers.all().associateBy { it.id }
-        val onHand = items.associate { i -> i.id to places.sumOf { core.stock.balance(i.id, it.id).quantity.micros } }
+        val onHand = items.associate { i -> i.id to places.sumOfExact { core.stock.balance(i.id, it.id).quantity.micros } }
         val onOrder = HashMap<GlobalId, Long>().also { m -> places.forEach { p -> openOrders(p.id).forEach { (k, v) -> m[k] = (m[k] ?: 0L) + v } } }
-        fun prepared(id: GlobalId) = places.sumOf { core.stock.balance(id, it.id).quantity.micros }
+        fun prepared(id: GlobalId) = places.sumOfExact { core.stock.balance(id, it.id).quantity.micros }
         // Cumulative need per day over the longest window any item needs.
         val horizon = items.map { i -> deliveryWindow(i.preferredSupplierId?.let { suppliers[it] }?.takeIf { it.isActive }, date, minutesNow).first }
             .maxOfOrNull { it.epochDay - date.epochDay }?.coerceIn(1, RUN_OUT_DAYS.toLong()) ?: 1L
@@ -406,8 +406,8 @@ class Buying internal constructor(private val core: SabouCore) {
         core.purchases.orders().filter { it.status == OrderStatus.OPEN && it.locationId == locationId }
             .forEach { o ->
                 val got = o.invoiceIds.mapNotNull { core.purchases.invoice(it) }.filter { it.status == InvoiceStatus.POSTED }.flatMap { it.lines }
-                    .groupBy { it.itemId }.mapValues { (_, l) -> l.sumOf { it.quantity.micros } }
-                o.lines.groupBy { it.itemId }.forEach { (item, l) -> onOrder[item] = (onOrder[item] ?: 0) + maxOf(0L, l.sumOf { it.quantity.micros } - (got[item] ?: 0L)) }
+                    .groupBy { it.itemId }.mapValues { (_, l) -> l.sumOfExact { it.quantity.micros } }
+                o.lines.groupBy { it.itemId }.forEach { (item, l) -> onOrder[item] = (onOrder[item] ?: 0) + maxOf(0L, l.sumOfExact { it.quantity.micros } - (got[item] ?: 0L)) }
             }
         return onOrder
     }

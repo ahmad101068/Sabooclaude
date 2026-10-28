@@ -273,11 +273,11 @@ data class UsageReport(
 ) {
     /** True when no approved count in the period: the actual figure is not a physical measurement. */
     val measuredByCount: Boolean get() = counts > 0
-    val theoreticalValue: Long get() = rows.sumOf { it.theoretical.value }
-    val actualValue: Long get() = rows.sumOf { it.actual.value }
-    val wasteValue: Long get() = rows.sumOf { it.waste.value }
-    val compsValue: Long get() = rows.sumOf { it.comps.value }
-    val unexplainedValue: Long get() = rows.sumOf { it.unexplained.value }
+    val theoreticalValue: Long get() = rows.sumOfExact { it.theoretical.value }
+    val actualValue: Long get() = rows.sumOfExact { it.actual.value }
+    val wasteValue: Long get() = rows.sumOfExact { it.waste.value }
+    val compsValue: Long get() = rows.sumOfExact { it.comps.value }
+    val unexplainedValue: Long get() = rows.sumOfExact { it.unexplained.value }
 }
 
 // ---------------------------------------------------------------- Attendance
@@ -350,10 +350,10 @@ class Reports internal constructor(private val core: SabouCore) {
             }
         }
         val byAccount = totals.groupBy { it.account }.mapNotNull { (code, rows) ->
-            val amount = rows.sumOf { natural(code, it.debit, it.credit) ?: 0 }
+            val amount = rows.sumOfExact { natural(code, it.debit, it.credit) ?: 0 }
             if (kind(code) == null || amount == 0L) null else Triple(kind(code)!!, accounts.getValue(code), amount)
         }.sortedBy { it.second.code.value }
-        fun sumOf(codes: List<AccountCode>) = codes.sumOf { c -> byAccount.firstOrNull { it.second.code == c }?.third ?: 0 }
+        fun sumOf(codes: List<AccountCode>) = codes.sumOfExact { c -> byAccount.firstOrNull { it.second.code == c }?.third ?: 0 }
         val places = core.locations.all().filter { l -> if (branch != null) l.scope == branch else a.canAccess(l.scope) }.map { it.id }.toSet()
         val openShortages = core.inventoryGateway.openShortages(places).count { it.date in from..to }
         return ProfitAndLoss(
@@ -431,14 +431,14 @@ class Reports internal constructor(private val core: SabouCore) {
                     day += dayActual[c] ?: 0L; mtd += mtdActual[c] ?: 0L
                 }
             }
-            DailyPnl.Line(g, day, mine.sumOf { dayBudget[it] ?: 0L }, mtd, mine.sumOf { mtdBudget[it] ?: 0L }, dayEstimated, mtdEstimated)
+            DailyPnl.Line(g, day, mine.sumOfExact { dayBudget[it] ?: 0L }, mtd, mine.sumOfExact { mtdBudget[it] ?: 0L }, dayEstimated, mtdEstimated)
         }
         val elapsed = date.epochDay - monthStart.epochDay + 1
         val days = monthEnd.epochDay - monthStart.epochDay + 1
         val sales = lines.single { it.group == DailyPnl.Group.SALES }
         return DailyPnl(scopeName(branch), date, monthStart, lines,
             salesRunRate = if (elapsed > 0) Ratio.mulDiv(sales.mtd, days, elapsed) else 0L,
-            monthSalesBudget = codes.filter { group(it) == DailyPnl.Group.SALES }.sumOf { monthBudget[it] ?: 0L })
+            monthSalesBudget = codes.filter { group(it) == DailyPnl.Group.SALES }.sumOfExact { monthBudget[it] ?: 0L })
     }
 
     /** The journal lines behind one P&L figure: every posting to [account] in the period. */
@@ -458,11 +458,11 @@ class Reports internal constructor(private val core: SabouCore) {
     fun menuEngineering(branch: Scope.Branch, from: BusinessDate, to: BusinessDate): MenuEngineering {
         val mix = productMix(branch, from, to)
         val target = core.salesOps.foodCostTarget()
-        val totalPortions = mix.rows.sumOf { it.portions.micros }
+        val totalPortions = mix.rows.sumOfExact { it.portions.micros }
         val n = mix.rows.size
         val popularity = if (n == 0) 0 else Ratio.mulDiv(10_000, 70, 100L * n)
         val costed = mix.rows.filter { it.unitMargin != null }
-        val averageMargin = costed.sumOf { it.portions.micros }.takeIf { it > 0 }?.let { q ->
+        val averageMargin = costed.sumOfExact { it.portions.micros }.takeIf { it > 0 }?.let { q ->
             java.math.BigInteger.ZERO.let { acc ->
                 costed.fold(acc) { s, r -> s + java.math.BigInteger.valueOf(r.unitMargin!!).multiply(java.math.BigInteger.valueOf(r.portions.micros)) }
             }.divide(java.math.BigInteger.valueOf(q)).toLong()
@@ -544,8 +544,8 @@ class Reports internal constructor(private val core: SabouCore) {
         val accounts = core.treasuryAccounts.all().associateBy { it.id }
         val liquid = posted.flatMap { it.settlements }.filterIsInstance<Settlement.Liquid>()
         val locations = core.locations.all().filter { it.scope == branch }
-        val waste = locations.sumOf { loc ->
-            core.stock.movementsAt(loc.id, date, date).filter { it.kind == MovementKind.WASTE }.sumOf { -it.valueDelta }
+        val waste = locations.sumOfExact { loc ->
+            core.stock.movementsAt(loc.id, date, date).filter { it.kind == MovementKind.WASTE }.sumOfExact { -it.valueDelta }
         }
         val purchases = core.purchases.invoices().filter { it.scope == branch && it.date == date && it.status == InvoiceStatus.POSTED }
         val day = core.sales.day(branch, date)
@@ -592,6 +592,8 @@ class Reports internal constructor(private val core: SabouCore) {
                     MovementKind.PRODUCTION_IN, MovementKind.PRODUCTION_OUT -> r.production += qv
                     MovementKind.WASTE -> if (m.source.type == InventoryOperations.COMP) r.comps -= qv else r.waste -= qv
                     MovementKind.COUNT_LOSS, MovementKind.COUNT_GAIN -> r.unexplained -= qv
+                    // A corrected purchase price: part of the purchases (SABOU-AUDIT-002).
+                    MovementKind.REVALUATION -> r.purchases += qv
                     // Issues: sales consumption is the theoretical usage; a return to the supplier undoes a purchase.
                     MovementKind.ISSUE -> if (m.source.module == ModuleId.SALES) r.theoretical -= qv else r.purchases += qv
                 }
@@ -619,8 +621,8 @@ class Reports internal constructor(private val core: SabouCore) {
         requirePeriod(from, to)
         return core.personnel.employees(branch).filter { it.employedDays(from, to) > 0 }.map { e ->
             val records = core.personnel.attendance(e.id, from, to)
-            AttendanceTotal(e.id, e.name, records.size, records.sumOf { it.workedMinutes.toLong() },
-                records.sumOf { it.overtimeMinutes.toLong() }, records.sumOf { it.absentMinutes.toLong() })
+            AttendanceTotal(e.id, e.name, records.size, records.sumOfExact { it.workedMinutes.toLong() },
+                records.sumOfExact { it.overtimeMinutes.toLong() }, records.sumOfExact { it.absentMinutes.toLong() })
         }
     }
 
@@ -655,7 +657,7 @@ class Reports internal constructor(private val core: SabouCore) {
 
         fun perUnit(itemId: GlobalId): Long? = cache.getOrPut(itemId) {
             val balances = core.locations.all().filter { it.scope == branch }.map { core.stock.balance(itemId, it.id) }
-            val qty = balances.sumOf { it.quantity.micros }
+            val qty = balances.sumOfExact { it.quantity.micros }
             val value = balances.sumOfExact { it.value.rial }
             if (qty > 0 && value > 0) Ratio.mulDiv(value, Quantity.SCALE, qty)
             else lastPurchase(itemId) ?: prepCost(itemId)

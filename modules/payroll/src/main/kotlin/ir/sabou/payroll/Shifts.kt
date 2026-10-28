@@ -1,5 +1,6 @@
 package ir.sabou.payroll
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -152,27 +153,27 @@ data class SaveShift(
     val breakMinutes: Int,
     val station: String,
 ) : Command {
-    override val requiredPermission = Permission.SHIFT_MANAGE
+    override val requiredPermission get() = Permission.SHIFT_MANAGE
     override fun fingerprint() = "$scope|$shiftId|$employeeId|${date.epochDay}|$startMinute|$endMinute|$breakMinutes|$station"
 }
 
 @NoDocument
 data class DeleteShift(override val commandId: GlobalId, override val scope: Scope.Branch, val shiftId: GlobalId) : Command {
-    override val requiredPermission = Permission.SHIFT_MANAGE
+    override val requiredPermission get() = Permission.SHIFT_MANAGE
     override fun fingerprint() = "$scope|$shiftId"
 }
 
 /** Copies the week starting [fromWeek] to the week starting [toWeek] (days without shifts in the target only). */
 @NoDocument
 data class CopyWeek(override val commandId: GlobalId, override val scope: Scope.Branch, val fromWeek: BusinessDate, val toWeek: BusinessDate) : Command {
-    override val requiredPermission = Permission.SHIFT_MANAGE
+    override val requiredPermission get() = Permission.SHIFT_MANAGE
     override fun fingerprint() = "$scope|${fromWeek.epochDay}|${toWeek.epochDay}"
 }
 
 /** Sets (4–6 digits) or removes (null) an employee's clock PIN. */
 @NoDocument
 data class SetClockPin(override val commandId: GlobalId, override val scope: Scope.Branch, val employeeId: GlobalId, val pin: String?) : Command {
-    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override val requiredPermission get() = Permission.PERSONNEL_MANAGE
     // The PIN itself never enters the fingerprint (idempotency records are kept): a slow, salted digest of it does.
     override fun fingerprint() = "$scope|$employeeId|" + (pin?.let { ir.sabou.platform.PinHasher.fingerprint(it.toCharArray(), commandId.value) } ?: "none")
 }
@@ -192,7 +193,7 @@ data class ClockPunch(
     /** A photo taken by the phone at the moment (required when the restaurant turns it on). */
     val photo: ir.sabou.platform.AttachmentInput? = null,
 ) : Command {
-    override val requiredPermission = Permission.TIME_CLOCK
+    override val requiredPermission get() = Permission.TIME_CLOCK
     override fun fingerprint() = "$scope|$employeeId|${date.epochDay}|$minute|" + ir.sabou.platform.PinHasher.fingerprint(pin.toCharArray(), commandId.value) +
         "|" + (photo?.fingerprint() ?: "")
 }
@@ -203,7 +204,7 @@ data class ClockPunch(
  */
 @NoDocument
 data class ConfirmDayTime(override val commandId: GlobalId, override val scope: Scope.Branch, val date: BusinessDate, val replaceManual: Boolean = false) : Command {
-    override val requiredPermission = Permission.ATTENDANCE_RECORD
+    override val requiredPermission get() = Permission.ATTENDANCE_RECORD
     override fun fingerprint() = "$scope|${date.epochDay}|$replaceManual"
 }
 
@@ -218,14 +219,14 @@ data class AddPunch(
     val kind: Punch.Kind,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.ATTENDANCE_RECORD
+    override val requiredPermission get() = Permission.ATTENDANCE_RECORD
     override fun fingerprint() = "$scope|$employeeId|${date.epochDay}|$minute|$kind|$reason"
 }
 
 /** A manager cancels a wrong punch (twice by mistake, the wrong name), with why. */
 @NoDocument
 data class VoidPunch(override val commandId: GlobalId, override val scope: Scope.Branch, val punchId: GlobalId, val date: BusinessDate, val reason: String) : Command {
-    override val requiredPermission = Permission.ATTENDANCE_RECORD
+    override val requiredPermission get() = Permission.ATTENDANCE_RECORD
     override fun fingerprint() = "$scope|$punchId|${date.epochDay}|$reason"
 }
 
@@ -295,7 +296,7 @@ class ShiftOperations(
         ensure(employee.employedOn(cmd.date)) { DomainError.InvalidState("EMPLOYEE", "NOT_EMPLOYED_ON_DATE") }
         ensure(cmd.minute in 0 until 36 * 60) { DomainError.InvalidInput("time", "زمان معتبر نیست.") }
         // The phone's date must be today's (within a day of the clock) so a punch cannot be back-dated.
-        val clockDay = Math.floorDiv(ctx.nowEpochMillis, 86_400_000L)
+        val clockDay = Math.floorDiv(ctx.nowEpochMillis + IRAN_OFFSET_MILLIS, 86_400_000L)
         ensure(kotlin.math.abs(cmd.date.epochDay - clockDay) <= 1) { DomainError.InvalidInput("date", "تاریخ گوشی درست نیست.") }
         val failed = shifts.pinFailures(employee.id)
         ensure(ctx.nowEpochMillis >= failed.lockedUntil) { DomainError.InvalidState("CLOCK_PIN", "LOCKED:${(failed.lockedUntil - ctx.nowEpochMillis + 999) / 1_000}") }
@@ -313,7 +314,16 @@ class ShiftOperations(
         if (failed.count > 0) shifts.savePinFailures(employee.id, PinFailures(0, 0L))
         ensure(cmd.photo != null || !settings().clockPhotoRequired) { DomainError.InvalidInput("photo", "عکس لحظه‌ی ساعت‌زنی لازم است.") }
         ensure(cmd.photo == null || cmd.photo.mime.startsWith("image/")) { DomainError.InvalidInput("photo", "عکس لازم است.") }
-        val (day, minute) = workDay(cmd.scope, employee.id, cmd.date, cmd.minute)
+        // The time is the main phone's (SABOU-AUDIT-006): a punch sent by another phone states its own clock, which is
+        // only accepted when it agrees with this one; what is recorded is this phone's time, in Iran.
+        val local = ctx.nowEpochMillis + IRAN_OFFSET_MILLIS
+        val hubDate = BusinessDate(Math.floorDiv(local, 86_400_000L))
+        val hubMinute = (Math.floorMod(local, 86_400_000L) / 60_000L).toInt()
+        val drift = (cmd.date.epochDay - hubDate.epochDay) * 1_440 + (cmd.minute - hubMinute)
+        ensure(kotlin.math.abs(drift) <= MAX_CLOCK_DRIFT_MINUTES) {
+            DomainError.InvalidInput("time", "ساعت این گوشی با گوشی اصلی ${kotlin.math.abs(drift)} دقیقه اختلاف دارد؛ ساعت گوشی را درست کنید.")
+        }
+        val (day, minute) = workDay(cmd.scope, employee.id, hubDate, hubMinute)
         val today = Punch.effective(shifts.punches(cmd.scope, day, day).filter { it.employeeId == employee.id })
         ensure(today.none { kotlin.math.abs(it.minute - minute) < 1 }) { DomainError.InvalidState("PUNCH", "DUPLICATE") }
         val kind = if (today.lastOrNull()?.kind == Punch.Kind.IN) Punch.Kind.OUT else Punch.Kind.IN
@@ -408,6 +418,9 @@ class ShiftOperations(
     }
 
     companion object {
+        const val IRAN_OFFSET_MILLIS = 210 * 60_000L
+        /** How far a phone's clock may be from the main phone's for its punch to count. */
+        const val MAX_CLOCK_DRIFT_MINUTES = 10
         const val MAX_FAILURES = 5
         const val LOCK_MILLIS = 5 * 60_000L
         const val MAX_LOCK_MILLIS = 24 * 60 * 60_000L

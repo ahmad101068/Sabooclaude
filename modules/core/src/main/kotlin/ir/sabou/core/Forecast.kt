@@ -68,10 +68,10 @@ class Forecasts internal constructor(private val core: SabouCore) {
         if (samples.isEmpty()) return DayForecast(date, 0, 0, 0, 0, special)
         // Newer weeks weigh more: weight 8 for last week … 1 for eight weeks ago.
         val weights = samples.map { (w, v) -> (WEEKS + 1 - w).toLong() to v }
-        val total = weights.sumOf { it.first }
+        val total = weights.sumOfExact { it.first }
         // One division at the end: rounding each term would drift by a few Rial.
-        val mean = maxOf(0, weights.sumOf { (wt, v) -> Math.multiplyExact(v, wt) } / total)
-        val deviation = weights.sumOf { (wt, v) -> Math.multiplyExact(kotlin.math.abs(v - mean), wt) } / total
+        val mean = maxOf(0, weights.sumOfExact { (wt, v) -> Math.multiplyExact(v, wt) } / total)
+        val deviation = weights.sumOfExact { (wt, v) -> Math.multiplyExact(kotlin.math.abs(v - mean), wt) } / total
         val percent = when (special?.kind) { SpecialDay.Kind.CLOSED -> 0; null -> 100; else -> special.percent }
         fun scaled(v: Long) = Ratio.mulDiv(v, percent.toLong(), 100)
         val expected = scaled(mean)
@@ -106,10 +106,10 @@ class Forecasts internal constructor(private val core: SabouCore) {
             if (f.samples == 0 || actual <= 0) null else f.expected to actual
         }
         if (pairs.size < 7) return null
-        val mape = pairs.sumOf { (f, a) -> Ratio.mulDiv(kotlin.math.abs(a - f), 10_000, a) } / pairs.size
-        val actual = pairs.sumOf { it.second }
-        val wape = Ratio.mulDiv(pairs.sumOf { (f, a) -> kotlin.math.abs(a - f) }, 10_000, actual)
-        val over = pairs.sumOf { (f, a) -> f - a }
+        val mape = pairs.sumOfExact { (f, a) -> Ratio.mulDiv(kotlin.math.abs(a - f), 10_000, a) } / pairs.size
+        val actual = pairs.sumOfExact { it.second }
+        val wape = Ratio.mulDiv(pairs.sumOfExact { (f, a) -> kotlin.math.abs(a - f) }, 10_000, actual)
+        val over = pairs.sumOfExact { (f, a) -> f - a }
         val bias = Ratio.mulDiv(kotlin.math.abs(over), 10_000, actual).let { if (over < 0) -it else it }
         return Backtest(mape, wape, bias)
     }
