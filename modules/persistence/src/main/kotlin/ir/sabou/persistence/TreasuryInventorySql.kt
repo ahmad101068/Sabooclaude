@@ -100,9 +100,9 @@ class SqlMovementStore(db: SqlDatabase) : SqlTable(db), MovementStore {
     ).single().long("n")
 
     override fun lowestBalanceFrom(accountId: GlobalId, date: BusinessDate): Long {
-        var running = balanceAsOf(accountId, date.plusDays(-1))
+        var running = balanceAsOf(accountId, date)
         var lowest = running
-        db.query("SELECT net FROM treasury_days WHERE account_id = ? AND date >= ? ORDER BY date", accountId.value, date.epochDay).forEach {
+        db.query("SELECT net FROM treasury_days WHERE account_id = ? AND date > ? ORDER BY date", accountId.value, date.epochDay).forEach {
             running = Math.addExact(running, it.long("net")); lowest = minOf(lowest, running)
         }
         return lowest

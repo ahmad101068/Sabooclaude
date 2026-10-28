@@ -167,7 +167,51 @@ internal object Wire {
         return base in ALLOWED_EXACT || ALLOWED_PREFIXES.any { base.startsWith(it) }
     }
 
+    /**
+     * Resource limits on what one message may make the reader build (independent audit, finding 005): depth, object
+     * count, array length and bytes, checked by the platform's serialization filter before anything is allocated.
+     * Applied through reflection where the platform has the filter (the JVM; newer Android); a message is at most one
+     * frame ([SecureChannel.MAX_FRAME]) in any case, and only a paired phone holding the key can send one.
+     */
+    internal const val MAX_DEPTH = 64L
+    internal const val MAX_REFS = 4_000_000L
+    private val LIMITS: Pair<java.lang.reflect.Method, Any>? = runCatching {
+        val filterType = Class.forName("java.io.ObjectInputFilter")
+        val status = Class.forName("java.io.ObjectInputFilter\$Status")
+        val rejected = status.getField("REJECTED").get(null)
+        val undecided = status.getField("UNDECIDED").get(null)
+        val info = Class.forName("java.io.ObjectInputFilter\$FilterInfo")
+        val serialClass = info.getMethod("serialClass")
+        val arrayLength = info.getMethod("arrayLength")
+        val depth = info.getMethod("depth")
+        val references = info.getMethod("references")
+        val streamBytes = info.getMethod("streamBytes")
+        val filter = java.lang.reflect.Proxy.newProxyInstance(Wire::class.java.classLoader, arrayOf(filterType)) { proxy, method, args ->
+            when (method.name) {
+                "checkInput" -> {
+                    val fi = args!![0]
+                    val type = serialClass.invoke(fi) as Class<*>?
+                    val length = arrayLength.invoke(fi) as Long
+                    val elementBytes = when (type?.componentType) { null -> 1L; Byte::class.javaPrimitiveType, Boolean::class.javaPrimitiveType -> 1L; Short::class.javaPrimitiveType, Char::class.javaPrimitiveType -> 2L; Int::class.javaPrimitiveType, Float::class.javaPrimitiveType -> 4L; else -> 8L }
+                    val tooBig = length >= 0 && length * elementBytes > SecureChannel.MAX_FRAME
+                    if (tooBig || depth.invoke(fi) as Long > MAX_DEPTH || references.invoke(fi) as Long > MAX_REFS ||
+                        streamBytes.invoke(fi) as Long > SecureChannel.MAX_FRAME) rejected else undecided
+                }
+                "hashCode" -> System.identityHashCode(proxy)
+                "equals" -> proxy === args?.get(0)
+                "toString" -> "sabou-sync-limits"
+                else -> undecided
+            }
+        }
+        ObjectInputStream::class.java.getMethod("setObjectInputFilter", filterType) to filter
+    }.getOrNull()
+
+    /** True where the platform enforces [LIMITS] (for tests and diagnostics). */
+    internal val limitsEnforced: Boolean get() = LIMITS != null
+
     private class AllowListInput(input: InputStream) : ObjectInputStream(input) {
+        init { LIMITS?.let { (set, filter) -> set.invoke(this, filter) } }
+
         override fun resolveClass(desc: ObjectStreamClass): Class<*> {
             if (!allowed(desc.name)) throw java.io.InvalidClassException(desc.name, "not allowed on the sync wire")
             return super.resolveClass(desc)

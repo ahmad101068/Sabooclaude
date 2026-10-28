@@ -291,6 +291,9 @@ class SyncHub(
     private fun newToken(): String = ByteArray(24).also(random::nextBytes).joinToString("") { "%02x".format(it) }
 
     private fun pull(c: SabouCore, peer: Peer, request: Message.Pull): Message {
+        // A phone can only have applied what this phone logged: a position ahead of the log (or negative) is refused and
+        // never recorded, so it cannot make this phone drop entries the other phone still needs (audit finding 004).
+        if (request.cursor !in 0..c.sync.head()) throw DomainException(DomainError.InvalidState("SYNC", "CURSOR_AHEAD"))
         recordCursor(peer.deviceId, request.cursor)
         val deadline = clock() + request.waitMillis.coerceIn(0, MAX_WAIT_MS)
         while (c.sync.head() <= request.cursor && clock() < deadline && isRunning) Thread.sleep(POLL_MS)
@@ -329,7 +332,8 @@ class SyncHub(
             channel.send(Message.Failure(e.error)); return
         }
         try {
-            recordCursor(peer.deviceId, snapshot.cursor)
+            // The phone's position is not moved here: only its first pull after installing the copy records it, so a
+            // copy cut off half way keeps the log that phone still needs (audit finding 003).
             channel.send(Message.CopyHeader(snapshot.epoch, snapshot.cursor, snapshot.key, snapshot.file.length()))
             snapshot.file.inputStream().use { i ->
                 val buffer = ByteArray(CHUNK)

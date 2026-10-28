@@ -183,6 +183,7 @@ object ManagementDashboardScreen {
     private fun CategoryCard(d: ManagementDashboard) {
         SCard {
             Title("فروش به تفکیک دسته")
+            if (!d.salesMixAvailable) { Text("نقش شما فروش به تفکیک غذا را نمی‌بیند.", style = SabouType.body, color = Sabou.colors.muted); return@SCard }
             if (d.categories.isEmpty()) { Text("فروشی در این دوره نیست.", style = SabouType.body, color = Sabou.colors.muted); return@SCard }
             val top = d.categories.take(6)
             ColorBars(top.map { it.amount }, top.map { it.name }, chartColors(), { money(it) },
@@ -236,6 +237,7 @@ object ManagementDashboardScreen {
     private fun TopItemsCard(d: ManagementDashboard, onMore: () -> Unit) {
         SCard(onClick = onMore) {
             Title("عملکرد اقلام پرفروش", "مهندسی منو ←")
+            if (!d.salesMixAvailable) { Text("نقش شما فروش به تفکیک غذا را نمی‌بیند.", style = SabouType.body, color = Sabou.colors.muted); return@SCard }
             if (d.topItems.isEmpty()) { Text("فروشی در این دوره نیست.", style = SabouType.body, color = Sabou.colors.muted); return@SCard }
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 listOf("غذا" to 2f, "تعداد" to 1f, "فروش" to 1.3f, "حاشیه" to 1f, "وضعیت" to 1.6f).forEach { (h, w) ->

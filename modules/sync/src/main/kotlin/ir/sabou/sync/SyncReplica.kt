@@ -91,6 +91,11 @@ class SyncReplica(
         fun onConnection(connected: Boolean)
         /** The copy cannot continue from the log (gap, replaced books, or a batch that did not apply): take a full copy. */
         fun onNeedsFullCopy(reason: String)
+        /**
+         * A command was recorded on the main phone but this copy could not yet bring in its effects: until the next
+         * [onApplied], what is on screen may not show it. The command itself stands (independent audit, finding 002).
+         */
+        fun onBehind() {}
     }
 
     @Volatile private var token: String? = null
@@ -168,14 +173,16 @@ class SyncReplica(
             throw e
         }
         val executed = reply as? Message.Executed ?: throw DomainException(SyncErrors.HUB_UNREACHABLE)
-        catchUp(executed.cursor)
+        // Recorded on the main phone, which keeps the books: that is the outcome. A copy left behind is said so, never
+        // reported as a failure (the person would enter it again) nor silently shown as up to date.
+        if (!runCatching { catchUp(executed.cursor) }.getOrDefault(false)) listener.onBehind()
         return executed.outcome
     }
 
     override fun login(username: String, pin: CharArray): GlobalId {
         val reply = request(Message.Login(username, pin.copyOf())) as? Message.LoginOk ?: throw DomainException(SyncErrors.HUB_UNREACHABLE)
         token = reply.token
-        catchUp(reply.cursor)
+        if (!runCatching { catchUp(reply.cursor) }.getOrDefault(false)) listener.onBehind()
         return reply.userId
     }
 
@@ -193,13 +200,14 @@ class SyncReplica(
 
     // ------------------------------------------------------------------ replication
 
-    /** Brings this copy at least to [target] (the effects of a command or sign-in just made). */
-    private fun catchUp(target: Long) {
+    /** Brings this copy at least to [target] (the effects of a command or sign-in just made); true once it is there. */
+    private fun catchUp(target: Long): Boolean {
         var rounds = 0
         while (core.sync.cursor() < target && rounds++ < 20) {
-            val reply = request(Message.Pull(core.sync.cursor(), 0)) as? Message.Changes ?: return
-            if (!applyBatch(reply)) return
+            val reply = request(Message.Pull(core.sync.cursor(), 0)) as? Message.Changes ?: return false
+            if (!applyBatch(reply)) return false
         }
+        return core.sync.cursor() >= target
     }
 
     /** Applies one batch; false when the copy must be replaced instead. */
@@ -261,6 +269,10 @@ class SyncReplica(
 
     companion object {
         const val PULL_WAIT_MS = 20_000L
+        /** A restaurant's books stay far below this; a larger announced copy is refused before it is downloaded. */
+        const val MAX_COPY_BYTES = 4L * 1024 * 1024 * 1024
+        /** Room left on the phone after the copy (the app and the old copy still need space). */
+        const val FREE_MARGIN_BYTES = 64L * 1024 * 1024
 
         /** Downloads a full copy of the main phone's books into [target]; returns its header. */
         fun downloadCopy(address: InetSocketAddress, pairing: Pairing, appVersion: String, target: File, progress: (Long, Long) -> Unit = { _, _ -> }): Message.CopyHeader {
@@ -271,16 +283,27 @@ class SyncReplica(
                     is Message.Failure -> throw DomainException(reply.error)
                     else -> throw IOException("unexpected reply")
                 }
-                target.outputStream().use { out: OutputStream ->
-                    var done = 0L
-                    while (true) {
-                        val chunk = c.channel.receiveBytes()
-                        if (chunk.isEmpty()) break
-                        out.write(chunk)
-                        done += chunk.size
-                        progress(done, header.size)
+                // Size and room are checked before anything is written, and the stream may not run past the size it
+                // announced; a copy that fails half way leaves no partial file behind (audit finding 007).
+                if (header.size !in 1..MAX_COPY_BYTES) throw DomainException(DomainError.InvalidState("SYNC", "COPY_SIZE"))
+                val room = (target.absoluteFile.parentFile ?: target.absoluteFile).usableSpace
+                if (room < header.size + FREE_MARGIN_BYTES) throw DomainException(DomainError.InvalidState("SYNC", "NO_ROOM"))
+                try {
+                    target.outputStream().use { out: OutputStream ->
+                        var done = 0L
+                        while (true) {
+                            val chunk = c.channel.receiveBytes()
+                            if (chunk.isEmpty()) break
+                            if (done + chunk.size > header.size) throw IOException("copy longer than announced")
+                            out.write(chunk)
+                            done += chunk.size
+                            progress(done, header.size)
+                        }
+                        if (done != header.size) throw IOException("copy truncated")
                     }
-                    if (done != header.size) throw IOException("copy truncated")
+                } catch (e: Throwable) {
+                    target.delete()
+                    throw e
                 }
                 return header
             }
