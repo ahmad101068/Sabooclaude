@@ -36,6 +36,11 @@ enum class TaxInvoiceStatus {
     REJECTED,
     /** An accepted original whose cancellation was accepted. */
     CANCELLED,
+    /** Issued but never sent, then taken back (SABOU-AUDIT-005): it never reached the tax system. */
+    WITHDRAWN;
+
+    /** Still stands for its sale: the sale cannot be issued again, nor reversed, while it does. */
+    val live: Boolean get() = this == READY || this == SENT || this == ACCEPTED
 }
 
 data class TaxInvoiceLine(
@@ -104,15 +109,22 @@ interface TaxInvoiceStore {
 /** Issues the invoice of a sale; nothing is sent. */
 @NoDocument
 data class IssueTaxInvoice(override val commandId: GlobalId, override val scope: Scope.Branch, val saleId: GlobalId, val issuedAt: Long) : Command {
-    override val requiredPermission = Permission.TAX_SETTINGS
+    override val requiredPermission get() = Permission.TAX_SETTINGS
     override fun fingerprint() = "$scope|$saleId|$issuedAt"
 }
 
 /** Issues the cancellation (ابطال) of an accepted invoice. */
 @NoDocument
 data class CancelTaxInvoice(override val commandId: GlobalId, override val scope: Scope.Branch, val invoiceId: GlobalId, val issuedAt: Long) : Command {
-    override val requiredPermission = Permission.TAX_SETTINGS
+    override val requiredPermission get() = Permission.TAX_SETTINGS
     override fun fingerprint() = "$scope|$invoiceId|$issuedAt"
+}
+
+/** Takes back an issued invoice that was never sent (SABOU-AUDIT-005): before reversing its sale, or to issue it anew. */
+@NoDocument
+data class WithdrawTaxInvoice(override val commandId: GlobalId, override val scope: Scope.Branch, val invoiceId: GlobalId, val reason: String) : Command {
+    override val requiredPermission get() = Permission.TAX_SETTINGS
+    override fun fingerprint() = "$scope|$invoiceId|$reason"
 }
 
 /** What the tax system said about an invoice: received (with its reference), accepted or refused. */
@@ -127,7 +139,7 @@ data class RecordTaxInvoiceResult(
     val messages: List<String>,
     val at: Long,
 ) : Command {
-    override val requiredPermission = Permission.TAX_SETTINGS
+    override val requiredPermission get() = Permission.TAX_SETTINGS
     override fun fingerprint() = "$scope|$invoiceId|$status|$referenceNumber|$uid|${messages.joinToString("\u0001")}|$at"
 }
 
@@ -146,7 +158,7 @@ class TaxInvoiceOperations(
         val sale = sales.sale(cmd.saleId) ?: throw DomainException(DomainError.NotFound("SALE"))
         ensure(sale.scope == cmd.scope) { DomainError.InvalidInput("scope", "فروش متعلق به این شعبه نیست.") }
         ensure(sale.status == SaleStatus.POSTED) { DomainError.InvalidState("SALE", sale.status.name) }
-        ensure(invoices.all().none { it.saleId == sale.id && it.kind == TaxInvoiceKind.ORIGINAL && it.status != TaxInvoiceStatus.REJECTED }) {
+        ensure(invoices.all().none { it.saleId == sale.id && it.kind == TaxInvoiceKind.ORIGINAL && it.status.live }) {
             DomainError.InvalidState("TAX_INVOICE", "ALREADY_ISSUED")
         }
         val credit = sale.settlements.filterIsInstance<Settlement.Credit>()
@@ -190,7 +202,7 @@ class TaxInvoiceOperations(
         val original = invoices.byId(cmd.invoiceId) ?: throw DomainException(DomainError.NotFound("TAX_INVOICE"))
         ensure(original.scope == cmd.scope) { DomainError.InvalidInput("scope", "صورتحساب متعلق به این شعبه نیست.") }
         ensure(original.kind == TaxInvoiceKind.ORIGINAL && original.status == TaxInvoiceStatus.ACCEPTED) { DomainError.InvalidState("TAX_INVOICE", original.status.name) }
-        ensure(invoices.all().none { it.refTaxId == original.taxId && it.status != TaxInvoiceStatus.REJECTED }) { DomainError.InvalidState("TAX_INVOICE", "CANCELLATION_EXISTS") }
+        ensure(invoices.all().none { it.refTaxId == original.taxId && it.status.live }) { DomainError.InvalidState("TAX_INVOICE", "CANCELLATION_EXISTS") }
         val serial = nextSerial()
         val cancellation = original.copy(
             id = GlobalId.new(), kind = TaxInvoiceKind.CANCELLATION, serial = serial,
@@ -200,6 +212,17 @@ class TaxInvoiceOperations(
         invoices.save(cancellation)
         ctx.audit(AuditDraft("TAX_INVOICE_CANCEL", "TAX_INVOICE", cancellation.id.value, "of=${original.taxId};taxId=${cancellation.taxId}"))
         cancellation.id
+    }
+
+    fun withdraw(c: WithdrawTaxInvoice): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->
+        val invoice = invoices.byId(cmd.invoiceId) ?: throw DomainException(DomainError.NotFound("TAX_INVOICE"))
+        ensure(invoice.scope == cmd.scope) { DomainError.InvalidInput("scope", "صورتحساب متعلق به این شعبه نیست.") }
+        // Only what the tax system never received: a sent or accepted invoice is answered or cancelled there.
+        ensure(invoice.status == TaxInvoiceStatus.READY) { DomainError.InvalidState("TAX_INVOICE", invoice.status.name) }
+        ensure(cmd.reason.trim().length in 3..300) { DomainError.InvalidInput("reason", "دلیل پس‌گرفتن الزامی است.") }
+        invoices.save(invoice.copy(status = TaxInvoiceStatus.WITHDRAWN, messages = listOf(cmd.reason.trim()), updatedAt = ctx.nowEpochMillis))
+        ctx.audit(AuditDraft("TAX_INVOICE_WITHDRAW", "TAX_INVOICE", invoice.id.value, cmd.reason.trim()))
+        invoice.id
     }
 
     fun record(c: RecordTaxInvoiceResult): CommandOutcome = bus.execute(ModuleId.SALES, c) { cmd, ctx ->

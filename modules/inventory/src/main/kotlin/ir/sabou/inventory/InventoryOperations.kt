@@ -34,10 +34,10 @@ data class CreateItem(
     val prepared: Boolean = false,
     val packs: List<PackUnit> = emptyList(),
 ) : Command {
-    override val requiredPermission = Permission.INVENTORY_ITEM_MANAGE
+    override val requiredPermission get() = Permission.INVENTORY_ITEM_MANAGE
     // The item catalogue is shared by all branches.
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$name|$unit|${minimumStock.micros}|$prepared|${packs.joinToString(";") { "${it.name}=${it.contains.micros}" }}"
 }
 
@@ -68,9 +68,9 @@ data class UpdateItem(
     /** A new stock unit: only for an item that never moved and is in no recipe (a unit typed wrong). */
     val unit: StockUnit? = null,
 ) : Command {
-    override val requiredPermission = Permission.INVENTORY_ITEM_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.INVENTORY_ITEM_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$itemId|$name|${minimumStock.micros}|${parLevel.micros}|$shelf|$allergens|$preferredSupplierId|" +
         approvedSupplierIds.map { it.value }.sorted().joinToString(",") + "|$isActive|" +
         (packs?.joinToString(";") { "${it.name}=${it.contains.micros}" } ?: "keep") + "|${shelfLifeDays ?: "-"}|" +
@@ -81,16 +81,16 @@ data class UpdateItem(
 /** Deletes an item created by mistake that nothing refers to (no stock movement, recipe, document or price). */
 @NoDocument
 data class DeleteItem(override val commandId: GlobalId, val itemId: GlobalId) : Command {
-    override val requiredPermission = Permission.INVENTORY_ITEM_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.INVENTORY_ITEM_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = itemId.toString()
 }
 
 /** Renames a storeroom or kitchen, or retires it (only when nothing is kept there and no count is waiting). */
 @NoDocument
 data class UpdateLocation(override val commandId: GlobalId, override val scope: Scope.Branch, val locationId: GlobalId, val name: String, val isActive: Boolean) : Command {
-    override val requiredPermission = Permission.INVENTORY_LOCATION_MANAGE
+    override val requiredPermission get() = Permission.INVENTORY_LOCATION_MANAGE
     override fun fingerprint() = "$scope|$locationId|$name|$isActive"
 }
 
@@ -107,7 +107,7 @@ data class ReverseInventoryDocument(
     val date: BusinessDate,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.INVENTORY_ADJUST
+    override val requiredPermission get() = Permission.INVENTORY_ADJUST
     override fun fingerprint() = "$scope|$sourceType|$documentId|${date.epochDay}|$reason"
 }
 
@@ -120,9 +120,9 @@ data class PublishPrepRecipe(
     val outputQuantity: Quantity,
     val lines: List<RecipeLine>,
 ) : Command {
-    override val requiredPermission = Permission.RECIPE_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.RECIPE_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$itemId|${effectiveFrom.epochDay}|${outputQuantity.micros}|" +
         lines.joinToString(";") { "${it.itemId}:${it.quantityPerPortion.micros}:${it.yieldPercent}" }
 }
@@ -140,13 +140,13 @@ data class RecordProduction(
     /** What actually came out, when it differs from [quantity] (the yield of the day); all the cost goes into it. */
     val actualOutput: Quantity? = null,
 ) : Command {
-    override val requiredPermission = Permission.INVENTORY_PRODUCE
+    override val requiredPermission get() = Permission.INVENTORY_PRODUCE
     override fun fingerprint() = "$scope|$locationId|$itemId|${quantity.micros}|${date.epochDay}|${actualOutput?.micros}"
 }
 
 @NoDocument
 data class CreateLocation(override val commandId: GlobalId, override val scope: Scope.Branch, val name: String) : Command {
-    override val requiredPermission = Permission.INVENTORY_LOCATION_MANAGE
+    override val requiredPermission get() = Permission.INVENTORY_LOCATION_MANAGE
     override fun fingerprint() = "$scope|$name"
 }
 
@@ -159,7 +159,7 @@ data class RecordOpeningStock(
     val lines: List<ReceiptLine>,
     val date: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.INVENTORY_OPENING
+    override val requiredPermission get() = Permission.INVENTORY_OPENING
     override fun fingerprint() = "$scope|$locationId|${date.epochDay}|" + lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}:${it.value.rial}" }
 }
 
@@ -187,7 +187,7 @@ data class RecordWaste(
     val dishId: GlobalId? = null,
     val portions: Quantity? = null,
 ) : Command {
-    override val requiredPermission = Permission.INVENTORY_WASTE
+    override val requiredPermission get() = Permission.INVENTORY_WASTE
     override fun fingerprint() = "$scope|$locationId|$itemId|${quantity?.micros}|$reason|$note|${date.epochDay}|" +
         lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}" } + "|$dishId|${portions?.micros}"
 }
@@ -207,42 +207,42 @@ data class TransferStock(
      */
     val inTransit: Boolean = false,
 ) : Command {
-    override val requiredPermission = Permission.INVENTORY_TRANSFER
+    override val requiredPermission get() = Permission.INVENTORY_TRANSFER
     override fun fingerprint() = "$scope|$fromLocationId|$toLocationId|${date.epochDay}|$note|$inTransit|" + lines.joinToString(";") { "${it.itemId}:${it.quantity.micros}" }
 }
 
 @NoDocument
 data class DefineMenuItem(override val commandId: GlobalId, val name: String) : Command {
-    override val requiredPermission = Permission.RECIPE_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.RECIPE_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = name
 }
 
 /** Renames a menu item or takes it off / back on the menu (inactive items are not sold or priced). */
 @NoDocument
 data class UpdateMenuItem(override val commandId: GlobalId, val menuItemId: GlobalId, val name: String, val isActive: Boolean) : Command {
-    override val requiredPermission = Permission.RECIPE_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.RECIPE_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$menuItemId|$name|$isActive"
 }
 
 /** Puts a menu item in a category for the reports (empty: none). */
 @NoDocument
 data class SetMenuItemCategory(override val commandId: GlobalId, val menuItemId: GlobalId, val category: String) : Command {
-    override val requiredPermission = Permission.RECIPE_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.RECIPE_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$menuItemId|$category"
 }
 
 /** Deletes a menu item that was never used (no recipe, price or sale); a used one can only be deactivated. */
 @NoDocument
 data class DeleteMenuItem(override val commandId: GlobalId, val menuItemId: GlobalId) : Command {
-    override val requiredPermission = Permission.RECIPE_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.RECIPE_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = menuItemId.toString()
 }
 
@@ -253,9 +253,9 @@ data class PublishRecipe(
     val effectiveFrom: BusinessDate,
     val lines: List<RecipeLine>,
 ) : Command {
-    override val requiredPermission = Permission.RECIPE_MANAGE
-    override val scope: Scope = Scope.Organization
-    override val sharedCatalog = true
+    override val requiredPermission get() = Permission.RECIPE_MANAGE
+    override val scope: Scope get() = Scope.Organization
+    override val sharedCatalog get() = true
     override fun fingerprint() = "$menuItemId|${effectiveFrom.epochDay}|" + lines.joinToString(";") { "${it.itemId}:${it.quantityPerPortion.micros}:${it.yieldPercent}" }
 }
 

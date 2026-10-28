@@ -87,7 +87,7 @@ data class ImportBankStatement(
     val lines: List<StatementLineInput>,
     val closingBalance: Money?,
 ) : Command {
-    override val requiredPermission = Permission.TREASURY_RECONCILE
+    override val requiredPermission get() = Permission.TREASURY_RECONCILE
     // Every field of every line: a retry with a different file must not answer with the first file's result.
     override fun fingerprint() = "$scope|$accountId|$fileName|${closingBalance?.rial}|" +
         lines.joinToString(";") { "${it.date.epochDay}:${it.direction}:${it.amount.rial}:${it.balance?.rial}:${it.reference.length}:${it.reference}:${it.description.length}:${it.description}" }
@@ -113,7 +113,7 @@ data class RecordStatementLine(
     val index: Int,
     val posting: StatementPosting,
 ) : Command {
-    override val requiredPermission = Permission.TREASURY_RECONCILE
+    override val requiredPermission get() = Permission.TREASURY_RECONCILE
     override val additionalPermissions: Set<Permission> get() = setOf(
         when (posting) {
             is StatementPosting.Pay -> Permission.TREASURY_PAYMENT
@@ -133,14 +133,14 @@ data class MatchStatementLine(
     val index: Int,
     val movementId: GlobalId?,
 ) : Command {
-    override val requiredPermission = Permission.TREASURY_RECONCILE
+    override val requiredPermission get() = Permission.TREASURY_RECONCILE
     override fun fingerprint() = "$scope|$statementId|$index|$movementId"
 }
 
 /** Matches what can be matched now (after the missing receipts and payments were recorded). */
 @NoDocument
 data class AutoMatchStatement(override val commandId: GlobalId, override val scope: Scope, val statementId: GlobalId) : Command {
-    override val requiredPermission = Permission.TREASURY_RECONCILE
+    override val requiredPermission get() = Permission.TREASURY_RECONCILE
     override fun fingerprint() = "$scope|$statementId"
 }
 

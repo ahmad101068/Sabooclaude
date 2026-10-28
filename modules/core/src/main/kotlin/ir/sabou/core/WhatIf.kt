@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -41,11 +42,11 @@ data class WhatIf(
     /** Dishes sold in the period without a recipe or with an unknown cost: left out. */
     val leftOut: List<String>,
 ) {
-    val salesNow: Long get() = dishes.sumOf { Ratio.mulDiv(it.priceNow, it.portions.micros, Quantity.SCALE) }
-    val salesNew: Long get() = dishes.sumOf { Ratio.mulDiv(it.priceNew, it.portions.micros, Quantity.SCALE) }
-    val costNow: Long get() = dishes.sumOf { Ratio.mulDiv(it.costNow, it.portions.micros, Quantity.SCALE) }
-    val costNew: Long get() = dishes.sumOf { Ratio.mulDiv(it.costNew, it.portions.micros, Quantity.SCALE) }
-    val profitChange: Long get() = dishes.sumOf { it.profitChange }
+    val salesNow: Long get() = dishes.sumOfExact { Ratio.mulDiv(it.priceNow, it.portions.micros, Quantity.SCALE) }
+    val salesNew: Long get() = dishes.sumOfExact { Ratio.mulDiv(it.priceNew, it.portions.micros, Quantity.SCALE) }
+    val costNow: Long get() = dishes.sumOfExact { Ratio.mulDiv(it.costNow, it.portions.micros, Quantity.SCALE) }
+    val costNew: Long get() = dishes.sumOfExact { Ratio.mulDiv(it.costNew, it.portions.micros, Quantity.SCALE) }
+    val profitChange: Long get() = dishes.sumOfExact { it.profitChange }
     val foodBpNow: Long? get() = if (salesNow <= 0) null else Ratio.mulDiv(costNow, 10_000, salesNow)
     val foodBpNew: Long? get() = if (salesNew <= 0) null else Ratio.mulDiv(costNew, 10_000, salesNew)
 }
@@ -66,7 +67,7 @@ class WhatIfs internal constructor(private val core: SabouCore) {
         val dishes = sold.mapNotNull { r ->
             val parts = breakdown[r.menuItemId] ?: return@mapNotNull null
             val costNow = parts.values.sum()
-            val costNew = parts.entries.sumOf { (item, cost) -> up(cost, itemChanges[item]) }
+            val costNew = parts.entries.sumOfExact { (item, cost) -> up(cost, itemChanges[item]) }
             val priceNow = r.averagePrice!!.rial
             val priceNew = up(priceNow, menuChanges[r.menuItemId])
             val suggested = if (costNow <= 0) null else Ratio.mulDiv(costNew, priceNow, costNow)

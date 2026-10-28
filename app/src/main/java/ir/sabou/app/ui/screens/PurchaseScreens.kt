@@ -1033,6 +1033,9 @@ object PurchaseScreens {
             var note by rememberSaveable { mutableStateOf("") }
             var date by rememberSaveable { mutableStateOf(session.today) }
             var applyTo by rememberSaveable { mutableStateOf<GlobalId?>(null) }
+            // Kept with the form until it succeeds (SABOU-AUDIT-011): a retry after the app was killed is the same payment.
+            val payId = ir.sabou.app.ui.rememberCommandId(supplierId)
+            val applyId = ir.sabou.app.ui.rememberCommandId(supplierId, "apply")
             val action = rememberAction()
             Loaded(data) { (accounts, advances, open) ->
                 advances.filter { !it.first.reversed }.forEach { (a, left) ->
@@ -1043,7 +1046,9 @@ object PurchaseScreens {
                             Picker("تسویه با فاکتور", open.map { Choice(it.invoice.id, "${it.invoice.supplierInvoiceNo} · ${Fa.rial(it.outstanding)}") }, applyTo, { applyTo = it })
                             SecondaryButton("تسویه از این پیش‌پرداخت", {
                                 val inv = open.first { it.invoice.id == applyTo }
-                                action.run({ purchasing.applyAdvance(ir.sabou.purchasing.ApplySupplierAdvance(GlobalId.new(), branch, a.id, inv.invoice.id, minOf(left, inv.outstanding), session.today)) })
+                                action.run({ purchasing.applyAdvance(ir.sabou.purchasing.ApplySupplierAdvance(applyId.value, branch, a.id, inv.invoice.id, minOf(left, inv.outstanding), session.today)) }) {
+                                    applyId.value = GlobalId.new()
+                                }
                             }, enabled = applyTo != null && !action.busy)
                         }
                         if (left == a.amount && session.can(Permission.PURCHASE_REVERSE)) Text("برگشت پیش‌پرداخت", style = SabouType.label, color = Sabou.colors.danger,
@@ -1060,9 +1065,9 @@ object PurchaseScreens {
                     action.error?.let { Banner(it) }
                     PrimaryButton("ثبت پرداخت", {
                         action.run({
-                            if (mode == 0) purchasing.paySupplier(ir.sabou.purchasing.PaySupplier(GlobalId.new(), branch, supplierId, accountId!!, amount!!, date))
-                            else purchasing.payAdvance(ir.sabou.purchasing.PaySupplierAdvance(GlobalId.new(), branch, supplierId, accountId!!, amount!!, date, note))
-                        }) { amount = null; note = "" }
+                            if (mode == 0) purchasing.paySupplier(ir.sabou.purchasing.PaySupplier(payId.value, branch, supplierId, accountId!!, amount!!, date))
+                            else purchasing.payAdvance(ir.sabou.purchasing.PaySupplierAdvance(payId.value, branch, supplierId, accountId!!, amount!!, date, note))
+                        }) { amount = null; note = ""; payId.value = GlobalId.new() }
                     }, enabled = accountId != null && amount != null && !action.busy, busy = action.busy)
                 }
             }

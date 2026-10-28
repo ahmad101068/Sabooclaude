@@ -367,6 +367,23 @@ object Schema {
                 "CREATE INDEX audit_events_action ON audit_events(action, position)",
             ),
         ),
+        Migration(
+            29,
+            listOf(
+                // Each cash or bank account's net per day: funds for a back-dated payment are checked against every later
+                // day without reading the account's whole history (SABOU-AUDIT-004, ADR-0066).
+                "CREATE TABLE treasury_days (account_id TEXT NOT NULL, date INTEGER NOT NULL, net INTEGER NOT NULL, PRIMARY KEY (account_id, date))",
+            ),
+            backfill = { db ->
+                val net = HashMap<Pair<String, Long>, Long>()
+                db.query("SELECT doc FROM treasury_movements").forEach { row ->
+                    val d = Doc.parse(row.str("doc"))
+                    val amount = d.long("amount").let { if (d.str("direction") == "RECEIPT") it else -it }
+                    net.merge(d.str("account") to d.long("date"), amount, Math::addExact)
+                }
+                net.forEach { (k, v) -> db.execute("INSERT INTO treasury_days (account_id, date, net) VALUES (?, ?, ?)", k.first, k.second, v) }
+            },
+        ),
     )
 
     val latestVersion: Int = migrations.maxOf { it.version }

@@ -53,7 +53,7 @@ data class ReceiveCustomerDeposit(
     val note: String,
     val cheque: ir.sabou.treasury.ChequeDetails? = null,
 ) : Command {
-    override val requiredPermission = Permission.RECEIVABLE_COLLECT
+    override val requiredPermission get() = Permission.RECEIVABLE_COLLECT
     override fun fingerprint() = "$scope|$customerId|$treasuryAccountId|${amount.rial}|${date.epochDay}|$note|${cheque?.fingerprint()}"
 }
 
@@ -67,14 +67,14 @@ data class ApplyCustomerDeposit(
     val amount: Money,
     val date: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.RECEIVABLE_COLLECT
+    override val requiredPermission get() = Permission.RECEIVABLE_COLLECT
     override fun fingerprint() = "$scope|$depositId|$receivableId|${amount.rial}|${date.epochDay}"
 }
 
 /** Takes back a deposit (received by mistake, or given back to the customer) when none of it was used. */
 @IssuesDocument(DocumentSeries.REVERSAL)
 data class ReverseCustomerDeposit(override val commandId: GlobalId, override val scope: Scope.Branch, val depositId: GlobalId, val date: BusinessDate, val reason: String) : Command {
-    override val requiredPermission = Permission.RECEIVABLE_REVERSE
+    override val requiredPermission get() = Permission.RECEIVABLE_REVERSE
     override fun fingerprint() = "$scope|$depositId|${date.epochDay}|$reason"
 }
 
@@ -88,6 +88,6 @@ data class CountCashShift(
     val date: BusinessDate,
     val note: String,
 ) : Command {
-    override val requiredPermission = Permission.SALES_RECORD
+    override val requiredPermission get() = Permission.SALES_RECORD
     override fun fingerprint() = "$scope|$cashAccountId|${counted.rial}|${date.epochDay}|$note"
 }

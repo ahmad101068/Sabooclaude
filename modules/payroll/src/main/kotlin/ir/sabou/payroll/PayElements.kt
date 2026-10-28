@@ -1,5 +1,6 @@
 package ir.sabou.payroll
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.JalaliCalendar
@@ -46,7 +47,7 @@ data class PayElement(
         /** Whole years of service up to [on], counting earlier employments. */
         fun serviceYears(e: Employee, on: BusinessDate): Int {
             val start = e.startDate ?: return 0
-            val days = e.pastEmployments.sumOf { p -> p.start?.let { (p.end.epochDay - it.epochDay + 1) } ?: 0L } + (on.epochDay - start.epochDay + 1)
+            val days = e.pastEmployments.sumOfExact { p -> p.start?.let { (p.end.epochDay - it.epochDay + 1) } ?: 0L } + (on.epochDay - start.epochDay + 1)
             return (days / 365).toInt()
         }
     }
@@ -82,8 +83,8 @@ interface PayElementStore {
 
 @NoDocument
 data class SavePayElement(override val commandId: GlobalId, val element: PayElement) : Command {
-    override val requiredPermission = Permission.PAYROLL_APPROVE
-    override val scope: Scope = Scope.Organization
+    override val requiredPermission get() = Permission.PAYROLL_APPROVE
+    override val scope: Scope get() = Scope.Organization
     override fun fingerprint() = element.toString()
 }
 
@@ -104,13 +105,13 @@ data class AddPayAdjustment(
     val insurable: Boolean,
     val taxable: Boolean,
 ) : Command {
-    override val requiredPermission = Permission.PAYROLL_CALCULATE
+    override val requiredPermission get() = Permission.PAYROLL_CALCULATE
     override fun fingerprint() = "$scope|$employeeIds|${periodFrom.epochDay}|$title|$kind|${amount?.rial}|$percentOfSalary|$insurable|$taxable"
 }
 
 @NoDocument
 data class RemovePayAdjustment(override val commandId: GlobalId, override val scope: Scope.Branch, val adjustmentId: GlobalId) : Command {
-    override val requiredPermission = Permission.PAYROLL_CALCULATE
+    override val requiredPermission get() = Permission.PAYROLL_CALCULATE
     override fun fingerprint() = "$scope|$adjustmentId"
 }
 
@@ -141,13 +142,13 @@ data class RecordLeave(
     val minutes: Int?,
     val note: String,
 ) : Command {
-    override val requiredPermission = Permission.ATTENDANCE_RECORD
+    override val requiredPermission get() = Permission.ATTENDANCE_RECORD
     override fun fingerprint() = "$scope|$employeeId|${from.epochDay}|${to.epochDay}|$kind|$minutes|$note"
 }
 
 @NoDocument
 data class CancelLeave(override val commandId: GlobalId, override val scope: Scope.Branch, val leaveId: GlobalId) : Command {
-    override val requiredPermission = Permission.ATTENDANCE_RECORD
+    override val requiredPermission get() = Permission.ATTENDANCE_RECORD
     override fun fingerprint() = "$scope|$leaveId"
 }
 
@@ -171,7 +172,7 @@ object LeaveRules {
             val end = JalaliCalendar.date(y, 12, JalaliCalendar.monthLength(y, 12))
             val yearDays = end.epochDay - start.epochDay + 1
             val earned = perYear * e.employedDays(start, end) / yearDays
-            val used = leaves.filter { !it.cancelled && it.kind == Leave.Kind.ANNUAL && it.date >= start && it.date <= end }.sumOf { it.minutes.toLong() }
+            val used = leaves.filter { !it.cancelled && it.kind == Leave.Kind.ANNUAL && it.date >= start && it.date <= end }.sumOfExact { it.minutes.toLong() }
             LeaveBalance(y, carried, earned, used).also { carried = minOf(cap, maxOf(0L, it.left)) }
         }
     }

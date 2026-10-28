@@ -30,30 +30,30 @@ data class SaveApprovalRule(
     val steps: Int,
     val isActive: Boolean = true,
 ) : Command {
-    override val requiredPermission = Permission.APPROVAL_RULES
-    override val scope: Scope = Scope.Organization
+    override val requiredPermission get() = Permission.APPROVAL_RULES
+    override val scope: Scope get() = Scope.Organization
     override fun fingerprint() = "$ruleId|$name|$branch|$supplierId|$category|${minAmount.rial}|$steps|$isActive"
 }
 
 /** One approval step on an invoice. [reason] is required when the owner approves an invoice they recorded. */
 @NoDocument
 data class ApproveInvoice(override val commandId: GlobalId, override val scope: Scope.Branch, val invoiceId: GlobalId, val reason: String? = null) : Command {
-    override val requiredPermission = Permission.PURCHASE_APPROVE
+    override val requiredPermission get() = Permission.PURCHASE_APPROVE
     override fun fingerprint() = "$scope|$invoiceId|${reason?.trim()}"
 }
 
 /** The owner's self-approval policy (owner only). */
 @NoDocument
 data class SetSelfApprovalPolicy(override val commandId: GlobalId, val allowed: Boolean, val maxAmount: Money?) : Command {
-    override val requiredPermission = Permission.APPROVAL_RULES
-    override val scope: Scope = Scope.Organization
+    override val requiredPermission get() = Permission.APPROVAL_RULES
+    override val scope: Scope get() = Scope.Organization
     override fun fingerprint() = "$allowed|${maxAmount?.rial}"
 }
 
 /** Takes every approval back (only while nothing has been paid). */
 @NoDocument
 data class UnapproveInvoice(override val commandId: GlobalId, override val scope: Scope.Branch, val invoiceId: GlobalId, val reason: String) : Command {
-    override val requiredPermission = Permission.PURCHASE_UNAPPROVE
+    override val requiredPermission get() = Permission.PURCHASE_UNAPPROVE
     override fun fingerprint() = "$scope|$invoiceId|$reason"
 }
 

@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
@@ -55,7 +56,7 @@ class Dashboards internal constructor(private val core: SabouCore) {
 
         val costLines = (pnl.costOfSales + pnl.expenses).filter { it.amount > 0 }.sortedByDescending { it.amount }
         val slices = costLines.take(SLICES).map { CostSlice(it.account.name, it.amount, it.account.code.value) } +
-            costLines.drop(SLICES).sumOf { it.amount }.takeIf { it > 0 }?.let { listOf(CostSlice("سایر", it, null)) }.orEmpty()
+            costLines.drop(SLICES).sumOfExact { it.amount }.takeIf { it > 0 }?.let { listOf(CostSlice("سایر", it, null)) }.orEmpty()
 
         val balances = if (actor.role.allows(Permission.TREASURY_VIEW)) {
             core.treasuryAccounts.all().filter { it.isActive && actor.canAccess(it.scope) && (branch == null || it.scope == branch) &&
@@ -69,8 +70,8 @@ class Dashboards internal constructor(private val core: SabouCore) {
             costs = pnl.totals.cogs + pnl.totals.expenses, profit = pnl.totals.profit, ratios = pnl.ratios,
             slices = slices,
             week = (0L..6L).map { d -> weekFrom.plusDays(d).let { day -> DaySales(day, weekPnl[day]?.revenue ?: 0) } },
-            cash = balances.filter { it.first == TreasuryKind.CASH || it.first == TreasuryKind.PETTY_CASH }.sumOf { it.second },
-            bank = balances.filter { it.first == TreasuryKind.BANK || it.first == TreasuryKind.CARD_TERMINAL }.sumOf { it.second },
+            cash = balances.filter { it.first == TreasuryKind.CASH || it.first == TreasuryKind.PETTY_CASH }.sumOfExact { it.second },
+            bank = balances.filter { it.first == TreasuryKind.BANK || it.first == TreasuryKind.CARD_TERMINAL }.sumOfExact { it.second },
         )
     }
 

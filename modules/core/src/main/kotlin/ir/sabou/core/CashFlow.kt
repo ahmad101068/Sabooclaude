@@ -146,8 +146,8 @@ data class CustomerReport(
     val rows: List<CustomerInsight>,
 ) {
     val topShareBp: Long? get() = rows.firstOrNull()?.shareBp
-    val topThreeShareBp: Long? get() = if (totalSales <= 0) null else Ratio.mulDiv(rows.take(3).sumOf { it.sales }, 10_000, totalSales)
-    val creditShareBp: Long? get() = if (totalSales <= 0) null else Ratio.mulDiv(rows.sumOf { it.sales }, 10_000, totalSales)
+    val topThreeShareBp: Long? get() = if (totalSales <= 0) null else Ratio.mulDiv(rows.take(3).sumOfExact { it.sales }, 10_000, totalSales)
+    val creditShareBp: Long? get() = if (totalSales <= 0) null else Ratio.mulDiv(rows.sumOfExact { it.sales }, 10_000, totalSales)
 }
 
 /**
@@ -178,7 +178,7 @@ class CashFlows internal constructor(private val core: SabouCore) {
 
         // ---- Money on hand: cash, bank, card terminals, petty cash of the branch.
         val opening = core.treasuryAccounts.all().filter { it.isActive && it.scope == branch && it.kind.isOrdinary }
-            .sumOf { core.treasuryGateway.balance(it.id) }
+            .sumOfExact { core.treasuryGateway.balance(it.id) }
 
         // ---- What customers owe, at due date + their usual delay.
         val history = customerHistory(branch)
@@ -219,7 +219,7 @@ class CashFlows internal constructor(private val core: SabouCore) {
         val liquid = posted.sumOfExact { s -> s.settlements.filterIsInstance<Settlement.Liquid>().sumOfExact { it.amount.rial } }
         val credit = posted.sumOfExact { s -> s.settlements.filterIsInstance<Settlement.Credit>().sumOfExact { it.amount.rial } }
         val recent = invoices.filter { it.date >= from && it.date < today && !it.opening }
-        val goods = recent.sumOfExact { inv -> inv.total.rial - inv.accountLines.sumOfExact { it.amount.rial } }.coerceAtLeast(0)
+        val goods = recent.sumOfExact { inv -> inv.total.rial - inv.accountLines.indices.sumOfExact { inv.accountValue(it) } }.coerceAtLeast(0)
         val term = weightedDays(recent.map { (it.dueDate.epochDay - it.date.epochDay) to it.total.rial }) ?: 0
         val collection = history.values.filter { it.collectionDays != null }
             .let { h -> weightedDays(h.map { it.collectionDays!!.toLong() to it.collected }) }
@@ -237,7 +237,7 @@ class CashFlows internal constructor(private val core: SabouCore) {
             // One customer buying less takes their share of credit sales out of the forecast.
             val customerShareBp = scenario.customerId?.let { id ->
                 val theirs = history[id]?.creditSales ?: 0L
-                val all = history.values.sumOf { it.creditSales }
+                val all = history.values.sumOfExact { it.creditSales }
                 if (all > 0) Ratio.mulDiv(theirs, 10_000, all) else 0L
             } ?: 0L
             val customerCutBp = Ratio.mulDiv(customerShareBp, 10_000 - scenario.customerBp, 10_000)    // of credit sales
@@ -302,9 +302,9 @@ class CashFlows internal constructor(private val core: SabouCore) {
         val result = (0 until weeks).map { w ->
             val f = today.plusDays(7L * w); val t = f.plusDays(6)
             val mine = items.filter { it.date >= f && it.date <= t }
-            val inflow = mine.filter { it.amount > 0 }.sumOf { it.amount }
-            val outflow = -mine.filter { it.amount < 0 }.sumOf { it.amount }
-            CashWeek(w + 1, f, t, balance, inflow, outflow, mine.groupBy { it.kind }.mapValues { (_, l) -> l.sumOf { it.amount } }).also { balance = it.closing }
+            val inflow = mine.filter { it.amount > 0 }.sumOfExact { it.amount }
+            val outflow = -mine.filter { it.amount < 0 }.sumOfExact { it.amount }
+            CashWeek(w + 1, f, t, balance, inflow, outflow, mine.groupBy { it.kind }.mapValues { (_, l) -> l.sumOfExact { it.amount } }).also { balance = it.closing }
         }
 
         val unscheduled = listOfNotNull(
@@ -327,7 +327,7 @@ class CashFlows internal constructor(private val core: SabouCore) {
         val receivables = receivablesOf(branch).filter { !it.voided }.groupBy { it.customerId }
         val rows = receivables.mapNotNull { (id, list) ->
             val customer = customers[id] ?: return@mapNotNull null
-            val sold = list.sumOf { r -> core.sales.sale(r.saleId)?.takeIf { it.date >= from && it.date <= today && it.status == SaleStatus.POSTED }?.let { r.amount.rial } ?: 0L }
+            val sold = list.sumOfExact { r -> core.sales.sale(r.saleId)?.takeIf { it.date >= from && it.date <= today && it.status == SaleStatus.POSTED }?.let { r.amount.rial } ?: 0L }
             val open = list.associateWith { core.salesOps.outstanding(it.id).rial }
             val h = history[id]
             CustomerInsight(customer, sold, if (total > 0) Ratio.mulDiv(sold, 10_000, total) else null, open.values.sum(),
@@ -353,7 +353,7 @@ class CashFlows internal constructor(private val core: SabouCore) {
             PayHistory(
                 weightedDays(done.map { it.first to it.third }),
                 weightedDays(done.mapNotNull { d -> d.second?.let { it to d.third } }),
-                done.sumOf { it.third }, done.size, list.sumOfExact { it.amount.rial },
+                done.sumOfExact { it.third }, done.size, list.sumOfExact { it.amount.rial },
             )
         }
 
@@ -366,7 +366,7 @@ class CashFlows internal constructor(private val core: SabouCore) {
 
     /** Mean of [days] weighted by amount (rounded), or null when there is nothing to weigh. */
     private fun weightedDays(days: List<Pair<Long, Long>>): Int? {
-        val weight = days.sumOf { it.second.coerceAtLeast(0) }
+        val weight = days.sumOfExact { it.second.coerceAtLeast(0) }
         if (weight <= 0) return null
         val sum = days.fold(java.math.BigInteger.ZERO) { acc, (d, w) -> acc + java.math.BigInteger.valueOf(d).multiply(java.math.BigInteger.valueOf(w.coerceAtLeast(0))) }
         return sum.add(java.math.BigInteger.valueOf(weight / 2)).divide(java.math.BigInteger.valueOf(weight)).toInt()
@@ -380,7 +380,7 @@ class CashFlows internal constructor(private val core: SabouCore) {
 
     /** What the books already show spent on [code] in [branch] over [from]…[to] (debit − credit). */
     private fun booked(code: AccountCode, branch: Scope.Branch, from: BusinessDate, to: BusinessDate): Long =
-        core.journals.dailyTotals(from, to).filter { it.account == code && it.scope == branch }.sumOf { it.debit - it.credit }
+        core.journals.dailyTotals(from, to).filter { it.account == code && it.scope == branch }.sumOfExact { it.debit - it.credit }
 
     private fun overheadAccounts(): Set<AccountCode> = core.accounts.all()
         .filter { it.type == ir.sabou.ledger.AccountType.EXPENSE && it.code !in NOT_OVERHEAD }.map { it.code }.toSet()

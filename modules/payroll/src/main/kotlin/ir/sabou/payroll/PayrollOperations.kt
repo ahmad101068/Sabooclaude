@@ -47,14 +47,14 @@ data class RegisterEmployee(
     /** [monthlySalary] is a month's salary, or a day's / an hour's wage. */
     val payType: PayType = PayType.MONTHLY,
 ) : Command {
-    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override val requiredPermission get() = Permission.PERSONNEL_MANAGE
     override fun fingerprint() = "$scope|$name|$nationalId|${monthlySalary.rial}|${startDate?.epochDay}|${birthDate?.packed()}|$payType"
 }
 
 /** The person's file: contact, job, insurance number, bank account, family, contract. */
 @NoDocument
 data class UpdateEmployeeProfile(override val commandId: GlobalId, override val scope: Scope.Branch, val employeeId: GlobalId, val profile: EmployeeProfile) : Command {
-    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override val requiredPermission get() = Permission.PERSONNEL_MANAGE
     override fun fingerprint() = "$scope|$employeeId|$profile"
 }
 
@@ -64,7 +64,7 @@ data class UpdateEmployeeProfile(override val commandId: GlobalId, override val 
  */
 @NoDocument
 data class TransferEmployee(override val commandId: GlobalId, override val scope: Scope.Branch, val employeeId: GlobalId, val toBranch: Scope.Branch, val effectiveFrom: BusinessDate) : Command {
-    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override val requiredPermission get() = Permission.PERSONNEL_MANAGE
     override fun fingerprint() = "$scope|$employeeId|$toBranch|${effectiveFrom.epochDay}"
 }
 
@@ -78,7 +78,7 @@ data class UpdateEmployeeDetails(
     val nationalId: String,
     val birthDate: JalaliDay?,
 ) : Command {
-    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override val requiredPermission get() = Permission.PERSONNEL_MANAGE
     override fun fingerprint() = "$scope|$employeeId|$name|$nationalId|${birthDate?.packed()}"
 }
 
@@ -94,7 +94,7 @@ data class ChangeSalary(
     /** Changes how the person is paid as well; null keeps it. */
     val payType: PayType? = null,
 ) : Command {
-    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override val requiredPermission get() = Permission.PERSONNEL_MANAGE
     override fun fingerprint() = "$scope|$employeeId|${effectiveFrom.epochDay}|${monthlySalary.rial}|$reason|$payType"
 }
 
@@ -108,7 +108,7 @@ data class RehireEmployee(
     val monthlySalary: Money,
     val payType: PayType? = null,
 ) : Command {
-    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override val requiredPermission get() = Permission.PERSONNEL_MANAGE
     override fun fingerprint() = "$scope|$employeeId|${startDate.epochDay}|${monthlySalary.rial}|$payType"
 }
 
@@ -120,7 +120,7 @@ data class EndEmployment(
     val employeeId: GlobalId,
     val lastDay: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.PERSONNEL_MANAGE
+    override val requiredPermission get() = Permission.PERSONNEL_MANAGE
     override fun fingerprint() = "$scope|$employeeId|${lastDay.epochDay}"
 }
 
@@ -134,7 +134,7 @@ data class RecordAttendance(
     val overtimeMinutes: Int,
     val absentMinutes: Int,
 ) : Command {
-    override val requiredPermission = Permission.ATTENDANCE_RECORD
+    override val requiredPermission get() = Permission.ATTENDANCE_RECORD
     override fun fingerprint() = "$scope|$employeeId|${date.epochDay}|$workedMinutes|$overtimeMinutes|$absentMinutes"
 }
 
@@ -145,19 +145,19 @@ data class CalculatePayroll(
     val from: BusinessDate,
     val to: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.PAYROLL_CALCULATE
+    override val requiredPermission get() = Permission.PAYROLL_CALCULATE
     override fun fingerprint() = "$scope|${from.epochDay}|${to.epochDay}"
 }
 
 @NoDocument
 data class ApprovePayroll(override val commandId: GlobalId, override val scope: Scope.Branch, val runId: GlobalId) : Command {
-    override val requiredPermission = Permission.PAYROLL_APPROVE
+    override val requiredPermission get() = Permission.PAYROLL_APPROVE
     override fun fingerprint() = "$scope|$runId"
 }
 
 @IssuesDocument(DocumentSeries.REVERSAL)
 data class ReversePayroll(override val commandId: GlobalId, override val scope: Scope.Branch, val runId: GlobalId, val date: BusinessDate, val reason: String) : Command {
-    override val requiredPermission = Permission.PAYROLL_APPROVE
+    override val requiredPermission get() = Permission.PAYROLL_APPROVE
     override fun fingerprint() = "$scope|$runId|${date.epochDay}|$reason"
 }
 
@@ -171,13 +171,13 @@ data class PaySalary(
     val amount: Money,
     val date: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.PAYROLL_PAY
+    override val requiredPermission get() = Permission.PAYROLL_PAY
     override fun fingerprint() = "$scope|$runId|$employeeId|$treasuryAccountId|${amount.rial}|${date.epochDay}"
 }
 
 @IssuesDocument(DocumentSeries.REVERSAL)
 data class ReverseSalaryPayment(override val commandId: GlobalId, override val scope: Scope.Branch, val paymentId: GlobalId, val date: BusinessDate, val reason: String) : Command {
-    override val requiredPermission = Permission.PAYROLL_PAY
+    override val requiredPermission get() = Permission.PAYROLL_PAY
     override fun fingerprint() = "$scope|$paymentId|${date.epochDay}|$reason"
 }
 
@@ -191,7 +191,7 @@ data class RemitLiability(
     val amount: Money,
     val date: BusinessDate,
 ) : Command {
-    override val requiredPermission = Permission.PAYROLL_PAY
+    override val requiredPermission get() = Permission.PAYROLL_PAY
     override fun fingerprint() = "$scope|$kind|$treasuryAccountId|${amount.rial}|${date.epochDay}"
 }
 
@@ -692,7 +692,7 @@ class PayrollOperations(
                 // Daily and hourly pay: a day's wage for each day worked, an hour's for each hour worked (from attendance).
                 val worked = records.associate { it.date to it.workedMinutes }
                 val divisor = if (partial) policy.prorationDays.toLong() else periodDays.toLong()
-                Money.of(days.sumOf { d ->
+                Money.of(days.sumOfExact { d ->
                     val rate = e.salaryOn(d).rial
                     when (e.payTypeOn(d)) {
                         PayType.MONTHLY -> Ratio.mulDiv(rate, 1, divisor)
@@ -701,7 +701,7 @@ class PayrollOperations(
                     }
                 })
             }
-            val overtimeMinutes = records.sumOf { it.overtimeMinutes.toLong() }
+            val overtimeMinutes = records.sumOfExact { it.overtimeMinutes.toLong() }
             val overtimePay = when (options.overtimeMode) {
                 OvertimeMode.STATUTORY -> null
                 OvertimeMode.FIXED_HOURLY -> Money.of(Ratio.mulDiv(options.overtimeHourlyRate.rial, overtimeMinutes, 60))
@@ -711,8 +711,8 @@ class PayrollOperations(
             val leaves = elements?.leaves(e.id).orEmpty().filter { !it.cancelled && it.date in days }
             val leaveOn = leaves.groupBy { it.date }.mapValues { (_, l) -> l.sumOf { it.minutes } }
             // Absence is deducted only from days paid monthly (a daily or hourly wage pays only the time worked).
-            val absent = records.filter { it.date in monthlyDays }.sumOf { maxOf(0, it.absentMinutes - (leaveOn[it.date] ?: 0)).toLong() } +
-                leaves.filter { it.kind != Leave.Kind.ANNUAL && it.date in monthlyDays }.sumOf { it.minutes.toLong() }
+            val absent = records.filter { it.date in monthlyDays }.sumOfExact { maxOf(0, it.absentMinutes - (leaveOn[it.date] ?: 0)).toLong() } +
+                leaves.filter { it.kind != Leave.Kind.ANNUAL && it.date in monthlyDays }.sumOfExact { it.minutes.toLong() }
             val baseAmount = base ?: if (partial) Money.of(minOf(monthly.rial, Ratio.mulDiv(monthly.rial, employed.toLong(), policy.prorationDays.toLong()))) else monthly
             val earnings = extraLines(e, scope, from, to, days, partial, employed, periodDays, monthly, baseAmount, records, leaves, policy, options)
             policy.calculate(e.id, monthly, absent, overtimeMinutes,
@@ -742,15 +742,15 @@ class PayrollOperations(
             add(PayLine("ADJ:${it.id.value}", it.title, it.amount, it.kind, it.insurable, it.taxable))
         }
         if (options.nightPremiumBp > 0) {
-            val night = records.sumOf { it.nightMinutes.toLong() }
+            val night = records.sumOfExact { it.nightMinutes.toLong() }
             if (night > 0) add(PayLine("NIGHT", "شب‌کاری", perMinute(night, options.nightPremiumBp.toLong()), PayLine.Kind.EARNING, insurable = true, taxable = true))
         }
         if (options.holidayPremiumBp > 0) {
-            val holiday = records.filter { isHoliday(scope, it.date) }.sumOf { (it.workedMinutes + it.overtimeMinutes).toLong() }
+            val holiday = records.filter { isHoliday(scope, it.date) }.sumOfExact { (it.workedMinutes + it.overtimeMinutes).toLong() }
             if (holiday > 0) add(PayLine("HOLIDAY", "جمعه‌کاری و تعطیل‌کاری", perMinute(holiday, options.holidayPremiumBp.toLong()), PayLine.Kind.EARNING, insurable = true, taxable = true))
         }
         // Annual leave of someone paid by the day or hour: their wage for that time.
-        val paidLeave = leaves.filter { it.kind == Leave.Kind.ANNUAL && e.payTypeOn(it.date) != PayType.MONTHLY }.sumOf { l ->
+        val paidLeave = leaves.filter { it.kind == Leave.Kind.ANNUAL && e.payTypeOn(it.date) != PayType.MONTHLY }.sumOfExact { l ->
             val rate = e.salaryOn(l.date).rial
             if (e.payTypeOn(l.date) == PayType.DAILY) Ratio.mulDiv(rate, l.minutes.toLong(), options.workdayMinutes.toLong()) else Ratio.mulDiv(rate, l.minutes.toLong(), 60)
         }

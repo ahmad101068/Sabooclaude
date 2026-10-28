@@ -70,7 +70,17 @@ object SyncScreens {
             Header("دو گوشی، یک دفتر", "همگام‌سازی روی وای‌فای رستوران", onBack = nav.back)
             Page {
                 error?.let { Banner(it) }
-                when (status.role) {
+                if (status.orphaned) {
+                    status.problem?.let { Banner(it, ChipKind.DANGER) }
+                    if (owner) {
+                        Text("گوشی اصلی را روشن کنید و این گوشی را دوباره به آن وصل کنید؛ یا آن را جدا کنید تا خالی شود (داده‌ها روی گوشی اصلی می‌ماند).",
+                            style = SabouType.caption, color = Sabou.colors.muted)
+                        PairAsSecondPhone(onCancel = null)
+                        SecondaryButton("جدا کردن این گوشی", { confirm = "leave" }, danger = true)
+                    } else {
+                        Text("فقط مالک می‌تواند این گوشی را دوباره وصل یا جدا کند.", style = SabouType.caption, color = Sabou.colors.muted)
+                    }
+                } else when (status.role) {
                     TwoPhones.Role.NONE -> {
                         SCard {
                             Text("یک گوشی «گوشی اصلی» می‌شود و همه‌ی داده‌ها روی آن می‌ماند. گوشی دوم هر چه ثبت کند، روی گوشی اصلی ثبت می‌شود و هر چه روی گوشی اصلی ثبت شود، چند ثانیه بعد روی گوشی دوم دیده می‌شود. " +
@@ -253,7 +263,9 @@ object SyncScreens {
     fun ReplicaStatusLine() {
         val container = (LocalContext.current.applicationContext as SabouApplication).container
         val status by container.twoPhones.status.collectAsState()
-        if (status.role == TwoPhones.Role.REPLICA && (!status.connected || status.problem != null)) {
+        if (status.orphaned) {
+            Banner(status.problem.orEmpty(), ChipKind.DANGER)
+        } else if (status.role == TwoPhones.Role.REPLICA && (!status.connected || status.problem != null)) {
             Banner(status.problem ?: "به گوشی اصلی وصل نیست؛ اطلاعات آخرین همگام‌سازی نمایش داده می‌شود و ثبت انجام نمی‌شود.", ChipKind.ACCENT)
         }
     }

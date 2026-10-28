@@ -21,8 +21,8 @@ interface PolicyStore {
 
 @NoDocument
 data class DefinePayrollPolicy(override val commandId: GlobalId, val policy: StatutoryPolicy) : Command {
-    override val requiredPermission = Permission.PAYROLL_APPROVE
-    override val scope: Scope = Scope.Organization
+    override val requiredPermission get() = Permission.PAYROLL_APPROVE
+    override val scope: Scope get() = Scope.Organization
     override fun fingerprint() = policy.toString()
 }
 

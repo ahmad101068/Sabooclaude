@@ -55,7 +55,7 @@ object ReportTables {
     fun ledgerDetail(accountName: String, rows: List<LedgerDetail>, from: BusinessDate, to: BusinessDate) = ReportTable(
         "گردش $accountName", period(from, to), listOf("تاریخ", "شماره سند", "شرح", "شعبه", "بدهکار", "بستانکار"),
         rows.map { listOf(Cell.of(Fa.date(it.date)), Cell.of(Fa.digits(it.number)), Cell.of(it.description + if (it.memo.isBlank()) "" else " · ${it.memo}"), Cell.of(it.scope), Cell.Amount(it.debit), Cell.Amount(it.credit)) },
-        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOf { it.debit }), Cell.Amount(rows.sumOf { it.credit })),
+        footer = listOf(Cell.of("جمع"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(rows.sumOfExact { it.debit }), Cell.Amount(rows.sumOfExact { it.credit })),
         notes = listOf(RIAL),
     )
 
@@ -176,8 +176,8 @@ object ReportTables {
                 it.delayDays?.let { d -> Cell.of(Fa.number(d.toLong())) } ?: Cell.of("—"),
                 it.collectionDays?.let { d -> Cell.of(Fa.number(d.toLong())) } ?: Cell.of("—"), Cell.of(Fa.number(it.collectedDebts.toLong())))
         },
-        footer = listOf(Cell.of("جمع"), Cell.Amount(r.rows.sumOf { it.sales }), pct(r.creditShareBp), Cell.Amount(r.rows.sumOf { it.outstanding }),
-            Cell.Amount(r.rows.sumOf { it.overdue }), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY),
+        footer = listOf(Cell.of("جمع"), Cell.Amount(r.rows.sumOfExact { it.sales }), pct(r.creditShareBp), Cell.Amount(r.rows.sumOfExact { it.outstanding }),
+            Cell.Amount(r.rows.sumOfExact { it.overdue }), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY),
         notes = listOf(RIAL, "فروش کل شعبه در این بازه ${Fa.rial(r.totalSales)} ریال (قابل پرداخت).",
             "تأخیر و مدت وصول از طلب‌هایی است که کامل وصول شده‌اند، به نسبت مبلغ."),
     )
@@ -251,7 +251,7 @@ object ReportTables {
         "کارکرد و اضافه‌کار", "$branch · ${period(from, to)}", listOf("کارمند", "روزهای ثبت‌شده", "ساعت کار", "ساعت اضافه‌کار", "ساعت غیبت"),
         rows.map { listOf(Cell.of(it.name), Cell.Count(it.days.toLong()), hours(it.workedMinutes), hours(it.overtimeMinutes), hours(it.absentMinutes)) },
         footer = listOf(Cell.of("جمع"), Cell.Count(rows.sumOf { it.days }.toLong()), hours(rows.sumOf { it.workedMinutes }),
-            hours(rows.sumOf { it.overtimeMinutes }), hours(rows.sumOf { it.absentMinutes })),
+            hours(rows.sumOfExact { it.overtimeMinutes }), hours(rows.sumOfExact { it.absentMinutes })),
     )
 
     fun trialBalance(rows: List<Pair<ir.sabou.ledger.Account, Long>>, asOf: BusinessDate) = ReportTable(
@@ -259,7 +259,7 @@ object ReportTables {
         rows.sortedBy { it.first.code.value }.map { (acc, net) ->
             listOf(Cell.of(acc.code.value), Cell.of(acc.name), Cell.Amount(maxOf(net, 0)), Cell.Amount(maxOf(-net, 0)))
         },
-        footer = listOf(Cell.EMPTY, Cell.of("جمع"), Cell.Amount(rows.sumOf { maxOf(it.second, 0) }), Cell.Amount(rows.sumOf { maxOf(-it.second, 0) })),
+        footer = listOf(Cell.EMPTY, Cell.of("جمع"), Cell.Amount(rows.sumOfExact { maxOf(it.second, 0) }), Cell.Amount(rows.sumOfExact { maxOf(-it.second, 0) })),
         notes = listOf(RIAL),
     )
 
@@ -271,8 +271,8 @@ object ReportTables {
             "تراز آزمایشی", "$place · ${period(from, to)}",
             listOf("کد", "حساب", "مانده‌ی اول بدهکار", "مانده‌ی اول بستانکار", "گردش بدهکار", "گردش بستانکار", "مانده بدهکار", "مانده بستانکار"),
             rows.map { listOf(Cell.of(it.account.code.value), Cell.of(it.account.name), d(it.opening), c(it.opening), Cell.Amount(it.debit), Cell.Amount(it.credit), d(it.closing), c(it.closing)) },
-            footer = listOf(Cell.EMPTY, Cell.of("جمع"), Cell.Amount(rows.sumOf { maxOf(it.opening, 0) }), Cell.Amount(rows.sumOf { maxOf(-it.opening, 0) }),
-                Cell.Amount(rows.sumOf { it.debit }), Cell.Amount(rows.sumOf { it.credit }), Cell.Amount(rows.sumOf { maxOf(it.closing, 0) }), Cell.Amount(rows.sumOf { maxOf(-it.closing, 0) })),
+            footer = listOf(Cell.EMPTY, Cell.of("جمع"), Cell.Amount(rows.sumOfExact { maxOf(it.opening, 0) }), Cell.Amount(rows.sumOfExact { maxOf(-it.opening, 0) }),
+                Cell.Amount(rows.sumOfExact { it.debit }), Cell.Amount(rows.sumOfExact { it.credit }), Cell.Amount(rows.sumOfExact { maxOf(it.closing, 0) }), Cell.Amount(rows.sumOfExact { maxOf(-it.closing, 0) })),
             notes = listOf(RIAL),
         )
     }
@@ -311,7 +311,7 @@ object ReportTables {
         listOf("تاریخ", "شرح", "شماره", "بدهکار", "بستانکار", "مانده"),
         listOf(listOf(Cell.of(Fa.date(s.from)), Cell.of("مانده‌ی ابتدای دوره"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(s.opening))) +
             s.rows.map { listOf(Cell.of(Fa.date(it.date)), Cell.of(it.title), Cell.of(it.number?.let(Fa::digits) ?: ""), Cell.Amount(it.debit), Cell.Amount(it.credit), Cell.Amount(it.balance)) },
-        footer = listOf(Cell.EMPTY, Cell.of("مانده‌ی پایان دوره"), Cell.EMPTY, Cell.Amount(s.rows.sumOf { it.debit }), Cell.Amount(s.rows.sumOf { it.credit }), Cell.Amount(s.closing)),
+        footer = listOf(Cell.EMPTY, Cell.of("مانده‌ی پایان دوره"), Cell.EMPTY, Cell.Amount(s.rows.sumOfExact { it.debit }), Cell.Amount(s.rows.sumOfExact { it.credit }), Cell.Amount(s.closing)),
         notes = listOf(RIAL, if (supplier) "مانده = بدهی ما به تأمین‌کننده." else "مانده = بدهی مشتری به ما."),
     )
 
@@ -319,7 +319,7 @@ object ReportTables {
         if (receivables) "سنی مطالبات" else "سنی بدهی به تأمین‌کنندگان", Fa.date(asOf),
         listOf(if (receivables) "مشتری" else "تأمین‌کننده", "سررسید نشده", "۱ تا ۳۰ روز", "۳۱ تا ۶۰ روز", "۶۱ تا ۹۰ روز", "بیش از ۹۰ روز", "جمع"),
         rows.map { r -> listOf(Cell.of(r.party)) + r.buckets.map { Cell.Amount(it) } + Cell.Amount(r.total) },
-        footer = listOf(Cell.of("جمع")) + (0 until 5).map { i -> Cell.Amount(rows.sumOf { it.buckets[i] }) } + Cell.Amount(rows.sumOf { it.total }),
+        footer = listOf(Cell.of("جمع")) + (0 until 5).map { i -> Cell.Amount(rows.sumOfExact { it.buckets[i] }) } + Cell.Amount(rows.sumOfExact { it.total }),
         notes = listOf(RIAL, "روزهای گذشته از سررسید."),
     )
 
@@ -592,7 +592,7 @@ object ReportTables {
                     Cell.of(l.reason?.let(ir.sabou.inventory.StockCountOperations::reasonName) ?: ""),
                     Cell.of(listOf(l.note, l.reasonNote).filter { it.isNotBlank() }.joinToString(" · ")))
             },
-            footer = listOf(Cell.of("جمع ارزش اختلاف"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(c.lines.sumOf { it.postedValue ?: 0 }), Cell.EMPTY, Cell.EMPTY),
+            footer = listOf(Cell.of("جمع ارزش اختلاف"), Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.EMPTY, Cell.Amount(c.lines.sumOfExact { it.postedValue ?: 0 }), Cell.EMPTY, Cell.EMPTY),
             notes = listOfNotNull(RIAL, "اختلاف = شمارش‌شده − دفتری در زمان شمارش؛ منفی یعنی کسری.", c.note.takeIf { it.isNotBlank() }?.let { "توضیح: $it" },
                 c.rejectReason?.let { "دلیل رد: $it" }),
         )

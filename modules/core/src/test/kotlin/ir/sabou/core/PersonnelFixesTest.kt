@@ -115,11 +115,11 @@ class PersonnelFixesTest {
         core.shifts.setPin(SetClockPin(id(), branch, sara, "1357"))
         core.shifts.setPin(SetClockPin(id(), branch, ali, "2468"))
         core.shifts.save(SaveShift(id(), branch, null, sara, day, 18 * 60, 26 * 60, 30, "صندوق"))
-        core.shifts.punch(ClockPunch(id(), branch, sara, "1357", day, 18 * 60))
+        punchAt(ClockPunch(id(), branch, sara, "1357", day, 18 * 60))
         // 01:30 the next morning, on the phone's next day: closes yesterday's shift.
         now += 16 * 3_600_000L
         core.identity.login("owner", "123456".toCharArray())   // the session timed out overnight
-        core.shifts.punch(ClockPunch(id(), branch, sara, "1357", day.plusDays(1), 90))
+        punchAt(ClockPunch(id(), branch, sara, "1357", day.plusDays(1), 90))
         val night = core.labor.day(branch, day).single { it.employee.name == "سارا" }
         assertEquals(listOf(Punch.Kind.IN to 18 * 60, Punch.Kind.OUT to 25 * 60 + 30), night.punches.map { it.kind to it.minute })
         // Breaks are not deducted by default: 7.5 hours worked, 8 planned.
@@ -127,8 +127,8 @@ class PersonnelFixesTest {
         assertEquals(emptyList(), core.labor.day(branch, day.plusDays(1)))
 
         // Ali forgot to clock out: the manager adds it, and cancels a punch made twice by mistake.
-        core.shifts.punch(ClockPunch(id(), branch, ali, "2468", day.plusDays(1), 9 * 60))
-        core.shifts.punch(ClockPunch(id(), branch, ali, "2468", day.plusDays(1), 9 * 60 + 2))
+        punchAt(ClockPunch(id(), branch, ali, "2468", day.plusDays(1), 9 * 60))
+        punchAt(ClockPunch(id(), branch, ali, "2468", day.plusDays(1), 9 * 60 + 2))
         val twice = core.labor.day(branch, day.plusDays(1)).single().punches.last()
         core.shifts.voidPunch(VoidPunch(id(), branch, twice.id, day.plusDays(1), "دو بار زده شد"))
         assertEquals("INVALID_STATE:PUNCH:OPEN:1", code { core.shifts.confirmDay(ConfirmDayTime(id(), branch, day.plusDays(1))) })
@@ -149,16 +149,16 @@ class PersonnelFixesTest {
         start()
         val ali = hire("علی", "0012345679", 120_000_000)
         core.shifts.setPin(SetClockPin(id(), branch, ali, "2468"))
-        repeat(5) { assertEquals("INVALID_INPUT:pin", code { core.shifts.punch(ClockPunch(id(), branch, ali, "0000", day, 9 * 60)) }) }
+        repeat(5) { assertEquals("INVALID_INPUT:pin", code { punchAt(ClockPunch(id(), branch, ali, "0000", day, 9 * 60)) }) }
         assertEquals(5, core.shiftStore.pinFailures(ali).count)
-        assertTrue(code { core.shifts.punch(ClockPunch(id(), branch, ali, "2468", day, 9 * 60)) }.startsWith("INVALID_STATE:CLOCK_PIN:LOCKED"))
+        assertTrue(code { punchAt(ClockPunch(id(), branch, ali, "2468", day, 9 * 60)) }.startsWith("INVALID_STATE:CLOCK_PIN:LOCKED"))
         now += 6 * 60_000L
-        assertEquals("INVALID_INPUT:pin", code { core.shifts.punch(ClockPunch(id(), branch, ali, "1111", day, 9 * 60 + 6)) })
+        assertEquals("INVALID_INPUT:pin", code { punchAt(ClockPunch(id(), branch, ali, "1111", day, 9 * 60 + 6)) })
         // The sixth wrong PIN locks for 10 minutes; still locked after 6.
         now += 6 * 60_000L
-        assertTrue(code { core.shifts.punch(ClockPunch(id(), branch, ali, "2468", day, 9 * 60 + 12)) }.startsWith("INVALID_STATE:CLOCK_PIN:LOCKED"))
+        assertTrue(code { punchAt(ClockPunch(id(), branch, ali, "2468", day, 9 * 60 + 12)) }.startsWith("INVALID_STATE:CLOCK_PIN:LOCKED"))
         now += 5 * 60_000L
-        core.shifts.punch(ClockPunch(id(), branch, ali, "2468", day, 9 * 60 + 17))
+        punchAt(ClockPunch(id(), branch, ali, "2468", day, 9 * 60 + 17))
         assertEquals(0, core.shiftStore.pinFailures(ali).count)
     }
 
@@ -179,5 +179,14 @@ class PersonnelFixesTest {
         assertEquals(75_000_000, slip.baseSalary.rial)                   // 150 M × 15 / 30
         assertEquals("INVALID_STATE:EMPLOYEE:STILL_EMPLOYED", code { core.payroll.rehire(RehireEmployee(id(), branch, ali, day, Money.of(1))) })
         assertEquals(BusinessDate(JalaliCalendar.date(1405, 7, 16).epochDay), back.startDate)
+    }
+
+    /** A punch made at the time it states, in Iran: the main phone's clock is moved there first (SABOU-AUDIT-006). */
+    private fun punchAt(c: ClockPunch) = run { now = c.date.epochDay * 86_400_000L + (c.minute - 210) * 60_000L
+        // Moving the clock that far ends the owner's session; the clock screen stays signed in on the real phone.
+        try { core.shifts.punch(c) } catch (e: ir.sabou.kernel.DomainException) {
+            if (e.error.code != "AUTHENTICATION_REQUIRED") throw e
+            core.identity.login("owner", "123456".toCharArray()); core.shifts.punch(c)
+        }
     }
 }

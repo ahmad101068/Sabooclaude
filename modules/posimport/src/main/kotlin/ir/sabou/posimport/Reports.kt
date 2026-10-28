@@ -1,5 +1,6 @@
 package ir.sabou.posimport
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.JalaliCalendar
 import java.math.BigDecimal
@@ -211,11 +212,11 @@ object PosReports {
                 val field = byCol[i] ?: return@forEachIndexed
                 val printed = Text.decimal(raw) ?: return@forEachIndexed
                 val sum: BigDecimal = when (field) {
-                    ItemCol.QTY -> BigDecimal.valueOf(over.sumOf { it.quantityMicros }).movePointLeft(6)
-                    ItemCol.GROSS -> BigDecimal.valueOf(over.sumOf { it.gross })
-                    ItemCol.DISCOUNT -> BigDecimal.valueOf(over.sumOf { it.discount })
-                    ItemCol.TAX -> BigDecimal.valueOf(over.sumOf { it.tax })
-                    ItemCol.NET -> BigDecimal.valueOf(over.sumOf { it.net })
+                    ItemCol.QTY -> BigDecimal.valueOf(over.sumOfExact { it.quantityMicros }).movePointLeft(6)
+                    ItemCol.GROSS -> BigDecimal.valueOf(over.sumOfExact { it.gross })
+                    ItemCol.DISCOUNT -> BigDecimal.valueOf(over.sumOfExact { it.discount })
+                    ItemCol.TAX -> BigDecimal.valueOf(over.sumOfExact { it.tax })
+                    ItemCol.NET -> BigDecimal.valueOf(over.sumOfExact { it.net })
                     else -> return@forEachIndexed
                 }
                 controls++

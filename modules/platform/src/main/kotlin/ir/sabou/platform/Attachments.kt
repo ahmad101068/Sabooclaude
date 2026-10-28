@@ -7,8 +7,8 @@ import java.security.MessageDigest
 
 /** A file the user attaches to a document (a photo or PDF of a supplier invoice, a cheque image). */
 class AttachmentInput(val fileName: String, val mime: String, val bytes: ByteArray) : java.io.Serializable {
-    // Computed once, with the bytes: a plain field also travels with a command to the main phone (ADR-0042).
-    val sha256: String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    /** Computed from the bytes on every read (SABOU-AUDIT-001): a value sent by another phone is never trusted. */
+    val sha256: String get() = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     /** For command fingerprints: the content hash, never the bytes. */
     fun fingerprint() = "$mime:${bytes.size}:$sha256"

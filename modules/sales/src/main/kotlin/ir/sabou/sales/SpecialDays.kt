@@ -35,7 +35,7 @@ data class SetSpecialDay(
     val note: String,
     val remove: Boolean = false,
 ) : Command {
-    override val requiredPermission = Permission.SHIFT_MANAGE
+    override val requiredPermission get() = Permission.SHIFT_MANAGE
     override fun fingerprint() = "$scope|${date.epochDay}|$kind|$percent|$note|$remove"
 }
 

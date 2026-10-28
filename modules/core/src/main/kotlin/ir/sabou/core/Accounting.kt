@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.DomainError
 import ir.sabou.kernel.DomainException
 import ir.sabou.kernel.Money
@@ -30,9 +31,9 @@ data class BalanceSheet(
     val earlierProfit: Long,
     val yearProfit: Long,
 ) {
-    val totalAssets: Long get() = assets.sumOf { it.amount }
-    val totalLiabilities: Long get() = liabilities.sumOf { it.amount }
-    val totalEquity: Long get() = equity.sumOf { it.amount } + earlierProfit + yearProfit
+    val totalAssets: Long get() = assets.sumOfExact { it.amount }
+    val totalLiabilities: Long get() = liabilities.sumOfExact { it.amount }
+    val totalEquity: Long get() = equity.sumOfExact { it.amount } + earlierProfit + yearProfit
 }
 
 /** A journal entry with its legal number, for the journal book. */
@@ -80,24 +81,24 @@ class AccountingReads internal constructor(private val core: SabouCore) {
     fun trialBalance(from: ir.sabou.kernel.BusinessDate, to: ir.sabou.kernel.BusinessDate, branch: Scope.Branch? = null): List<TrialRow> {
         val visible = scopes(actor(Permission.LEDGER_VIEW), branch)
         fun ok(s: Scope) = visible == null || s in visible
-        val opening = core.journals.balancesUpTo(from.plusDays(-1)).filter { ok(it.second) }.groupBy { it.first }.mapValues { e -> e.value.sumOf { it.third } }
+        val opening = core.journals.balancesUpTo(from.plusDays(-1)).filter { ok(it.second) }.groupBy { it.first }.mapValues { e -> e.value.sumOfExact { it.third } }
         val period = core.journals.dailyTotals(from, to).filter { ok(it.scope) }.groupBy { it.account }
         return core.accounts.all().sortedBy { it.code.value }.map { acc ->
             val rows = period[acc.code].orEmpty()
-            TrialRow(acc, opening[acc.code] ?: 0L, rows.sumOf { it.debit }, rows.sumOf { it.credit })
+            TrialRow(acc, opening[acc.code] ?: 0L, rows.sumOfExact { it.debit }, rows.sumOfExact { it.credit })
         }.filter { it.opening != 0L || it.debit != 0L || it.credit != 0L }
     }
 
     fun balanceSheet(asOf: ir.sabou.kernel.BusinessDate, branch: Scope.Branch? = null): BalanceSheet {
         val visible = scopes(actor(Permission.LEDGER_VIEW), branch)
         fun net(upTo: ir.sabou.kernel.BusinessDate) = core.journals.balancesUpTo(upTo).filter { visible == null || it.second in visible }
-            .groupBy { it.first }.mapValues { e -> e.value.sumOf { it.third } }
+            .groupBy { it.first }.mapValues { e -> e.value.sumOfExact { it.third } }
         val now = net(asOf)
         val yearStart = ir.sabou.kernel.JalaliCalendar.date(ir.sabou.kernel.JalaliCalendar.yearOf(asOf), 1, 1)
         val before = net(yearStart.plusDays(-1))
         val accounts = core.accounts.all().sortedBy { it.code.value }
         fun profit(map: Map<ir.sabou.ledger.AccountCode, Long>) =
-            -accounts.filter { it.type == ir.sabou.ledger.AccountType.REVENUE || it.type == ir.sabou.ledger.AccountType.EXPENSE }.sumOf { map[it.code] ?: 0L }
+            -accounts.filter { it.type == ir.sabou.ledger.AccountType.REVENUE || it.type == ir.sabou.ledger.AccountType.EXPENSE }.sumOfExact { map[it.code] ?: 0L }
         fun side(type: ir.sabou.ledger.AccountType, sign: Long) = accounts.filter { it.type == type }
             .map { SheetLine(it, sign * (now[it.code] ?: 0L)) }.filter { it.amount != 0L }
         val earlier = profit(before)
@@ -121,9 +122,13 @@ class AccountingReads internal constructor(private val core: SabouCore) {
         val invoices = core.purchases.invoices().filter { it.supplierId == supplierId && it.status == ir.sabou.purchasing.InvoiceStatus.POSTED && ok(it.scope) }
         val events = buildList {
             invoices.forEach { inv ->
-                add(E(inv.date, if (inv.opening) "مانده‌ی اول دوره" else "فاکتور ${inv.supplierInvoiceNo}", inv.id, 0, inv.total.rial))
+                add(E(inv.date, if (inv.opening) "مانده‌ی اول دوره" else "فاکتور ${inv.supplierInvoiceNo}", inv.id, 0, inv.originalTotal.rial))
                 core.purchases.payments(inv.id).filter { !it.reversed }.forEach { add(E(it.date, "پرداخت بابت ${inv.supplierInvoiceNo}", it.id, it.amount.rial, 0)) }
                 core.purchases.returns(inv.id).forEach { add(E(it.date, "مرجوعی از فاکتور ${inv.supplierInvoiceNo}", it.id, it.credit.rial, 0)) }
+                // A corrected amount (SABOU-AUDIT-002): an increase is owed, a decrease is no longer owed.
+                inv.corrections.forEach { c ->
+                    add(E(c.date, "اصلاح فاکتور ${inv.supplierInvoiceNo}", c.id, maxOf(0L, -c.change), maxOf(0L, c.change)))
+                }
             }
             invoices.map { it.scope }.distinct().forEach { s ->
                 core.purchases.refundsOf(supplierId, s).filter { !it.reversed }.forEach { add(E(it.date, "استرداد وجه از تأمین‌کننده", it.id, 0, it.amount.rial)) }
@@ -131,7 +136,7 @@ class AccountingReads internal constructor(private val core: SabouCore) {
             // An advance is paid before the invoice: the supplier owes it to us until set against invoices.
             core.purchasing.advancesOf(supplierId).filter { !it.reversed && ok(it.scope) }.forEach { add(E(it.date, "پیش‌پرداخت", it.id, it.amount.rial, 0)) }
         }.sortedBy { it.date }
-        val opening = events.filter { it.date < from }.sumOf { it.credit - it.debit }
+        val opening = events.filter { it.date < from }.sumOfExact { it.credit - it.debit }
         var balance = opening
         val rows = events.filter { it.date >= from && it.date <= to }.map { e ->
             balance += e.credit - e.debit
@@ -156,7 +161,7 @@ class AccountingReads internal constructor(private val core: SabouCore) {
             }
             core.salesOps.depositsOf(customerId).filter { !it.reversed && ok(it.scope) }.forEach { add(E(it.date, "پیش‌دریافت", it.id, 0, it.amount.rial)) }
         }.sortedBy { it.date }
-        val opening = events.filter { it.date < from }.sumOf { it.debit - it.credit }
+        val opening = events.filter { it.date < from }.sumOfExact { it.debit - it.credit }
         var balance = opening
         val rows = events.filter { it.date >= from && it.date <= to }.map { e ->
             balance += e.debit - e.credit

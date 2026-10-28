@@ -1,5 +1,6 @@
 package ir.sabou.ledger
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.kernel.BusinessDate
 import ir.sabou.kernel.GlobalId
 import ir.sabou.kernel.Money
@@ -97,7 +98,7 @@ interface JournalStore {
     /** Debit-minus-credit of every account and scope up to [upTo] (all, when null), in one pass. */
     fun balancesUpTo(upTo: BusinessDate?): List<Triple<AccountCode, Scope, Long>> =
         all().filter { upTo == null || it.date <= upTo }.flatMap { e -> e.lines.map { Triple(it.account, e.scope, it.debit.rial - it.credit.rial) } }
-            .groupBy { it.first to it.second }.map { (k, v) -> Triple(k.first, k.second, v.sumOf { it.third }) }
+            .groupBy { it.first to it.second }.map { (k, v) -> Triple(k.first, k.second, v.sumOfExact { it.third }) }
 }
 
 interface PeriodStore {

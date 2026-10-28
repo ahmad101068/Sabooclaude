@@ -68,6 +68,24 @@ class Sync internal constructor(private val core: SabouCore) {
         core.unitOfWork.transaction { core.db.execute("DELETE FROM ${SyncLog.CHANGES}") }
     }
 
+    /**
+     * True when this database is a second phone's copy: only a copy ever records how far it applied the main phone's
+     * log. The marker lives in the database itself, so it survives losing the phone's pairing file.
+     */
+    fun isCopy(): Boolean = core.unitOfWork.transaction {
+        core.db.query("SELECT 1 AS n FROM ${SyncLog.STATE} WHERE key = ?", SyncLog.CURSOR).isNotEmpty()
+    }
+
+    /**
+     * A copy whose pairing was lost (its file is missing, unreadable or has no key): it must not become a second set
+     * of books (independent audit, 1405/08/06, finding 001). Every command is refused until the owner pairs this phone
+     * again or detaches it (which sets the copy aside); what it already holds can still be read.
+     */
+    fun lockOrphanedCopy() {
+        isReplica = true
+        core.bus.forwarder = CommandForwarder { _, _ -> throw DomainException(DomainError.InvalidState("DEVICE", "PAIRING_LOST")) }
+    }
+
     /** How far this copy has applied the main phone's log. */
     fun cursor(): Long = core.unitOfWork.transaction { SyncLog.cursor(core.db) }
 

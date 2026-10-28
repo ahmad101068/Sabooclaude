@@ -125,7 +125,7 @@ class SabouCore private constructor(
 
     val accounting = ManualAccounting(bus, ledger, registry.issue(ModuleId.LEDGER_MANUAL), periods, accounts)
     internal val treasuryGateway = TreasuryGateway(ledger, treasuryCapability, treasuryAccounts, treasuryMovements, cheques) { scope, date ->
-        scope is ir.sabou.kernel.Scope.Branch && sales.day(scope, date)?.closed == true
+        scope is ir.sabou.kernel.Scope.Branch && sales.closedOnOrAfter(scope, date) != null
     }
     val treasury = TreasuryOperations(bus, treasuryGateway, treasuryCapability, treasuryAccounts)
     internal val bankStatementStore = ir.sabou.persistence.SqlBankStatementStore(db)
@@ -156,7 +156,9 @@ class SabouCore private constructor(
     val purchasing = PurchasingOperations(bus, ledger, registry.issue(ModuleId.PURCHASING), inventoryGateway, treasuryGateway, suppliers, purchases, attachments, approvalRules, supplierAdvances)
     val approvals = ir.sabou.purchasing.ApprovalOperations(bus, approvalRules, purchases)
     val orders = OrderOperations(bus, inventoryGateway, suppliers, purchases)
-    val salesOps = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventoryGateway, recipeBook, treasuryGateway, customers, sales, menuPrices, posImportStore, depositStore)
+    val salesOps = SalesOperations(bus, ledger, registry.issue(ModuleId.SALES), inventoryGateway, recipeBook, treasuryGateway, customers, sales, menuPrices, posImportStore, depositStore) { saleId ->
+        taxInvoiceStore.all().any { it.saleId == saleId && it.kind == ir.sabou.sales.TaxInvoiceKind.ORIGINAL && it.status.live }
+    }
     /** Stored policies (entered by the owner) plus any supplied by the caller (tests). */
     val payrollPolicies = PolicyAdministration(bus, SqlPolicyStore(db))
     internal val policyRegistry = StatutoryPolicyRegistry { payrollPolicies.policies() + policies }

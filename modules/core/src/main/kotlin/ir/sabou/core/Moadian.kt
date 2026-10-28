@@ -63,7 +63,7 @@ class Moadian internal constructor(private val core: SabouCore) {
     /** Posted sales on account to a customer with a tax ID that have no live invoice yet (newest first). */
     fun candidates(): List<TaxCandidate> {
         val a = actor(Permission.TAX_SETTINGS)
-        val live = core.taxInvoiceStore.all().filter { it.kind == ir.sabou.sales.TaxInvoiceKind.ORIGINAL && it.status != ir.sabou.sales.TaxInvoiceStatus.REJECTED }.map { it.saleId }.toSet()
+        val live = core.taxInvoiceStore.all().filter { it.kind == ir.sabou.sales.TaxInvoiceKind.ORIGINAL && it.status != ir.sabou.sales.TaxInvoiceStatus.REJECTED && it.status != ir.sabou.sales.TaxInvoiceStatus.WITHDRAWN }.map { it.saleId }.toSet()
         val branches = core.branches.all().associate { it.id to it.name }
         return core.customers.all().filter { it.taxId.isNotEmpty() }.flatMap { c ->
             core.sales.receivablesOfCustomer(c.id).map { it.saleId }.distinct().mapNotNull { core.sales.sale(it) }
@@ -93,7 +93,9 @@ class Moadian internal constructor(private val core: SabouCore) {
      */
     fun send(client: MoadianClient, ids: Set<ir.sabou.kernel.GlobalId>? = null, now: Long = System.currentTimeMillis()): TaxSendReport {
         actor(Permission.TAX_SETTINGS)
-        val ready = invoices().map { it.invoice }.filter { it.status == ir.sabou.sales.TaxInvoiceStatus.READY && (ids == null || it.id in ids) }
+        // An original is sent only while its sale stands (SABOU-AUDIT-005); a reversed sale's invoice is withdrawn instead.
+        val ready = invoices().map { it.invoice }.filter { it.status == ir.sabou.sales.TaxInvoiceStatus.READY && (ids == null || it.id in ids) &&
+            (it.kind != ir.sabou.sales.TaxInvoiceKind.ORIGINAL || core.sales.sale(it.saleId)?.status == ir.sabou.sales.SaleStatus.POSTED) }
         if (ready.isEmpty()) return TaxSendReport(0, 0, 0, 0, emptyList())
         val receipts = client.send(ready.map { it.id.value to MoadianPayload.invoice(it) })
         var sent = 0; var rejected = 0; var waiting = 0

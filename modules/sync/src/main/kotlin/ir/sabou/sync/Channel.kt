@@ -90,6 +90,11 @@ internal class SecureChannel(
     private val output: DataOutputStream,
     sendKey: ByteArray,
     receiveKey: ByteArray,
+    /**
+     * The largest frame accepted now (SABOU-AUDIT-007): small until the peer has proved the key with a valid frame, so
+     * a stranger who knows a device id cannot make this phone set aside megabytes; the hub raises it after Hello.
+     */
+    @Volatile var maxFrame: Int = MAX_FRAME,
 ) {
     private val sendKey = SecretKeySpec(sendKey, "AES")
     private val receiveKey = SecretKeySpec(receiveKey, "AES")
@@ -110,8 +115,16 @@ internal class SecureChannel(
 
     fun receiveBytes(): ByteArray {
         val size = input.readInt()
-        if (size !in 16..MAX_FRAME) throw IOException("bad frame size")
-        val sealed = ByteArray(size).also { input.readFully(it) }
+        if (size !in 16..maxFrame) throw IOException("bad frame size")
+        // Read as the bytes arrive, never set aside the announced size up front: a frame claiming 48 MB costs only what
+        // was actually sent before the connection times out.
+        val sealed = if (size <= READ_STEP) ByteArray(size).also { input.readFully(it) } else {
+            val out = ByteArrayOutputStream(READ_STEP)
+            val step = ByteArray(READ_STEP)
+            var left = size
+            while (left > 0) { val n = minOf(left, READ_STEP); input.readFully(step, 0, n); out.write(step, 0, n); left -= n }
+            out.toByteArray()
+        }
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.DECRYPT_MODE, receiveKey, GCMParameterSpec(128, iv(received++)))
         return try {
@@ -127,6 +140,9 @@ internal class SecureChannel(
     companion object {
         /** Large enough for a command with a few photos attached; the full copy travels in chunks. */
         const val MAX_FRAME = 48 * 1024 * 1024
+        /** Before the peer is authenticated: a Hello or a pairing confirmation is a few hundred bytes. */
+        const val PRE_AUTH_MAX_FRAME = 64 * 1024
+        private const val READ_STEP = 1024 * 1024
     }
 }
 
@@ -151,7 +167,51 @@ internal object Wire {
         return base in ALLOWED_EXACT || ALLOWED_PREFIXES.any { base.startsWith(it) }
     }
 
+    /**
+     * Resource limits on what one message may make the reader build (independent audit, finding 005): depth, object
+     * count, array length and bytes, checked by the platform's serialization filter before anything is allocated.
+     * Applied through reflection where the platform has the filter (the JVM; newer Android); a message is at most one
+     * frame ([SecureChannel.MAX_FRAME]) in any case, and only a paired phone holding the key can send one.
+     */
+    internal const val MAX_DEPTH = 64L
+    internal const val MAX_REFS = 4_000_000L
+    private val LIMITS: Pair<java.lang.reflect.Method, Any>? = runCatching {
+        val filterType = Class.forName("java.io.ObjectInputFilter")
+        val status = Class.forName("java.io.ObjectInputFilter\$Status")
+        val rejected = status.getField("REJECTED").get(null)
+        val undecided = status.getField("UNDECIDED").get(null)
+        val info = Class.forName("java.io.ObjectInputFilter\$FilterInfo")
+        val serialClass = info.getMethod("serialClass")
+        val arrayLength = info.getMethod("arrayLength")
+        val depth = info.getMethod("depth")
+        val references = info.getMethod("references")
+        val streamBytes = info.getMethod("streamBytes")
+        val filter = java.lang.reflect.Proxy.newProxyInstance(Wire::class.java.classLoader, arrayOf(filterType)) { proxy, method, args ->
+            when (method.name) {
+                "checkInput" -> {
+                    val fi = args!![0]
+                    val type = serialClass.invoke(fi) as Class<*>?
+                    val length = arrayLength.invoke(fi) as Long
+                    val elementBytes = when (type?.componentType) { null -> 1L; Byte::class.javaPrimitiveType, Boolean::class.javaPrimitiveType -> 1L; Short::class.javaPrimitiveType, Char::class.javaPrimitiveType -> 2L; Int::class.javaPrimitiveType, Float::class.javaPrimitiveType -> 4L; else -> 8L }
+                    val tooBig = length >= 0 && length * elementBytes > SecureChannel.MAX_FRAME
+                    if (tooBig || depth.invoke(fi) as Long > MAX_DEPTH || references.invoke(fi) as Long > MAX_REFS ||
+                        streamBytes.invoke(fi) as Long > SecureChannel.MAX_FRAME) rejected else undecided
+                }
+                "hashCode" -> System.identityHashCode(proxy)
+                "equals" -> proxy === args?.get(0)
+                "toString" -> "sabou-sync-limits"
+                else -> undecided
+            }
+        }
+        ObjectInputStream::class.java.getMethod("setObjectInputFilter", filterType) to filter
+    }.getOrNull()
+
+    /** True where the platform enforces [LIMITS] (for tests and diagnostics). */
+    internal val limitsEnforced: Boolean get() = LIMITS != null
+
     private class AllowListInput(input: InputStream) : ObjectInputStream(input) {
+        init { LIMITS?.let { (set, filter) -> set.invoke(this, filter) } }
+
         override fun resolveClass(desc: ObjectStreamClass): Class<*> {
             if (!allowed(desc.name)) throw java.io.InvalidClassException(desc.name, "not allowed on the sync wire")
             return super.resolveClass(desc)

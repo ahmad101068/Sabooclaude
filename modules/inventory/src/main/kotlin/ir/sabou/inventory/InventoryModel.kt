@@ -74,7 +74,11 @@ data class StockBalance(val itemId: GlobalId, val locationId: GlobalId, val quan
     }
 }
 
-enum class MovementKind { RECEIPT, ISSUE, TRANSFER_OUT, TRANSFER_IN, WASTE, COUNT_GAIN, COUNT_LOSS, OPENING, PRODUCTION_OUT, PRODUCTION_IN }
+enum class MovementKind {
+    RECEIPT, ISSUE, TRANSFER_OUT, TRANSFER_IN, WASTE, COUNT_GAIN, COUNT_LOSS, OPENING, PRODUCTION_OUT, PRODUCTION_IN,
+    /** A change of the stock's value with no goods moving: a corrected purchase price (SABOU-AUDIT-002). */
+    REVALUATION,
+}
 
 /** Immutable stock movement. Signed deltas; corrections are reversal movements. */
 data class StockMovement(

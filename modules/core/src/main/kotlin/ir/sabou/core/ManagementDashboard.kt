@@ -47,6 +47,8 @@ data class ManagementDashboard(
     val suggestions: List<Finding>,
     val operations: List<AreaResult>,
     val latestSales: List<DashSale>,
+    /** False when the person may not see sales by dish: categories and best sellers are then unknown, not zero. */
+    val salesMixAvailable: Boolean = true,
 )
 
 class ManagementDashboards internal constructor(private val core: SabouCore) {
@@ -94,7 +96,9 @@ class ManagementDashboards internal constructor(private val core: SabouCore) {
         val week = (0L..6L).map { i -> weekFrom.plusDays(i).let { d -> DashDay(d, now7[d]?.revenue ?: 0, before7[d.plusDays(-7)]?.revenue ?: 0) } }
 
         // ---- sales by category (the owner's menu categories) and by way of payment
-        val mix = runCatching { core.reports.productMix(branch, from, to) }.getOrNull()
+        // Only "not allowed to see this" leaves a section out (and says so); any other failure is the dashboard's failure,
+        // never an empty list that reads as "no sales" (independent audit, finding 006).
+        val mix = allowedOrNull { core.reports.productMix(branch, from, to) }
         val categoryOf = core.recipes.menuItems().associate { it.id to it.category.ifBlank { "بدون دسته" } }
         val byCategory = mix?.rows.orEmpty().groupBy { categoryOf[it.menuItemId] ?: "بدون دسته" }.mapValues { (_, r) -> r.sumOfExact { it.gross.rial } }
         val categoryTotal = sumExact(byCategory.values)
@@ -129,7 +133,7 @@ class ManagementDashboards internal constructor(private val core: SabouCore) {
         }
 
         // ---- best sellers, with their actual margin and menu-engineering class
-        val classes = runCatching { core.reports.menuEngineering(branch, from, to) }.getOrNull()?.rows.orEmpty().associate { it.mix.menuItemId to it.menuClass }
+        val classes = allowedOrNull { core.reports.menuEngineering(branch, from, to) }?.rows.orEmpty().associate { it.mix.menuItemId to it.menuClass }
         val topItems = mix?.rows.orEmpty().sortedByDescending { it.gross.rial }.take(TOP).map { r ->
             val margin = r.actualCost?.takeIf { r.costedGross.rial > 0 }?.let { Ratio.mulDivSigned(r.costedGross.rial - it.rial, 10_000, r.costedGross.rial) }
             DashItem(r.name, r.portions, r.gross.rial, margin, classes[r.menuItemId])
@@ -148,7 +152,13 @@ class ManagementDashboards internal constructor(private val core: SabouCore) {
 
         val branchName = core.branches.all().firstOrNull { it.id == branch.branchId }?.name.orEmpty()
         return ManagementDashboard(branchName, from, to, baseFrom, baseTo, kpis, week, categories, payments, months, topItems,
-            assessment.findings.take(4), assessment.areas, latest)
+            assessment.findings.take(4), assessment.areas, latest, salesMixAvailable = mix != null)
+    }
+
+    private fun <T> allowedOrNull(block: () -> T): T? = try {
+        block()
+    } catch (e: DomainException) {
+        if (e.error is DomainError.PermissionDenied) null else throw e
     }
 
     private fun share(part: Long, total: Long) = if (total <= 0) 0 else Ratio.mulDiv(part, 10_000, total)

@@ -173,8 +173,8 @@ data class SetAssessmentSettings(
     /** Channel name → basis points of its net sales (commission, courier). */
     val channelCosts: Map<String, Long> = emptyMap(),
 ) : Command {
-    override val requiredPermission = Permission.BUDGET_MANAGE
-    override val scope: Scope = Scope.Organization
+    override val requiredPermission get() = Permission.BUDGET_MANAGE
+    override val scope: Scope get() = Scope.Organization
     override fun fingerprint() = targets.toSortedMap().entries.joinToString(";") { "${it.key}=${it.value}" } + "|" +
         weights.toSortedMap().entries.joinToString(";") { "${it.key}=${it.value}" } + "|" +
         channelCosts.toSortedMap().entries.joinToString(";") { "${it.key}=${it.value}" }
@@ -209,7 +209,7 @@ data class Assessment(
     val kpis: List<Kpi> get() = dimensions.flatMap { it.kpis }
     val critical: List<Finding> get() = findings.filter { it.severity == Finding.Severity.CRITICAL }
     /** The average of the data-quality parts; null without any. */
-    val dataQualityBp: Long? get() = quality.takeIf { it.isNotEmpty() }?.let { q -> q.sumOf { it.bp } / q.size }
+    val dataQualityBp: Long? get() = quality.takeIf { it.isNotEmpty() }?.let { q -> q.sumOfExact { it.bp } / q.size }
 }
 
 /** The 360° scorecard and diagnosis of one branch for a period, against the period of the same length before it. */
@@ -357,7 +357,7 @@ class Assessments internal constructor(private val core: SabouCore) {
             if (ir.sabou.sales.SalesChannel.entries.none { it.name == channel }) throw DomainException(DomainError.InvalidInput("channel", "کانال «$channel» نیست."))
             if (bp !in 0..9_000) throw DomainException(DomainError.InvalidInput("channel", "هزینه‌ی کانال بین ۰ و ۹۰ درصد فروش آن است."))
         }
-        if (AssessmentArea.entries.sumOf { a -> cmd.weights[a.name] ?: a.weight } <= 0) throw DomainException(DomainError.InvalidInput("weight", "دست‌کم یک حوزه وزن می‌خواهد."))
+        if (AssessmentArea.entries.sumOfExact { a -> cmd.weights[a.name] ?: a.weight } <= 0) throw DomainException(DomainError.InvalidInput("weight", "دست‌کم یک حوزه وزن می‌خواهد."))
         val revision = settings().revision + 1
         meta.put(SETTINGS_KEY, ir.sabou.persistence.Json.encode(mapOf("targets" to cmd.targets.toSortedMap(), "weights" to cmd.weights.toSortedMap(), "revision" to revision.toLong(),
             "channels" to cmd.channelCosts.filterValues { it > 0 }.toSortedMap())))
@@ -404,12 +404,12 @@ class Assessments internal constructor(private val core: SabouCore) {
         // Each area's weight is shared equally by its dimensions; weights are kept ×1,000 to stay whole.
         fun weight(d: DimensionResult) = settings.weight(d.dimension.area) * 1_000 / Dimension.entries.count { it.area == d.dimension.area }
         val applicable = dimensions.filter { it.applicable }
-        val total = applicable.sumOf { weight(it) }
+        val total = applicable.sumOfExact { weight(it) }
         val scored = applicable.filter { it.score != null }
-        val scoredWeight = scored.sumOf { weight(it) }
+        val scoredWeight = scored.sumOfExact { weight(it) }
         val coverageBp = if (total == 0L) 0 else Ratio.mulDiv(scoredWeight, 10_000, total)
         val score = if (scoredWeight == 0L || coverageBp < MIN_COVERAGE_BP) null
-            else Ratio.mulDiv(scored.sumOf { weight(it) * it.score!! }, 1, scoredWeight).toInt()
+            else Ratio.mulDiv(scored.sumOfExact { weight(it) * it.score!! }, 1, scoredWeight).toInt()
 
         val actions = store.actions(branch)
         val quiet = actions.filter { it.status == AssessmentAction.Status.FALSE_ALARM && to.epochDay - it.opened.epochDay in 0 until FALSE_ALARM_DAYS }.map { it.findingKey }.toSet()
@@ -458,7 +458,7 @@ class Assessments internal constructor(private val core: SabouCore) {
 
         fun channelCost(rows: List<ChannelRow>) = rows.sumOfExact { r -> settings.channelCosts[r.channel]?.let { Ratio.mulDiv(r.net.rial, it, 10_000) } ?: 0L }
 
-        fun account(code: ir.sabou.ledger.AccountCode, p: ProfitAndLoss = pnl) = (p.costOfSales + p.expenses).filter { it.account.code == code }.sumOf { it.amount }
+        fun account(code: ir.sabou.ledger.AccountCode, p: ProfitAndLoss = pnl) = (p.costOfSales + p.expenses).filter { it.account.code == code }.sumOfExact { it.amount }
 
         fun kpis(): List<Kpi> = (baseKpis() + recordKpis()).sortedBy { it.dimension.ordinal }
 
@@ -466,7 +466,7 @@ class Assessments internal constructor(private val core: SabouCore) {
             // ---- D01 accounting
             val trial = safe { core.overview.trialBalance() }
             add(if (trial == null) unknown("D01.TRIAL", Dimension.D01, "تراز آزمایشی", KpiUnit.RIAL, "تراز آزمایشی", "")
-                else Kpi("D01.TRIAL", Dimension.D01, "اختلاف تراز آزمایشی (باید صفر باشد)", kotlin.math.abs(trial.sumOf { it.second }), KpiUnit.RIAL,
+                else Kpi("D01.TRIAL", Dimension.D01, "اختلاف تراز آزمایشی (باید صفر باشد)", kotlin.math.abs(trial.sumOfExact { it.second }), KpiUnit.RIAL,
                     KpiTarget.lower(0, 1), KpiQuality.OK, "جمع مانده‌ی بدهکار و بستانکار همه‌ی حساب‌ها"))
             val drafts = salesByDay.values.sumOf { l -> l.count { it.status == SaleStatus.DRAFT } }
             val openDays = salesByDay.count { (d, l) -> l.any { it.status == SaleStatus.POSTED } && core.sales.day(branch, d)?.closed != true }
@@ -523,11 +523,11 @@ class Assessments internal constructor(private val core: SabouCore) {
 
             // ---- D04 liquidity
             val cr = customers
-            val outstanding = cr?.rows?.sumOf { it.outstanding } ?: 0L
+            val outstanding = cr?.rows?.sumOfExact { it.outstanding } ?: 0L
             add(when {
                 cr == null -> unknown("D04.OVERDUE", Dimension.D04, "سهم طلب سررسیدگذشته", KpiUnit.PERCENT, "مشتریان نسیه", "")
                 outstanding <= 0L -> na("D04.OVERDUE", Dimension.D04, "سهم طلب سررسیدگذشته", "طلب بازی از مشتریان نیست")
-                else -> cr.rows.sumOf { it.overdue }.let { od -> Kpi("D04.OVERDUE", Dimension.D04, "سهم طلب سررسیدگذشته", bp(od, outstanding), KpiUnit.PERCENT,
+                else -> cr.rows.sumOfExact { it.overdue }.let { od -> Kpi("D04.OVERDUE", Dimension.D04, "سهم طلب سررسیدگذشته", bp(od, outstanding), KpiUnit.PERCENT,
                     KpiTarget.lower(0, 3_000), KpiQuality.OK, "طلب سررسیدگذشته ÷ کل طلب از مشتریان", od, outstanding) }
             })
             val f = cash
@@ -636,9 +636,9 @@ class Assessments internal constructor(private val core: SabouCore) {
 
             // ---- D11 kitchen: dishes sold with a recipe
             val rows = mix?.rows.orEmpty()
-            val portions = rows.sumOf { it.portions.micros }
+            val portions = rows.sumOfExact { it.portions.micros }
             add(if (portions <= 0) unknown("D11.RECIPES", Dimension.D11, "پرس‌های دارای رسپی", KpiUnit.PERCENT, "اقلام فروش", "در این دوره فروش غذا ثبت نشده است.")
-                else rows.filter { it.unitCost != null }.sumOf { it.portions.micros }.let { withRecipe ->
+                else rows.filter { it.unitCost != null }.sumOfExact { it.portions.micros }.let { withRecipe ->
                     Kpi("D11.RECIPES", Dimension.D11, "پرس‌های فروخته‌شده‌ی دارای رسپی و بها", bp(withRecipe, portions), KpiUnit.PERCENT, KpiTarget.higher(10_000, 7_000),
                         KpiQuality.OK, "پرس‌های غذاهای دارای رسپی ÷ همه‌ی پرس‌ها")
                 })
@@ -653,9 +653,9 @@ class Assessments internal constructor(private val core: SabouCore) {
                     "حقوق و بیمه‌ی کارفرما ÷ فروش غذا", labor, sales)
             })
             val att = safe { core.reports.attendance(branch, from, to) }
-            val minutes = att?.sumOf { it.workedMinutes } ?: 0L
+            val minutes = att?.sumOfExact { it.workedMinutes } ?: 0L
             if (minutes > 0 && sales > 0) {
-                val baseAtt = safe { core.reports.attendance(branch, baseFrom, baseTo) }?.sumOf { it.workedMinutes } ?: 0L
+                val baseAtt = safe { core.reports.attendance(branch, baseFrom, baseTo) }?.sumOfExact { it.workedMinutes } ?: 0L
                 val perHour = Ratio.mulDiv(sales, 60, minutes)
                 val basePerHour = if (baseAtt > 0 && basePnl.ratios.sales > 0) Ratio.mulDiv(basePnl.ratios.sales, 60, baseAtt) else null
                 add(Kpi("D13.PER_HOUR", Dimension.D13, "فروش به ازای هر ساعت کار", perHour, KpiUnit.RIAL_PER_HOUR, null, KpiQuality.OK, "فروش غذا ÷ ساعت‌های کارکرد ثبت‌شده",
@@ -700,7 +700,7 @@ class Assessments internal constructor(private val core: SabouCore) {
                         "روزهای کاری (بی روزهای تعطیل) از نخستین فروش", n, expected.size.toLong())
                 })
             add(if (portions <= 0) unknown("D18.COSTED", Dimension.D18, "پرس‌های دارای بهای واقعی", KpiUnit.PERCENT, "اقلام فروش", "")
-                else rows.sumOf { it.costedPortions.micros }.let { c ->
+                else rows.sumOfExact { it.costedPortions.micros }.let { c ->
                     Kpi("D18.COSTED", Dimension.D18, "پرس‌های دارای بهای واقعی هنگام فروش", bp(c, portions), KpiUnit.PERCENT, KpiTarget.higher(10_000, 8_000), KpiQuality.OK,
                         "پرس‌هایی که بهای موادشان هنگام ثبت فروش ثبت شد ÷ همه‌ی پرس‌ها")
                 })
@@ -766,7 +766,7 @@ class Assessments internal constructor(private val core: SabouCore) {
                 add(unknown("D08.RATING", Dimension.D08, "میانگین رضایت مشتری", KpiUnit.RATING, "نظر مشتریان",
                     "در این دوره ${Fa.number(feedback.size.toLong())} نظر ثبت شده؛ دست‌کم ${Fa.number(MIN_FEEDBACK.toLong())} نظر لازم است («ثبت‌های روزانه»)."))
             } else {
-                val sum = feedback.sumOf { it.value!! }
+                val sum = feedback.sumOfExact { it.value!! }
                 add(Kpi("D08.RATING", Dimension.D08, "میانگین رضایت مشتری", Ratio.mulDiv(sum, 100, feedback.size.toLong()), KpiUnit.RATING, KpiTarget.higher(450, 300),
                     KpiQuality.OK, "امتیاز ۱ تا ۵ نظرهای ثبت‌شده", sum, feedback.size.toLong()))
                 val complaints = feedback.count { it.value!! <= 2 }.toLong()
@@ -803,7 +803,7 @@ class Assessments internal constructor(private val core: SabouCore) {
                     "خرابی و تعمیر تجهیزات ثبت نمی‌شود؛ هر خرابی را در «ثبت‌های روزانه» ثبت کنید.")
                 else recordsIn(FieldRecord.Kind.BREAKDOWN).let { b ->
                     Kpi("D15.BREAKDOWNS", Dimension.D15, "خرابی تجهیزات در دوره", b.size.toLong(), KpiUnit.COUNT, KpiTarget.lower(0, 4), KpiQuality.OK, "خرابی‌های ثبت‌شده",
-                        note = "هزینه‌ی تعمیر ${Fa.rial(b.sumOf { it.value ?: 0 })} ریال")
+                        note = "هزینه‌ی تعمیر ${Fa.rial(b.sumOfExact { it.value ?: 0 })} ریال")
                 })
 
             // D16: permits — the latest record of each one.
@@ -857,14 +857,14 @@ class Assessments internal constructor(private val core: SabouCore) {
                     "تمدید را از همین هفته شروع کنید.", Finding.Confidence.HIGH))
             }
             recordsIn(FieldRecord.Kind.BREAKDOWN).groupBy { it.subject }.filter { it.value.size >= 2 }.forEach { (equipment, list) ->
-                val cost = list.sumOf { it.value ?: 0 }
+                val cost = list.sumOfExact { it.value ?: 0 }
                 add(Finding("BREAKDOWN:$equipment", Finding.Severity.MEDIUM, Dimension.D15, "«$equipment» ${Fa.number(list.size.toLong())} بار در این دوره خراب شد",
                     list.map { "${Fa.date(it.date)}" + (it.value?.let { v -> " · ${Fa.rial(v)} ریال" } ?: "") + (if (it.note.isNotBlank()) " · ${it.note}" else "") },
                     cost, cost, listOf("تعمیر ناقص", "فرسودگی", "استفاده‌ی نادرست"),
                     "هزینه‌ی تعمیرهای پی‌درپی را با خرید دستگاه تازه یا قرارداد سرویس دوره‌ای مقایسه کنید.", Finding.Confidence.MEDIUM))
             }
             recordsIn(FieldRecord.Kind.PORTION).takeIf { it.size >= MIN_PORTIONS }?.let { l ->
-                val over = Ratio.mulDivSigned(l.sumOf { it.value2!! - it.value!! }, 10_000, l.sumOf { it.value!! })
+                val over = Ratio.mulDivSigned(l.sumOfExact { it.value2!! - it.value!! }, 10_000, l.sumOfExact { it.value!! })
                 if (over >= PORTION_TOLERANCE_BP) add(Finding("PORTIONS_HEAVY", Finding.Severity.MEDIUM, Dimension.D11, "پرس‌ها به‌طور میانگین ${Fa.percent(over)} سنگین‌تر از رسپی‌اند",
                     l.sortedByDescending { (it.value2!! - it.value!!) * 10_000 / it.value }.take(3).map { "«${it.subject}»: رسپی ${Fa.number(it.value!!)} گرم، وزن‌شده ${Fa.number(it.value2!!)} گرم" },
                     null, null, listOf("نبود ترازو یا پیمانه در خط پخت", "رسپی به‌روز نیست"), "ترازو یا پیمانه در خط پخت بگذارید و رسپی را با آشپزها مرور کنید.", Finding.Confidence.MEDIUM))
@@ -911,10 +911,10 @@ class Assessments internal constructor(private val core: SabouCore) {
                 val n = expected.count { d -> salesByDay[d]?.any { it.status == SaleStatus.POSTED } == true }
                 add(QualityPart("کامل بودن فروش روزانه", bp(n.toLong(), expected.size.toLong()), "${Fa.number(n.toLong())} از ${Fa.number(expected.size.toLong())} روز کاری"))
             }
-            val rows = mix?.rows.orEmpty(); val portions = rows.sumOf { it.portions.micros }
+            val rows = mix?.rows.orEmpty(); val portions = rows.sumOfExact { it.portions.micros }
             if (portions > 0) {
-                add(QualityPart("رسپی و بهای غذاها", bp(rows.filter { it.unitCost != null }.sumOf { it.portions.micros }, portions), "سهم پرس‌های دارای رسپی"))
-                add(QualityPart("بهای واقعی هنگام فروش", bp(rows.sumOf { it.costedPortions.micros }, portions), "سهم پرس‌هایی که بهای واقعی دارند"))
+                add(QualityPart("رسپی و بهای غذاها", bp(rows.filter { it.unitCost != null }.sumOfExact { it.portions.micros }, portions), "سهم پرس‌های دارای رسپی"))
+                add(QualityPart("بهای واقعی هنگام فروش", bp(rows.sumOfExact { it.costedPortions.micros }, portions), "سهم پرس‌هایی که بهای واقعی دارند"))
             }
             if (!counted && (mix?.rows?.isNotEmpty() == true)) add(QualityPart("انبارگردانی", 0, "شمارشی در دوره نیست"))
             usage?.takeIf { it.rows.isNotEmpty() }?.let { u ->
@@ -997,14 +997,14 @@ class Assessments internal constructor(private val core: SabouCore) {
                     listOf("کمترین مانده‌ی پیش‌بینی‌شده ${Fa.rial(low.closing)} ریال در هفته‌ی ${Fa.number(low.index.toLong())}"),
                     null, -low.closing,
                     outs.map { "${cashKind(it.key)}: ${Fa.rial(-it.value)} ریال" } +
-                        listOfNotNull(customers?.rows?.sumOf { it.overdue }?.takeIf { it > 0 }?.let { "طلب سررسیدگذشته‌ی وصول‌نشده ${Fa.rial(it)} ریال" }),
+                        listOfNotNull(customers?.rows?.sumOfExact { it.overdue }?.takeIf { it > 0 }?.let { "طلب سررسیدگذشته‌ی وصول‌نشده ${Fa.rial(it)} ریال" }),
                     "طلب‌های سررسیدگذشته را وصول کنید و پرداخت‌های بزرگ آن هفته را با تأمین‌کننده جابه‌جا کنید؛ «پیش‌بینی نقدینگی» را با سناریوی محتاط هم ببینید.",
                     Finding.Confidence.MEDIUM))
             }
 
             // Customers owe past their due date.
             customers?.rows?.filter { it.overdue > 0 }?.sortedByDescending { it.overdue }?.takeIf { it.isNotEmpty() }?.let { late ->
-                val total = late.sumOf { it.overdue }
+                val total = late.sumOfExact { it.overdue }
                 add(Finding("RECEIVABLES_LATE", if ((kpi("D04.OVERDUE")?.value ?: 0) >= 3_000) Finding.Severity.HIGH else Finding.Severity.MEDIUM, Dimension.D04,
                     "طلب سررسیدگذشته ${Fa.rial(total)} ریال", late.take(3).map { "${it.customer.name}: ${Fa.rial(it.overdue)} ریال" + (it.delayDays?.let { d -> " · معمولاً ${Fa.number(d.toLong())} روز دیرتر" } ?: "") },
                     total, total, emptyList(), "با این مشتریان تماس بگیرید و تا وصول، فروش نسیه‌ی تازه را محدود کنید.", Finding.Confidence.HIGH))

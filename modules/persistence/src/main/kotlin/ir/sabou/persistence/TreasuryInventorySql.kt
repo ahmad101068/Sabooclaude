@@ -65,7 +65,14 @@ class SqlMovementStore(db: SqlDatabase) : SqlTable(db), MovementStore {
         d.long("recordedAt"), Codec.idOrNull(d.strOrNull("cheque")),
     )
 
-    override fun insert(movement: TreasuryMovement) = db.execute(
+    override fun insert(movement: TreasuryMovement) {
+        insertRow(movement)
+        val net = if (movement.direction == Direction.RECEIPT) movement.amount.rial else -movement.amount.rial
+        db.execute("INSERT INTO treasury_days (account_id, date, net) VALUES (?, ?, ?) ON CONFLICT(account_id, date) DO UPDATE SET net = treasury_days.net + excluded.net",
+            movement.accountId.value, movement.date.epochDay, net)
+    }
+
+    private fun insertRow(movement: TreasuryMovement) = db.execute(
         "INSERT INTO treasury_movements (id, account_id, direction, amount, source_type, source_id, reversal_of, doc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         movement.id.value, movement.accountId.value, movement.direction.name, movement.amount.rial, movement.source.type,
         movement.source.id.value, movement.reversalOf?.value,
@@ -87,6 +94,19 @@ class SqlMovementStore(db: SqlDatabase) : SqlTable(db), MovementStore {
 
     fun byAccount(accountId: GlobalId, limit: Int): List<TreasuryMovement> =
         docs("SELECT doc FROM treasury_movements WHERE account_id = ? ORDER BY rowid DESC LIMIT ?", accountId.value, limit).map(::read)
+
+    override fun balanceAsOf(accountId: GlobalId, date: BusinessDate): Long = db.query(
+        "SELECT COALESCE(SUM(net), 0) AS n FROM treasury_days WHERE account_id = ? AND date <= ?", accountId.value, date.epochDay,
+    ).single().long("n")
+
+    override fun lowestBalanceFrom(accountId: GlobalId, date: BusinessDate): Long {
+        var running = balanceAsOf(accountId, date)
+        var lowest = running
+        db.query("SELECT net FROM treasury_days WHERE account_id = ? AND date > ? ORDER BY date", accountId.value, date.epochDay).forEach {
+            running = Math.addExact(running, it.long("net")); lowest = minOf(lowest, running)
+        }
+        return lowest
+    }
 
     override fun balance(accountId: GlobalId): Long = db.query(
         "SELECT COALESCE(SUM(CASE direction WHEN 'RECEIPT' THEN amount ELSE -amount END), 0) AS n FROM treasury_movements WHERE account_id = ?",
@@ -322,6 +342,7 @@ class SqlStockCountStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.Sto
         d.strOr("note", ""), ir.sabou.inventory.CountStatus.valueOf(d.str("status")), Codec.id(d.str("countedBy")), d.str("countedByName"), d.long("countedAt"),
         Codec.idOrNull(d.strOrNull("reviewedBy")), d.strOrNull("reviewedByName"), d.longOrNull("reviewedAt"), d.strOrNull("rejectReason"),
         Codec.idOrNull(d.strOrNull("plan")),
+        if (d.has("shortagesAtCount")) d.strs("shortagesAtCount").map(Codec::id) else null,
     )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM stock_counts WHERE id = ?", id.value)?.let(::read)
     override fun all() = docs("SELECT doc FROM stock_counts ORDER BY rowid DESC").map(::read)
@@ -338,6 +359,7 @@ class SqlStockCountStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.Sto
                 "note" to count.note, "status" to count.status.name, "countedBy" to count.countedBy.value, "countedByName" to count.countedByName,
                 "countedAt" to count.countedAt, "reviewedBy" to count.reviewedBy?.value, "reviewedByName" to count.reviewedByName,
                 "reviewedAt" to count.reviewedAt, "rejectReason" to count.rejectReason, "plan" to count.planId?.value,
+                "shortagesAtCount" to count.shortagesAtCount?.map { it.value },
             )),
         ),
     )
@@ -349,6 +371,7 @@ class SqlShortageStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.Short
         Codec.id(d.str("id")), Codec.id(d.str("item")), Codec.id(d.str("location")), Codec.date(d.long("date")),
         d.str("sourceType"), Codec.id(d.str("sourceId")), Codec.qty(d.long("qty")), Codec.qty(d.long("settled")), Codec.money(d.long("settledCost")),
         Codec.qty(d.long("taken")), Codec.money(d.long("takenCost")), ir.sabou.inventory.StockShortage.Status.valueOf(d.str("status")),
+        d.longOr("recordedAt", 0L),
     )
     override fun byId(id: GlobalId) = doc("SELECT doc FROM stock_shortages WHERE id = ?", id.value)?.let(::read)
     override fun ofSource(sourceType: String, sourceId: GlobalId) =
@@ -366,7 +389,7 @@ class SqlShortageStore(db: SqlDatabase) : SqlTable(db), ir.sabou.inventory.Short
                 "id" to shortage.id.value, "item" to shortage.itemId.value, "location" to shortage.locationId.value, "date" to shortage.date.epochDay,
                 "sourceType" to shortage.sourceType, "sourceId" to shortage.sourceId.value, "qty" to shortage.quantity.micros,
                 "settled" to shortage.settled.micros, "settledCost" to shortage.settledCost.rial, "taken" to shortage.takenFromStock.micros,
-                "takenCost" to shortage.takenCost.rial, "status" to shortage.status.name,
+                "takenCost" to shortage.takenCost.rial, "status" to shortage.status.name, "recordedAt" to shortage.recordedAt,
             )),
         ),
     )

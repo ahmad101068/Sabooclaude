@@ -51,6 +51,8 @@ class TwoPhones(private val context: Context, private val container: AppContaine
         val pairingDevice: String? = null,
         val pairingOpen: Boolean = false,
         val pairingResult: String? = null,
+        /** This phone holds a second phone's copy but its pairing was lost: nothing can be recorded on it. */
+        val orphaned: Boolean = false,
     )
 
     private val file = File(context.noBackupFilesDir, "two-phones.cfg")
@@ -131,6 +133,13 @@ class TwoPhones(private val context: Context, private val container: AppContaine
 
     /** Called by the container whenever a healthy core is open. */
     fun attach(core: SabouCore) {
+        // Fail closed: a copy of the main phone's books never turns into books of its own because a file was lost.
+        if (core.sync.isCopy() && (config.role != Role.REPLICA || config.key == null)) {
+            core.sync.lockOrphanedCopy()
+            mutableStatus.value = mutableStatus.value.copy(orphaned = true,
+                problem = "اتصال این گوشی به گوشی اصلی از بین رفته؛ تا مالک دوباره آن را وصل یا جدا نکند، ثبتی انجام نمی‌شود.")
+            return
+        }
         when (config.role) {
             Role.NONE -> Unit
             Role.HUB -> SyncService.start(context)
@@ -233,13 +242,17 @@ class TwoPhones(private val context: Context, private val container: AppContaine
     // ------------------------------------------------------------------ second phone
 
     private fun startReplica(core: SabouCore) {
-        val key = config.key ?: return
+        val key = checkNotNull(config.key) { "REPLICA_WITHOUT_KEY" }   // attach() locks such a copy first
         val pairing = Pairing(config.deviceId, key, config.hubId, config.hubName)
         val f = HubFinder(context, config.hubId) { address -> save(config.copy(lastAddress = "${address.hostString}:${address.port}")) }
         finder = f
         f.start()
         val r = SyncReplica(core, locator(f), pairing, appVersion(), object : SyncReplica.Listener {
-            override fun onApplied() { mutableChanges.value = mutableChanges.value + 1 }
+            override fun onApplied() {
+                mutableChanges.value = mutableChanges.value + 1
+                if (mutableStatus.value.problem == BEHIND) mutableStatus.value = mutableStatus.value.copy(problem = null)
+            }
+            override fun onBehind() { mutableStatus.value = mutableStatus.value.copy(problem = BEHIND) }
             override fun onConnection(connected: Boolean) {
                 mutableStatus.value = mutableStatus.value.copy(connected = connected, problem = null)
             }
@@ -330,6 +343,9 @@ class TwoPhones(private val context: Context, private val container: AppContaine
         }
 
         const val SERVICE_TYPE = "_sabou._tcp."
+        /** Shown on the second phone after a command whose effects have not reached it yet. */
+        const val BEHIND = "در گوشی اصلی ثبت شد؛ این گوشی هنوز به‌روز نشده و تا چند لحظه‌ی دیگر نشان داده می‌شود."
+
         fun serviceName(hubId: String) = "sabou-${hubId.take(12)}"
     }
 }

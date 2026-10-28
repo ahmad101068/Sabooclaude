@@ -111,12 +111,19 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
         matchReview = d.docOrNull("matchReview")?.let { MatchReview(Codec.id(it.str("user")), it.str("name"), it.long("at"), it.str("note")) },
         opening = d.boolOr("opening", false),
         vat = Codec.money(d.longOr("vat", 0)), discount = Codec.money(d.longOr("discount", 0)), freight = Codec.money(d.longOr("freight", 0)),
+        corrections = d.docsOr("corrections").map { c ->
+            ir.sabou.purchasing.InvoiceCorrection(Codec.id(c.str("id")), Codec.date(c.long("date")),
+                c.docsOr("items").map { ir.sabou.purchasing.ItemChange(Codec.id(it.str("item")), it.long("delta")) },
+                c.docsOr("accounts").map { ir.sabou.purchasing.AccountChange(it.int("index"), it.long("delta")) },
+                c.strOr("reason", ""), Codec.idOrNull(c.strOrNull("journal")))
+        },
     )
 
     override fun invoice(id: GlobalId) = doc("SELECT doc FROM purchase_invoices WHERE id = ?", id.value)?.let(::invoiceOf)
     override fun invoiceByNumber(supplierId: GlobalId, normalizedNo: String) =
         doc("SELECT doc FROM purchase_invoices WHERE supplier_id = ? AND number = ?", supplierId.value, normalizedNo)?.let(::invoiceOf)
     override fun invoices() = docs("SELECT doc FROM purchase_invoices ORDER BY rowid").map(::invoiceOf)
+    override fun invoicesOf(supplierId: GlobalId) = docs("SELECT doc FROM purchase_invoices WHERE supplier_id = ? ORDER BY rowid", supplierId.value).map(::invoiceOf)
     override fun saveInvoice(invoice: PurchaseInvoice) = upsert(
         "purchase_invoices", "id",
         mapOf(
@@ -143,6 +150,11 @@ class SqlPurchaseStore(db: SqlDatabase) : SqlTable(db), PurchaseStore {
                     "approvals" to invoice.approvals.map { mapOf("user" to it.userId.value, "name" to it.name, "at" to it.atEpochMillis, "self" to it.self, "reason" to it.reason) },
                     "discrepancies" to invoice.discrepancies.map { mapOf("kind" to it.kind.name, "item" to it.itemId?.value, "ordered" to it.ordered, "invoiced" to it.invoiced) },
                     "matchReview" to invoice.matchReview?.let { mapOf("user" to it.userId.value, "name" to it.name, "at" to it.atEpochMillis, "note" to it.note) },
+                    "corrections" to invoice.corrections.map { c ->
+                        mapOf("id" to c.id.value, "date" to c.date.epochDay, "reason" to c.reason, "journal" to c.journalId?.value,
+                            "items" to c.items.map { mapOf("item" to it.itemId.value, "delta" to it.delta) },
+                            "accounts" to c.accounts.map { mapOf("index" to it.index.toLong(), "delta" to it.delta) })
+                    },
                 ),
             ),
         ),
@@ -429,6 +441,9 @@ class SqlSalesStore(db: SqlDatabase) : SqlTable(db), SalesStore {
                 Codec.idOrNull(it.strOrNull("cashAccount")), it.longOr("difference", 0), Codec.idOrNull(it.strOrNull("count")),
                 it.docsOr("terminals").associate { t -> Codec.id(t.str("account")) to t.long("difference") })
         }
+    override fun closedOnOrAfter(scope: Scope.Branch, date: BusinessDate): BusinessDate? =
+        docs("SELECT doc FROM sales_days WHERE scope = ? AND date >= ? ORDER BY date DESC", Codec.scope(scope), date.epochDay)
+            .firstOrNull { it.bool("closed") }?.let { Codec.date(it.long("date")) }
     override fun saveDay(day: SalesDay) = upsert(
         "sales_days", listOf("scope", "date"),
         mapOf(

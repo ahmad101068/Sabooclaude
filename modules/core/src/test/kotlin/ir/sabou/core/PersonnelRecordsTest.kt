@@ -158,8 +158,17 @@ class PersonnelRecordsTest {
         val ali = core.payroll.registerEmployee(RegisterEmployee(id(), branch, "علی", "0012345679", Money.of(100_000_000), JalaliCalendar.date(1405, 1, 1))).resultId
         core.shifts.setPin(SetClockPin(id(), branch, ali, "2468"))
         core.payrollSettings.save(SavePayrollSettings(id(), PayrollSettings(clockPhotoRequired = true)))
-        assertEquals("INVALID_INPUT:photo", code { core.shifts.punch(ClockPunch(id(), branch, ali, "2468", day, 540)) })
-        core.shifts.punch(ClockPunch(id(), branch, ali, "2468", day, 540, AttachmentInput("p.jpg", "image/jpeg", ByteArray(600) { 1 })))
+        assertEquals("INVALID_INPUT:photo", code { punchAt(ClockPunch(id(), branch, ali, "2468", day, 540)) })
+        punchAt(ClockPunch(id(), branch, ali, "2468", day, 540, AttachmentInput("p.jpg", "image/jpeg", ByteArray(600) { 1 })))
         assertEquals(1, core.labor.day(branch, day).single().photos.values.single().size)
+    }
+
+    /** A punch made at the time it states, in Iran: the main phone's clock is moved there first (SABOU-AUDIT-006). */
+    private fun punchAt(c: ClockPunch) = run { now = c.date.epochDay * 86_400_000L + (c.minute - 210) * 60_000L
+        // Moving the clock that far ends the owner's session; the clock screen stays signed in on the real phone.
+        try { core.shifts.punch(c) } catch (e: ir.sabou.kernel.DomainException) {
+            if (e.error.code != "AUTHENTICATION_REQUIRED") throw e
+            core.identity.login("owner", "123456".toCharArray()); core.shifts.punch(c)
+        }
     }
 }

@@ -1,5 +1,6 @@
 package ir.sabou.inventory
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.platform.NoDocument
 
 import ir.sabou.platform.DocumentSeries
@@ -86,6 +87,11 @@ data class StockCount(
     val rejectReason: String? = null,
     /** The count plan this count fulfils (ADR-0031), or null for a free count. */
     val planId: GlobalId? = null,
+    /**
+     * The shortages of the counted items open when the shelf was counted (SABOU-AUDIT-009): only these are measured by
+     * the count. Null for counts made before this was kept (all open shortages then, as before).
+     */
+    val shortagesAtCount: List<GlobalId>? = null,
 ) {
     val differences: List<CountedLine> get() = lines.filter { it.difference != 0L }
 }
@@ -110,7 +116,7 @@ data class SubmitStockCount(
     /** A plan's count must cover every item of the plan. */
     val planId: GlobalId? = null,
 ) : Command {
-    override val requiredPermission = Permission.INVENTORY_COUNT
+    override val requiredPermission get() = Permission.INVENTORY_COUNT
     override fun fingerprint() = "$scope|$locationId|${date.epochDay}|$note|$planId|" + lines.joinToString(";") { "${it.itemId}:${it.counted.micros}:${it.note}" }
 }
 
@@ -122,7 +128,7 @@ data class ApproveStockCount(
     val countId: GlobalId,
     val reasons: Map<GlobalId, LineReason>,
 ) : Command {
-    override val requiredPermission = Permission.INVENTORY_ADJUST
+    override val requiredPermission get() = Permission.INVENTORY_ADJUST
     override fun fingerprint() = "$scope|$countId|" + reasons.entries.sortedBy { it.key.value.toString() }.joinToString(";") { "${it.key}:${it.value.reason}:${it.value.note}" }
 }
 
@@ -134,7 +140,7 @@ data class RejectStockCount(
     val countId: GlobalId,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.INVENTORY_ADJUST
+    override val requiredPermission get() = Permission.INVENTORY_ADJUST
     override fun fingerprint() = "$scope|$countId|$reason"
 }
 
@@ -165,8 +171,9 @@ class StockCountOperations(
             gateway.item(e.itemId)
             CountedLine(e.itemId, e.counted, gateway.balance(e.itemId, location.id).quantity, e.note.trim())
         }
+        val atCount = lines.flatMap { gateway.openShortagesOf(it.itemId, location.id) }.map { it.id }
         val count = StockCount(GlobalId.new(), cmd.scope, location.id, cmd.date, lines, cmd.note.trim(), CountStatus.PENDING,
-            ctx.actor.userId, ctx.actor.displayName, ctx.nowEpochMillis, planId = cmd.planId)
+            ctx.actor.userId, ctx.actor.displayName, ctx.nowEpochMillis, planId = cmd.planId, shortagesAtCount = atCount)
         counts.save(count)
         ctx.audit(AuditDraft("STOCK_COUNT_SUBMIT", "STOCK_COUNT", count.id.value, "location=${location.id};lines=${lines.size};differences=${count.differences.size}"))
         ctx.number(DocumentSeries.STOCK_COUNT, cmd.date, count.id)
@@ -194,7 +201,7 @@ class StockCountOperations(
             }
         }
         // What was consumed beyond the book before this count is now measured by it: write those shortages off first.
-        count.lines.forEach { gateway.writeOffShortages(ctx, location, it.itemId, count.date, count.id) }
+        count.lines.forEach { gateway.writeOffShortages(ctx, location, it.itemId, count.date, count.id, count.shortagesAtCount?.toSet()) }
         // The difference measured at count time is applied now, valued at today's average cost, so
         // sales and receipts recorded between counting and approval are not undone.
         val posted = lines.map { line ->
@@ -227,7 +234,7 @@ class StockCountOperations(
         }
         counts.save(count.copy(lines = posted, status = CountStatus.POSTED, reviewedBy = ctx.actor.userId, reviewedByName = ctx.actor.displayName, reviewedAt = ctx.nowEpochMillis))
         ctx.audit(AuditDraft("STOCK_COUNT_APPROVE", "STOCK_COUNT", count.id.value,
-            "differences=${count.differences.size};value=${posted.sumOf { it.postedValue ?: 0 }};" + posted.filter { it.reason != null }.joinToString(",") { "${it.itemId}:${it.reason}" }))
+            "differences=${count.differences.size};value=${posted.sumOfExact { it.postedValue ?: 0 }};" + posted.filter { it.reason != null }.joinToString(",") { "${it.itemId}:${it.reason}" }))
         count.id
     }
 

@@ -1,5 +1,6 @@
 package ir.sabou.core
 
+import ir.sabou.kernel.sumOfExact
 import ir.sabou.inventory.Item
 import ir.sabou.inventory.Location
 import ir.sabou.inventory.MenuItem
@@ -483,7 +484,7 @@ class Overview internal constructor(private val core: SabouCore) {
             if (a.canAccess(Scope.Organization)) add(Scope.Organization)
         }
         return core.accounts.all().map { acc ->
-            acc to (scopes?.sumOf { core.journals.netDebit(acc.code, it, null) } ?: core.journals.netDebit(acc.code, null, null))
+            acc to (scopes?.sumOfExact { core.journals.netDebit(acc.code, it, null) } ?: core.journals.netDebit(acc.code, null, null))
         }.filter { it.second != 0L }
     }
 }

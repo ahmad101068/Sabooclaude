@@ -47,14 +47,14 @@ data class OpenTreasuryAccount(
     val name: String,
     val kind: TreasuryKind,
 ) : Command {
-    override val requiredPermission = Permission.TREASURY_ACCOUNT_MANAGE
+    override val requiredPermission get() = Permission.TREASURY_ACCOUNT_MANAGE
     override fun fingerprint() = "$scope|$name|$kind"
 }
 
 /** Renames a cash box or bank account, or closes it (only when it is empty and holds no cheque). */
 @NoDocument
 data class UpdateTreasuryAccount(override val commandId: GlobalId, override val scope: Scope, val accountId: GlobalId, val name: String, val isActive: Boolean) : Command {
-    override val requiredPermission = Permission.TREASURY_ACCOUNT_MANAGE
+    override val requiredPermission get() = Permission.TREASURY_ACCOUNT_MANAGE
     override fun fingerprint() = "$scope|$accountId|$name|$isActive"
 }
 
@@ -72,7 +72,7 @@ data class RecordReceipt(
     /** Any open (non-control) account instead of [purpose]'s: a loan received, a deposit returned. */
     val counterAccount: AccountCode? = null,
 ) : Command {
-    override val requiredPermission = Permission.TREASURY_RECEIPT
+    override val requiredPermission get() = Permission.TREASURY_RECEIPT
     override fun fingerprint() = "$scope|$accountId|$purpose|${amount.rial}|${date.epochDay}|$description|${cheque?.fingerprint()}|$counterAccount"
 }
 
@@ -91,7 +91,7 @@ data class RecordPayment(
     /** Any open (non-control) account instead of [purpose]'s: repairs, a loan instalment, the rent deposit. */
     val counterAccount: AccountCode? = null,
 ) : Command {
-    override val requiredPermission = Permission.TREASURY_PAYMENT
+    override val requiredPermission get() = Permission.TREASURY_PAYMENT
     override fun fingerprint() = "$scope|$accountId|$purpose|${amount.rial}|${date.epochDay}|$description|${cheque?.fingerprint()}|$chequeId|$counterAccount"
 }
 
@@ -114,7 +114,7 @@ data class TransferFunds(
     val date: BusinessDate,
     val description: String,
 ) : Command {
-    override val requiredPermission = Permission.TREASURY_TRANSFER
+    override val requiredPermission get() = Permission.TREASURY_TRANSFER
     override fun fingerprint() = "$scope|$fromAccountId|$toAccountId|${amount.rial}|${date.epochDay}|$description"
 }
 
@@ -128,7 +128,7 @@ data class ReconcileAccount(
     val date: BusinessDate,
     val description: String,
 ) : Command {
-    override val requiredPermission = Permission.TREASURY_RECONCILE
+    override val requiredPermission get() = Permission.TREASURY_RECONCILE
     override fun fingerprint() = "$scope|$accountId|${counted.rial}|${date.epochDay}|$description"
 }
 
@@ -142,7 +142,7 @@ data class ReverseTreasuryDocument(
     val date: BusinessDate,
     val reason: String,
 ) : Command {
-    override val requiredPermission = Permission.TREASURY_REVERSE
+    override val requiredPermission get() = Permission.TREASURY_REVERSE
     override fun fingerprint() = "$scope|$documentType|$documentId|${date.epochDay}|$reason"
 }
 
