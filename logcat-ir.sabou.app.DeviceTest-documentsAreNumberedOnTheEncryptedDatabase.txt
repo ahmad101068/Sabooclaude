@@ -1,0 +1,4 @@
+10-29 15:20:37.447  6071  6091 I TestRunner: started: documentsAreNumberedOnTheEncryptedDatabase(ir.sabou.app.DeviceTest)
+10-29 15:20:37.458  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:20:39.000  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:20:39.552  6071  6091 I TestRunner: finished: documentsAreNumberedOnTheEncryptedDatabase(ir.sabou.app.DeviceTest)

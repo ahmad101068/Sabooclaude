@@ -1,0 +1,65 @@
+10-29 15:19:45.778  6071  6091 I TestRunner: started: anOlderCopyOfTheDatabaseIsDetected(ir.sabou.app.DeviceTest)
+10-29 15:19:45.830  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:19:48.131  6071  6083 I sabou.erp.debu: Background young concurrent copying GC freed 57747(2735KB) AllocSpace objects, 0(0B) LOS objects, 38% free, 4055KB/6552KB, paused 1.831ms total 101.763ms
+10-29 15:19:48.419  1166  6177 I NetworkManagementSocketTagger: tagSocketFd(-1, 805307399, -1) failed with errno-9
+10-29 15:19:48.470  6071  6083 I sabou.erp.debu: Background concurrent copying GC freed 69448(3136KB) AllocSpace objects, 4(272KB) LOS objects, 49% free, 3318KB/6637KB, paused 79us total 129.992ms
+10-29 15:19:48.853  6071  6083 I sabou.erp.debu: Background young concurrent copying GC freed 61686(2911KB) AllocSpace objects, 0(0B) LOS objects, 46% free, 3526KB/6637KB, paused 519us total 140.842ms
+10-29 15:19:49.201  5858  5890 E libc    : Access denied finding property "persist.adb.tls_server.enable"
+10-29 15:19:49.201  5858  5890 E libc    : Access denied finding property "service.adb.tls.port"
+10-29 15:19:49.290  6071  6083 I sabou.erp.debu: Background concurrent copying GC freed 90545(4270KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 3592KB/7184KB, paused 26us total 143.729ms
+10-29 15:19:49.196  5858  5858 W Binder:5858_3: type=1400 audit(0.0:88): avc: denied { read } for name="u:object_r:system_adbd_prop:s0" dev="tmpfs" ino=8250 scontext=u:r:gmscore_app:s0:c512,c768 tcontext=u:object_r:system_adbd_prop:s0 tclass=file permissive=0 app=com.google.android.gms
+10-29 15:19:49.381  1166  1857 W GLSUser : [AppCertManager] Failed to get security token.
+10-29 15:19:49.381  1166  1857 W GLSUser : java.io.IOException: Invalid scope
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at adac.b(:com.google.android.gms@201817023@20.18.17 (040800-311416286):23)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at adac.a(:com.google.android.gms@201817023@20.18.17 (040800-311416286):18)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at adac.a(:com.google.android.gms@201817023@20.18.17 (040800-311416286):11)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at huk.a(:com.google.android.gms@201817023@20.18.17 (040800-311416286):16)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at hui.a(:com.google.android.gms@201817023@20.18.17 (040800-311416286):41)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at hud.a(:com.google.android.gms@201817023@20.18.17 (040800-311416286):0)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at hug.a(:com.google.android.gms@201817023@20.18.17 (040800-311416286):10)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at fzn.call(:com.google.android.gms@201817023@20.18.17 (040800-311416286):5)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at java.util.concurrent.FutureTask.run(FutureTask.java:266)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at sji.b(:com.google.android.gms@201817023@20.18.17 (040800-311416286):12)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at sji.run(:com.google.android.gms@201817023@20.18.17 (040800-311416286):7)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at spj.run(:com.google.android.gms@201817023@20.18.17 (040800-311416286):0)
+10-29 15:19:49.381  1166  1857 W GLSUser : 	at java.lang.Thread.run(Thread.java:923)
+10-29 15:19:49.446  1166  1857 W GLSUser : [AppCertManager] IOException while requesting key:
+10-29 15:19:49.446  1166  1857 W GLSUser : java.io.IOException: Invalid device key response.
+10-29 15:19:49.446  1166  1857 W GLSUser : 	at huk.a(:com.google.android.gms@201817023@20.18.17 (040800-311416286):46)
+10-29 15:19:49.446  1166  1857 W GLSUser : 	at hui.a(:com.google.android.gms@201817023@20.18.17 (040800-311416286):41)
+10-29 15:19:49.446  1166  1857 W GLSUser : 	at hud.a(:com.google.android.gms@201817023@20.18.17 (040800-311416286):0)
+10-29 15:19:49.446  1166  1857 W GLSUser : 	at hug.a(:com.google.android.gms@201817023@20.18.17 (040800-311416286):10)
+10-29 15:19:49.446  1166  1857 W GLSUser : 	at fzn.call(:com.google.android.gms@201817023@20.18.17 (040800-311416286):5)
+10-29 15:19:49.446  1166  1857 W GLSUser : 	at java.util.concurrent.FutureTask.run(FutureTask.java:266)
+10-29 15:19:49.446  1166  1857 W GLSUser : 	at sji.b(:com.google.android.gms@201817023@20.18.17 (040800-311416286):12)
+10-29 15:19:49.446  1166  1857 W GLSUser : 	at sji.run(:com.google.android.gms@201817023@20.18.17 (040800-311416286):7)
+10-29 15:19:49.446  1166  1857 W GLSUser : 	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+10-29 15:19:49.446  1166  1857 W GLSUser : 	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+10-29 15:19:49.446  1166  1857 W GLSUser : 	at spj.run(:com.google.android.gms@201817023@20.18.17 (040800-311416286):0)
+10-29 15:19:49.446  1166  1857 W GLSUser : 	at java.lang.Thread.run(Thread.java:923)
+10-29 15:19:49.454  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:19:50.636  6071  6083 I sabou.erp.debu: Background young concurrent copying GC freed 56835(2640KB) AllocSpace objects, 6(264KB) LOS objects, 40% free, 4292KB/7184KB, paused 9.912ms total 27.933ms
+10-29 15:19:51.076  1375  6186 I Vision  : Requesting optional module download of ocr.
+10-29 15:19:51.086  1375  6186 I Vision  : Checking for download completion for 374105 -- ocr
+10-29 15:19:51.140   493   842 D WifiNl80211Manager: Scan result ready event
+10-29 15:19:51.140   493   842 D WifiNative: Scan result ready event
+10-29 15:19:51.997  6071  6083 I sabou.erp.debu: Background concurrent copying GC freed 61183(2848KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 4516KB/9032KB, paused 1.769ms total 138.390ms
+10-29 15:19:58.262  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:19:59.396  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:19:59.660  1479  3006 I Dialer  : OmtpVvmCarrierCfgHlpr - OmtpEvent:CONFIG_STATUS_SMS_TIME_OUT
+10-29 15:19:59.660  1479  1479 I Dialer  : RetryPolicy - Retry limit for com.android.voicemail.impl.ActivationTask@6be9cab reached
+10-29 15:19:59.660  1479  1479 I Dialer  : RetryPolicy - committing deferred status: configuration_state=4
+10-29 15:19:59.706  5662  5855 I VoicemailNotifier: receivers for android.intent.action.PROVIDER_CHANGED :[]
+10-29 15:19:59.708  1479  1479 I Dialer  : VvmTaskExecutor - no more tasks, stopping service if no task are added in 5000 millis
+10-29 15:20:00.008   700   700 D KeyguardClockSwitch: Updating clock: 320
+10-29 15:20:01.111  1375  6189 I Vision  : Requesting optional module download of ocr.
+10-29 15:20:01.116  1375  6189 I Vision  : Checking for download completion for 384137 -- ocr
+10-29 15:20:02.923  6071  6083 I sabou.erp.debu: Background young concurrent copying GC freed 93967(4431KB) AllocSpace objects, 0(0B) LOS objects, 50% free, 4355KB/8710KB, paused 5.666ms total 81.480ms
+10-29 15:20:03.200   428   428 I keystore: del USRPKEY_sabou.biometric.pin 10167
+10-29 15:20:03.201   428   428 I keystore: del USRSKEY_sabou.biometric.pin 10167
+10-29 15:20:03.201   428   428 I keystore: del USRCERT_sabou.biometric.pin 10167
+10-29 15:20:03.201   428   428 I keystore: del CACERT_sabou.biometric.pin 10167
+10-29 15:20:03.286  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:20:04.492  6071  6091 I TestRunner: finished: anOlderCopyOfTheDatabaseIsDetected(ir.sabou.app.DeviceTest)

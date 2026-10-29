@@ -1,0 +1,6 @@
+10-29 15:19:45.498  6071  6091 I TestRunner: started: storedDraftsAreReadOnceAndATamperedFileIsDropped(ir.sabou.app.DeviceTest)
+10-29 15:19:45.516   428   428 I keystore: del USRPKEY_sabou_drafts 10167
+10-29 15:19:45.518   428   428 I keystore: del USRSKEY_sabou_drafts 10167
+10-29 15:19:45.518   428   428 I keystore: del USRCERT_sabou_drafts 10167
+10-29 15:19:45.518   428   428 I keystore: del CACERT_sabou_drafts 10167
+10-29 15:19:45.757  6071  6091 I TestRunner: finished: storedDraftsAreReadOnceAndATamperedFileIsDropped(ir.sabou.app.DeviceTest)

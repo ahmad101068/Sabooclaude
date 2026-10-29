@@ -1,0 +1,260 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.13/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :modules:assets:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:kernel:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:kernel:compileKotlin FROM-CACHE
+> Task :modules:kernel:compileJava NO-SOURCE
+> Task :modules:ledger:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:platform:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:platform:compileKotlin FROM-CACHE
+> Task :modules:platform:compileJava NO-SOURCE
+> Task :modules:treasury:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:inventory:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:payroll:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:persistence:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:purchasing:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:sales:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:posimport:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:posimport:compileKotlin FROM-CACHE
+> Task :modules:posimport:compileJava NO-SOURCE
+> Task :modules:sync:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:sync:processResources NO-SOURCE
+> Task :modules:core:processResources NO-SOURCE
+> Task :modules:backup:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :modules:backup:compileKotlin FROM-CACHE
+> Task :modules:backup:compileJava NO-SOURCE
+> Task :modules:backup:processResources NO-SOURCE
+> Task :modules:backup:classes UP-TO-DATE
+> Task :modules:backup:jar
+> Task :modules:persistence:processResources NO-SOURCE
+> Task :modules:posimport:processResources NO-SOURCE
+> Task :modules:posimport:classes UP-TO-DATE
+> Task :modules:posimport:jar
+> Task :modules:sales:processResources NO-SOURCE
+> Task :modules:purchasing:processResources NO-SOURCE
+> Task :modules:inventory:processResources NO-SOURCE
+> Task :modules:payroll:processResources NO-SOURCE
+> Task :modules:assets:processResources NO-SOURCE
+> Task :modules:treasury:processResources NO-SOURCE
+> Task :modules:ledger:processResources NO-SOURCE
+> Task :modules:platform:processResources NO-SOURCE
+> Task :modules:platform:classes UP-TO-DATE
+> Task :modules:platform:jar
+> Task :modules:kernel:processResources NO-SOURCE
+> Task :modules:kernel:classes UP-TO-DATE
+> Task :modules:kernel:jar
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :modules:ledger:compileKotlin
+> Task :modules:ledger:compileJava NO-SOURCE
+> Task :app:checkDebugAarMetadata
+> Task :modules:treasury:compileKotlin FROM-CACHE
+> Task :modules:treasury:compileJava NO-SOURCE
+> Task :modules:assets:compileKotlin FROM-CACHE
+> Task :modules:assets:compileJava NO-SOURCE
+> Task :modules:inventory:compileKotlin FROM-CACHE
+> Task :modules:inventory:compileJava NO-SOURCE
+> Task :modules:payroll:compileKotlin FROM-CACHE
+> Task :modules:payroll:compileJava NO-SOURCE
+> Task :modules:purchasing:compileKotlin FROM-CACHE
+> Task :modules:purchasing:compileJava NO-SOURCE
+> Task :modules:sales:compileKotlin FROM-CACHE
+> Task :modules:sales:compileJava NO-SOURCE
+> Task :modules:persistence:compileKotlin FROM-CACHE
+> Task :modules:persistence:compileJava NO-SOURCE
+> Task :modules:core:compileKotlin FROM-CACHE
+> Task :modules:core:compileJava NO-SOURCE
+> Task :modules:sync:compileKotlin FROM-CACHE
+> Task :modules:sync:compileJava NO-SOURCE
+> Task :modules:sync:classes UP-TO-DATE
+> Task :modules:sync:jar
+> Task :modules:core:classes UP-TO-DATE
+> Task :modules:core:jar
+> Task :modules:persistence:classes UP-TO-DATE
+> Task :modules:persistence:jar
+> Task :modules:sales:classes UP-TO-DATE
+> Task :modules:sales:jar
+> Task :modules:purchasing:classes UP-TO-DATE
+> Task :modules:purchasing:jar
+> Task :modules:inventory:classes UP-TO-DATE
+> Task :modules:inventory:jar
+> Task :modules:payroll:classes UP-TO-DATE
+> Task :modules:payroll:jar
+> Task :modules:assets:classes UP-TO-DATE
+> Task :modules:assets:jar
+> Task :modules:treasury:classes UP-TO-DATE
+> Task :modules:treasury:jar
+> Task :modules:ledger:classes UP-TO-DATE
+> Task :modules:ledger:jar
+> Task :app:processDebugNavigationResources FROM-CACHE
+> Task :app:compileDebugNavigationResources FROM-CACHE
+> Task :app:generateDebugResValues FROM-CACHE
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources FROM-CACHE
+> Task :app:mergeDebugResources FROM-CACHE
+> Task :app:packageDebugResources FROM-CACHE
+> Task :app:parseDebugLocalResources FROM-CACHE
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug FROM-CACHE
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:javaPreCompileDebug FROM-CACHE
+> Task :app:preDebugAndroidTestBuild SKIPPED
+> Task :app:processDebugManifestForPackage
+> Task :app:processDebugResources
+> Task :app:checkDebugAndroidTestAarMetadata
+> Task :app:processDebugAndroidTestNavigationResources FROM-CACHE
+> Task :app:compileDebugAndroidTestNavigationResources FROM-CACHE
+> Task :app:generateDebugAndroidTestResValues FROM-CACHE
+> Task :app:mapDebugAndroidTestSourceSetPaths
+> Task :app:generateDebugAndroidTestResources FROM-CACHE
+> Task :app:mergeDebugAndroidTestResources FROM-CACHE
+> Task :app:processDebugAndroidTestManifest
+> Task :app:processDebugAndroidTestResources FROM-CACHE
+> Task :app:javaPreCompileDebugAndroidTest FROM-CACHE
+> Task :app:mergeDebugShaders
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:compressDebugAssets FROM-CACHE
+> Task :app:desugarDebugFileDependencies FROM-CACHE
+> Task :app:mergeDebugJniLibFolders
+> Task :app:checkDebugDuplicateClasses
+> Task :app:mergeDebugNativeLibs
+> Task :app:mergeExtDexDebug FROM-CACHE
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:writeDebugSigningConfigVersions
+
+> Task :app:stripDebugDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libsqlcipher.so. Run with --info option to learn more.
+
+> Task :app:mergeDebugAndroidTestShaders
+> Task :app:compileDebugAndroidTestShaders NO-SOURCE
+> Task :app:generateDebugAndroidTestAssets UP-TO-DATE
+> Task :app:mergeDebugAndroidTestAssets
+> Task :app:compressDebugAndroidTestAssets FROM-CACHE
+> Task :app:desugarDebugAndroidTestFileDependencies FROM-CACHE
+> Task :app:checkDebugAndroidTestDuplicateClasses
+> Task :app:mergeDebugAndroidTestJniLibFolders
+> Task :app:mergeExtDexDebugAndroidTest FROM-CACHE
+> Task :app:mergeLibDexDebugAndroidTest FROM-CACHE
+> Task :app:mergeDebugAndroidTestNativeLibs NO-SOURCE
+> Task :app:stripDebugAndroidTestDebugSymbols NO-SOURCE
+> Task :app:validateSigningDebugAndroidTest
+> Task :app:writeDebugAndroidTestSigningConfigVersions
+> Task :app:preReleaseCheckBuild UP-TO-DATE
+> Task :app:mergeReleaseCheckJniLibFolders
+> Task :app:mergeReleaseCheckNativeLibs
+> Task :app:buildKotlinToolingMetadata
+> Task :app:checkReleaseCheckDuplicateClasses
+
+> Task :app:stripReleaseCheckDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libsqlcipher.so. Run with --info option to learn more.
+
+> Task :app:extractReleaseCheckNativeSymbolTables FROM-CACHE
+> Task :app:mergeReleaseCheckNativeDebugMetadata NO-SOURCE
+> Task :app:processReleaseCheckNavigationResources FROM-CACHE
+> Task :app:checkReleaseCheckAarMetadata
+> Task :app:compileReleaseCheckNavigationResources FROM-CACHE
+> Task :app:generateReleaseCheckResValues FROM-CACHE
+> Task :app:mapReleaseCheckSourceSetPaths
+> Task :app:generateReleaseCheckResources FROM-CACHE
+> Task :app:mergeReleaseCheckResources FROM-CACHE
+> Task :app:mergeLibDexDebug
+> Task :app:packageReleaseCheckResources FROM-CACHE
+> Task :app:parseReleaseCheckLocalResources FROM-CACHE
+> Task :app:createReleaseCheckCompatibleScreenManifests
+> Task :app:extractDeepLinksReleaseCheck FROM-CACHE
+> Task :app:processReleaseCheckMainManifest FROM-CACHE
+> Task :app:processReleaseCheckManifest FROM-CACHE
+> Task :app:processReleaseCheckManifestForPackage FROM-CACHE
+> Task :app:processReleaseCheckResources FROM-CACHE
+> Task :app:javaPreCompileReleaseCheck FROM-CACHE
+> Task :app:mergeReleaseCheckArtProfile
+> Task :app:extractProguardFiles
+> Task :app:mergeReleaseCheckStartupProfile
+> Task :app:mergeReleaseCheckShaders
+> Task :app:compileReleaseCheckShaders NO-SOURCE
+> Task :app:generateReleaseCheckAssets UP-TO-DATE
+> Task :app:mergeReleaseCheckAssets
+> Task :app:compressReleaseCheckAssets FROM-CACHE
+> Task :app:extractReleaseCheckVersionControlInfo
+> Task :app:collectReleaseCheckDependencies
+> Task :app:sdkReleaseCheckDependencyData
+> Task :app:validateSigningReleaseCheck
+> Task :app:writeReleaseCheckAppMetadata
+> Task :app:writeReleaseCheckSigningConfigVersions
+> Task :app:compileDebugKotlin
+> Task :app:compileReleaseCheckKotlin
+> Task :app:compileReleaseCheckJavaWithJavac NO-SOURCE
+> Task :app:mergeReleaseCheckGeneratedProguardFiles
+> Task :app:processReleaseCheckJavaRes
+> Task :app:compileDebugJavaWithJavac NO-SOURCE
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:expandReleaseCheckArtProfileWildcards
+> Task :app:dexBuilderDebug
+> Task :app:mergeDebugGlobalSynthetics FROM-CACHE
+> Task :app:processDebugJavaRes
+> Task :app:mergeReleaseCheckJavaResource
+> Task :app:compileDebugAndroidTestKotlin
+> Task :app:mergeDebugJavaResource
+> Task :app:mergeProjectDexDebug
+> Task :app:compileDebugAndroidTestJavaWithJavac NO-SOURCE
+> Task :app:dexBuilderDebugAndroidTest FROM-CACHE
+> Task :app:mergeDebugAndroidTestGlobalSynthetics FROM-CACHE
+> Task :app:processDebugAndroidTestJavaRes
+> Task :app:mergeProjectDexDebugAndroidTest FROM-CACHE
+> Task :app:mergeDebugAndroidTestJavaResource
+> Task :app:generateReleaseCheckLintVitalReportModel
+> Task :app:packageDebug
+> Task :app:packageDebugAndroidTest
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:createDebugAndroidTestApkListingFileRedirect
+[EmulatorConsole]: Failed to start Emulator console for 5554
+
+> Task :app:connectedDebugAndroidTest
+Starting 17 tests on emulator-5554 - 11
+
+> Task :app:minifyReleaseCheckWithR8
+> Task :app:lintVitalAnalyzeReleaseCheck
+
+emulator-5554 - 11 Tests 1/17 completed. (0 skipped) (0 failed)
+emulator-5554 - 11 Tests 2/17 completed. (0 skipped) (0 failed)
+emulator-5554 - 11 Tests 3/17 completed. (0 skipped) (0 failed)
+emulator-5554 - 11 Tests 4/17 completed. (0 skipped) (0 failed)
+emulator-5554 - 11 Tests 5/17 completed. (0 skipped) (0 failed)
+emulator-5554 - 11 Tests 8/17 completed. (0 skipped) (0 failed)
+emulator-5554 - 11 Tests 10/17 completed. (0 skipped) (0 failed)
+emulator-5554 - 11 Tests 11/17 completed. (0 skipped) (0 failed)
+emulator-5554 - 11 Tests 13/17 completed. (0 skipped) (0 failed)
+emulator-5554 - 11 Tests 14/17 completed. (0 skipped) (0 failed)
+emulator-5554 - 11 Tests 16/17 completed. (0 skipped) (0 failed)
+Finished 17 tests on emulator-5554 - 11
+
+> Task :app:convertShrunkResourcesToBinaryReleaseCheck FROM-CACHE
+> Task :app:optimizeReleaseCheckResources FROM-CACHE
+> Task :app:lintVitalReportReleaseCheck
+> Task :app:lintVitalReleaseCheck
+> Task :app:compileReleaseCheckArtProfile
+> Task :app:packageReleaseCheck
+> Task :app:createReleaseCheckApkListingFileRedirect
+> Task :app:assembleReleaseCheck
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__reactivecircus_android-emulator-runner-1793286872242.json
+
+BUILD SUCCESSFUL in 7m 23s
+144 actionable tasks: 87 executed, 57 from cache
+--- release check (minified build) ---
+Performing Streamed Install
+Success
+Starting: Intent { cmp=ir.sabou.erp.check/ir.sabou.app.MainActivity }
+Status: ok
+LaunchState: COLD
+Activity: ir.sabou.erp.check/ir.sabou.app.MainActivity
+TotalTime: 504
+WaitTime: 508
+Complete
+6652
+release check: started and running

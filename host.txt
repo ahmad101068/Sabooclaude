@@ -1,0 +1,145 @@
+Linux runnervm48cm3 7.0.0-1017-azure #17~24.04.1-Ubuntu SMP PREEMPT Thu Sep 24 18:46:57 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 24.04.5 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+4
+               total        used        free      shared  buff/cache   available
+Mem:           15982        1045        7804          49        7529       14936
+Swap:           3071           0        3071
+/dev/root       145G   51G   94G  35% /
+crw-rw-rw- 1 root kvm 10, 232 Oct 29 15:22 /dev/kvm
+runner adm users docker systemd-journal
+Android emulator version 37.2.12.0 (build_id 16428233) (CL:N/A)
+Copyright (C) 2006-2024 The Android Open Source Project and many others.
+0
+KVM (version 12) is installed and usable.
+accel
+x86_64
+test.avd
+test.ini
+List of devices attached
+emulator-5554	offline
+
+adb: device offline
+- waiting for device -
+--- emulator started again for 90 s, its own output ---
+DEBUG   | ColorBuffer 53, 66x66, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 17424, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 54, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+VERBOSE | Created RenderThread. Active RenderThreads: 16
+DEBUG   | Started new RenderThread (total 16) @0x561e51aea8c0
+DEBUG   | ColorBuffer 57, 1x1, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 16, type: 0, props: 15 / 1]
+VERBOSE | Created RenderThread. Active RenderThreads: 17
+DEBUG   | Started new RenderThread (total 17) @0x561e51aebc00
+DEBUG   | ColorBuffer 60, 320x640, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 819200, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 62, 320x640, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 819200, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 63, 320x640, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 819200, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 64, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+VERBOSE | Created RenderThread. Active RenderThreads: 18
+DEBUG   | Started new RenderThread (total 18) @0x561e51aeafc0
+DEBUG   | ColorBuffer 67, 1x1, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 16, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 68, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 69, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 70, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 71, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 72, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 73, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 74, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 75, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 76, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 77, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 78, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 79, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 80, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 81, 54x54, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 11664, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 82, 320x640, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 819200, type: 0, props: 15 / 1]
+VERBOSE | Created RenderThread. Active RenderThreads: 19
+DEBUG   | Started new RenderThread (total 19) @0x561e51aeac40
+DEBUG   | ColorBuffer 84, 320x640, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 819200, type: 0, props: 15 / 1]
+DEBUG   | ColorBuffer 85, 320x640, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 819200, type: 0, props: 15 / 1]
+INFO         | Boot completed in 35739 ms
+INFO         | Increasing screen off timeout, logcat buffer size to 2M.
+DEBUG   | Waiting for exit signal RenderThread @0x561e51aea8c0
+VERBOSE | Created RenderThread. Active RenderThreads: 20
+DEBUG   | Exited a RenderThread @0x561e51aea8c0
+VERBOSE | Destroyed RenderThread. Active RenderThreads: 19
+DEBUG   | Started new RenderThread (total 19) @0x561e559dbdc0
+DEBUG   | ColorBuffer 88, 32x32, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 4096, type: 0, props: 15 / 1]
+VERBOSE | Created RenderThread. Active RenderThreads: 20
+DEBUG   | Started new RenderThread (total 20) @0x561e51aea8c0
+DEBUG   | ColorBuffer 91, 2x2, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 16, type: 0, props: 15 / 1]
+DEBUG   | Waiting for exit signal RenderThread @0x561e44de2700
+DEBUG   | Waiting for exit signal RenderThread @0x561e431d2700
+DEBUG   | Waiting for exit signal RenderThread @0x561e51aea8c0
+VERBOSE | Created RenderThread. Active RenderThreads: 21
+DEBUG   | Exited a RenderThread @0x561e431d2700
+VERBOSE | Destroyed RenderThread. Active RenderThreads: 20
+DEBUG   | Exited a RenderThread @0x561e44de2700
+VERBOSE | Destroyed RenderThread. Active RenderThreads: 19
+DEBUG   | Exited a RenderThread @0x561e51aea8c0
+VERBOSE | Destroyed RenderThread. Active RenderThreads: 18
+DEBUG   | Started new RenderThread (total 18) @0x561e52c95340
+DEBUG   | ColorBuffer 94, 32x32, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 4096, type: 0, props: 15 / 1]
+VERBOSE | Created RenderThread. Active RenderThreads: 19
+DEBUG   | Started new RenderThread (total 19) @0x561e44de3880
+DEBUG   | ColorBuffer 97, 32x32, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 4096, type: 0, props: 15 / 1]
+DEBUG   | Timed out with running command |/usr/local/lib/android/sdk/platform-tools/adb -s emulator-5554 shell am broadcast -a com.android.emulator.multidisplay.START -n com.android.emulator.multidisplay/.MultiDisplayServiceReceiver --user 0 |
+VERBOSE | Created RenderThread. Active RenderThreads: 20
+DEBUG   | Started new RenderThread (total 20) @0x561e431d2540
+DEBUG   | ColorBuffer 100, 2x2, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 16, type: 0, props: 15 / 1]
+DEBUG   | Registering pipe service multidisplay
+DEBUG   | MultiDisplayPipe created 0x561e5c409b20
+DEBUG   | MultiDisplayPipe recevied QUERY
+DEBUG   | MultiDisplayPipe send add id 0 width 320 height 640 dpi 0 flag 0
+DEBUG   | ColorBuffer 103, 32x32, VK_FORMAT_R8G8B8A8_UNORM, Memory [size: 4096, type: 0, props: 15 / 1]
+DEBUG   | Waiting for exit signal RenderThread @0x561e52c95340
+INFO         | Wait for emulator (pid 4262) 20 seconds to shutdown gracefully before kill;you can set environment variable ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL(in seconds) to change the default value (20 seconds)
+
+USER_INFO    | Snapshots have been disabled by the user, save request is ignored.
+INFO         | Saving snapshot 'default_boot' took 0 ms
+WARNING      | Netsim Wifi ipv6:%5B::1%5D:35957 is gone due to CANCELLED
+INFO         | ipv6:%5B::1%5D:35957: Got goaway [2] err=UNAVAILABLE:GOAWAY received; Error code: 2; Debug Text: Cancelling all calls {http2_error:2}
+ERROR        | stop: Not implemented
+DEBUG   | Done with QEMU main loop
+DEBUG   | Uninitializing VirtualSceneManager
+INFO         | removeAll
+DEBUG   | Waiting for exit signal RenderThread @0x561e431d2000
+DEBUG   | Waiting for exit signal RenderThread @0x561e4352b880
+DEBUG   | Waiting for exit signal RenderThread @0x561e4352b500
+DEBUG   | Waiting for exit signal RenderThread @0x561e4352bc00
+DEBUG   | Waiting for exit signal RenderThread @0x561e4352ac40
+DEBUG   | Waiting for exit signal RenderThread @0x561e44de21c0
+DEBUG   | Waiting for exit signal RenderThread @0x561e4312a380
+DEBUG   | Exited a RenderThread @0x561e4352ac40
+DEBUG   | Exited a RenderThread @0x561e4352b500
+DEBUG   | Waiting for exit signal RenderThread @0x561e431d2380
+DEBUG   | Exited a RenderThread @0x561e4352b880
+DEBUG   | Exited a RenderThread @0x561e4352bc00
+DEBUG   | Exited a RenderThread @0x561e431d2000
+DEBUG   | Waiting for exit signal RenderThread @0x561e51aeafc0
+DEBUG   | Waiting for exit signal RenderThread @0x561e51aeac40
+DEBUG   | Waiting for exit signal RenderThread @0x561e51aea540
+DEBUG   | Waiting for exit signal RenderThread @0x561e559dbdc0
+DEBUG   | Exited a RenderThread @0x561e431d2380
+DEBUG   | Waiting for exit signal RenderThread @0x561e51aea1c0
+DEBUG   | Exited a RenderThread @0x561e44de21c0
+DEBUG   | Waiting for exit signal RenderThread @0x561e44de2a80
+DEBUG   | Waiting for exit signal RenderThread @0x561e44de3880
+DEBUG   | Waiting for exit signal RenderThread @0x561e51aebc00
+DEBUG   | Waiting for exit signal RenderThread @0x561e431d2540
+DEBUG   | Waiting for exit signal RenderThread @0x561e4312a000
+DEBUG   | Exited a RenderThread @0x561e4312a000
+DEBUG   | Waiting for exit signal RenderThread @0x561e44de2e00
+DEBUG   | Exited a RenderThread @0x561e44de2a80
+DEBUG   | Exited a RenderThread @0x561e44de2e00
+DEBUG   | Exited a RenderThread @0x561e4312a380
+DEBUG   | Exited a RenderThread @0x561e51aea1c0
+DEBUG   | Exited a RenderThread @0x561e51aea540
+DEBUG   | Exited a RenderThread @0x561e51aebc00
+DEBUG   | Exited a RenderThread @0x561e51aeafc0
+DEBUG   | Exited a RenderThread @0x561e51aeac40
+DEBUG   | Exited a RenderThread @0x561e559dbdc0
+DEBUG   | Exited a RenderThread @0x561e52c95340
+DEBUG   | Exited a RenderThread @0x561e44de3880
+DEBUG   | Exited a RenderThread @0x561e431d2540
+VERBOSE | Destroyed RenderThread. Active RenderThreads: 19
+DEBUG   | User configuration saved to /home/runner/.android/avd/test.avd/emulator-user.ini

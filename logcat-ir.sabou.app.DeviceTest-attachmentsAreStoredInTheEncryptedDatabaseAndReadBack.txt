@@ -1,0 +1,4 @@
+10-29 15:20:34.408  6071  6091 I TestRunner: started: attachmentsAreStoredInTheEncryptedDatabaseAndReadBack(ir.sabou.app.DeviceTest)
+10-29 15:20:34.419  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:20:35.991  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:20:37.445  6071  6091 I TestRunner: finished: attachmentsAreStoredInTheEncryptedDatabaseAndReadBack(ir.sabou.app.DeviceTest)

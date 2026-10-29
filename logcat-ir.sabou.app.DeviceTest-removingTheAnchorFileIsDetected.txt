@@ -1,0 +1,8 @@
+10-29 15:19:10.562  6071  6091 I TestRunner: started: removingTheAnchorFileIsDetected(ir.sabou.app.DeviceTest)
+10-29 15:19:10.604  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:19:10.981  1375  6140 I Vision  : Requesting optional module download of ocr.
+10-29 15:19:10.981  1375  6140 I Vision  : Checking for download completion for 334002 -- ocr
+10-29 15:19:13.907  6071  6083 I sabou.erp.debu: Background young concurrent copying GC freed 68438(3231KB) AllocSpace objects, 0(0B) LOS objects, 45% free, 3593KB/6592KB, paused 2.854ms total 166.027ms
+10-29 15:19:14.716  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:19:16.369  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:19:17.975  6071  6091 I TestRunner: finished: removingTheAnchorFileIsDetected(ir.sabou.app.DeviceTest)

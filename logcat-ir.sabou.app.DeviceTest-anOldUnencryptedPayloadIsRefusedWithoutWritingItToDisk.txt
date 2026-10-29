@@ -1,0 +1,65 @@
+10-29 15:17:53.985  6071  6091 I TestRunner: started: anOldUnencryptedPayloadIsRefusedWithoutWritingItToDisk(ir.sabou.app.DeviceTest)
+10-29 15:17:54.057  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:17:54.279  1479  3006 I Dialer  : VvmTaskExecutor - executing task com.android.voicemail.impl.ActivationTask@44f21ee
+10-29 15:17:54.279  1479  3006 I Dialer  : PreOMigrationHandler - ComponentInfo{com.android.phone/com.android.services.telephony.TelephonyConnectionService}, ***, UserHandle{0} already migrated
+10-29 15:17:54.319  5662  5678 I VoicemailNotifier: receivers for android.intent.action.PROVIDER_CHANGED :[]
+10-29 15:17:54.324  1479  3006 I Dialer  : VvmActivationTask - VVM content provider configured - vvm_type_cvvm
+10-29 15:17:54.324  1479  3006 I Dialer  : OmtpVvmCarrierCfgHlpr - OmtpEvent:CONFIG_ACTIVATING
+10-29 15:17:54.340  5662  5855 I VoicemailNotifier: receivers for android.intent.action.PROVIDER_CHANGED :[]
+10-29 15:17:54.373  1056  1096 D SmsNumberUtils: enter filterDestAddr. destAddr="[BajqU4K5_YhSYbs-7QUn0dOwcmI]"
+10-29 15:17:54.375  1056  1096 D SmsNumberUtils: destAddr is not formatted.
+10-29 15:17:54.375  1056  1096 D SmsNumberUtils: leave filterDestAddr, new destAddr="[BajqU4K5_YhSYbs-7QUn0dOwcmI]"
+10-29 15:17:54.453   285   285 I Zygote  : Process 5422 exited due to signal 9 (Killed)
+10-29 15:17:54.457   493   536 I libprocessgroup: Successfully killed process cgroup uid 10141 pid 5422 in 45ms
+10-29 15:17:55.234  6071  6083 I sabou.erp.debu: Background concurrent copying GC freed 66869(3161KB) AllocSpace objects, 6(344KB) LOS objects, 49% free, 3274KB/6549KB, paused 1.918ms total 118.102ms
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for java.lang.Throwable: Explicit termination method 'close' not called
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.CloseGuard.open(CloseGuard.java:190)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.openInner(SQLiteDatabase.java:1033)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.open(SQLiteDatabase.java:1017)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteDatabase.openDatabase(SQLiteDatabase.java:844)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteOpenHelper.getDatabaseLocked(SQLiteOpenHelper.java:359)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SQLiteOpenHelper.getWritableDatabase(SQLiteOpenHelper.java:278)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at net.zetetic.database.sqlcipher.SupportHelper.getWritableDatabase(SupportHelper.java:60)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.data.AppContainer.open(AppContainer.kt:92)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.data.AppContainer.open$default(AppContainer.kt:84)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at ir.sabou.app.DeviceTest.encryptedDatabaseAndKeystoreKeySurviveAReopen(DeviceTest.kt:94)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at java.lang.reflect.Method.invoke(Native Method)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.ext.junit.runners.AndroidJUnit4.run(AndroidJUnit4.java:162)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.Suite.runChild(Suite.java:128)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.Suite.runChild(Suite.java:27)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:68)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:59)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at androidx.test.runner.AndroidJUnitRunner.onStart(AndroidJUnitRunner.java:463)
+10-29 15:17:55.240  6071  6085 W A resource was acquired at attached stack trace but never released. See java.io.Closeable for 	at android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2205)
+10-29 15:17:56.492  6071  6083 I sabou.erp.debu: Background young concurrent copying GC freed 68446(3231KB) AllocSpace objects, 0(0B) LOS objects, 48% free, 3387KB/6549KB, paused 5.725ms total 124.321ms
+10-29 15:17:59.524  6071  6083 I sabou.erp.debu: Background concurrent copying GC freed 72411(3419KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 3720KB/7441KB, paused 3.244ms total 438.936ms
+10-29 15:18:00.023   700   700 D KeyguardClockSwitch: Updating clock: 318
+10-29 15:18:00.802  1375  6109 I Vision  : Requesting optional module download of ocr.
+10-29 15:18:00.803  1375  6109 I Vision  : Checking for download completion for 263823 -- ocr
+10-29 15:18:03.672  6071  6083 I sabou.erp.debu: Background concurrent copying GC freed 73532(3473KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 3289KB/6579KB, paused 2.475ms total 207.810ms
+10-29 15:18:05.751  6071  6091 I TestRunner: finished: anOldUnencryptedPayloadIsRefusedWithoutWritingItToDisk(ir.sabou.app.DeviceTest)

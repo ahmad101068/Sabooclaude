@@ -1,0 +1,17 @@
+10-29 15:17:36.476  6071  6091 I TestRunner: started: ourChequePrintsOnALeafSizedPdf(ir.sabou.app.DeviceTest)
+10-29 15:17:36.614   428   428 I keystore: del USRPKEY_sabou_db_wrap 10167
+10-29 15:17:36.618   428   428 I keystore: del USRSKEY_sabou_db_wrap 10167
+10-29 15:17:36.626   428   428 I keystore: del USRCERT_sabou_db_wrap 10167
+10-29 15:17:36.628   428   428 I keystore: del CACERT_sabou_db_wrap 10167
+10-29 15:17:36.740  6071  6091 I SQLiteConnection: Database keying operation returned:0
+10-29 15:17:38.484   428   428 I keystore: del USRPKEY_sabou_anchor_hmac 10167
+10-29 15:17:38.489   428   428 I keystore: del USRSKEY_sabou_anchor_hmac 10167
+10-29 15:17:38.489   428   428 I keystore: del USRCERT_sabou_anchor_hmac 10167
+10-29 15:17:38.490   428   428 I keystore: del CACERT_sabou_anchor_hmac 10167
+10-29 15:17:39.996  6071  6090 I sabou.erp.debu: Waiting for a blocking GC ProfileSaver
+10-29 15:17:40.002  6071  6090 I sabou.erp.debu: WaitForGcToComplete blocked ProfileSaver on RunEmptyCheckpoint for 6.782ms
+10-29 15:17:40.726  1375  6100 I Vision  : Requesting optional module download of ocr.
+10-29 15:17:40.727  1375  6100 I Vision  : Checking for download completion for 243747 -- ocr
+10-29 15:17:42.062  6071  6101 D ProfileInstaller: Installing profile for ir.sabou.erp.debug
+10-29 15:17:42.301  6071  6083 I sabou.erp.debu: Background concurrent copying GC freed 490040(22MB) AllocSpace objects, 7(412KB) LOS objects, 49% free, 3063KB/6127KB, paused 111us total 172.958ms
+10-29 15:17:42.551  6071  6091 I TestRunner: finished: ourChequePrintsOnALeafSizedPdf(ir.sabou.app.DeviceTest)
