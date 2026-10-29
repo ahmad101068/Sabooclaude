@@ -483,7 +483,7 @@ object MeScreens {
                                     style = SabouType.caption, color = if (over) Sabou.colors.danger else Sabou.colors.muted)
                             }
                             val v = latest[m.id]
-                            if (v == null) Text("رسپی ندارد — فروش آن ثبت نهایی نمی‌شود.", style = SabouType.caption, color = Sabou.colors.danger)
+                            if (v == null) Text("رسپی ندارد — فروشش ثبت می‌شود ولی از انبار چیزی کم نمی‌شود و بهای غذا معلوم نیست.", style = SabouType.caption, color = Sabou.colors.danger)
                             else Text("نسخه ${Fa.number(v.version.toLong())} از ${Fa.date(v.effectiveFrom)}: " +
                                 v.lines.joinToString("، ") { "${items[it.itemId]?.name ?: ""} ${Fa.quantity(it.quantityPerPortion)}" + if (it.yieldPercent < 100) " (بازده ${Fa.number(it.yieldPercent.toLong())}٪)" else "" },
                                 style = SabouType.caption, color = Sabou.colors.muted)
