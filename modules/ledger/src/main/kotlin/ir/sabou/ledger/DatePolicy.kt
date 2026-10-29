@@ -43,7 +43,7 @@ data class DatePolicy(
         ensure(date <= latest(context.nowEpochMillis, sourceType)) { DomainError.InvalidInput("date", "تاریخ سند در آینده است؛ تاریخ را بررسی کنید.") }
         earliest(context)?.let { first ->
             ensure(date >= first) {
-                DomainError.InvalidInput("date", "تاریخ سند بیش از $pastDays روز گذشته است؛ ثبت آن مجوز «ثبت با تاریخ گذشته» (مالک یا مدیر) می‌خواهد.")
+                DomainError.InvalidInput("date", "تاریخ سند بیش از $pastDays روز گذشته است؛ ثبت آن مجوز «ثبت با تاریخ گذشته» (مالک، مدیر یا حسابدار) می‌خواهد.")
             }
         }
     }

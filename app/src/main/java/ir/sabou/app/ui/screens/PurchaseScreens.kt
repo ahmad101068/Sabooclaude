@@ -461,6 +461,10 @@ object PurchaseScreens {
                             KeyValue("${d.accountNames[l.account.value] ?: l.account.value}$where" + if (l.memo.isNotBlank()) " · ${l.memo}" else "", Fa.rial(l.amount))
                         }
                         Divider()
+                        // Corrections of value after the fact (independent audit, finding 002): each with its date and reason.
+                        inv.corrections.forEach { c ->
+                            KeyValue("اصلاح ${Fa.date(c.date)} · ${c.reason}", (if (c.change > 0) "+" else "") + Fa.rial(c.change))
+                        }
                         KeyValue("جمع فاکتور", Fa.rial(inv.total))
                         KeyValue("مانده (ریال)", Fa.rial(v.outstanding), strong = true)
                         if (inv.note.isNotBlank()) Text(inv.note, style = SabouType.caption, color = Sabou.colors.muted)
@@ -575,6 +579,10 @@ object PurchaseScreens {
                             }, enabled = inv.approved && payAccount != null && payAmount != null && (!ourCheque || cheque != null) && (!passOn || heldCheque != null), busy = action.busy)
                         }
                     }
+                    if (inv.status == InvoiceStatus.POSTED && !inv.opening && session.can(Permission.PURCHASE_REVERSE) &&
+                        (inv.lines.isNotEmpty() || inv.accountLines.any { it.branch == null || it.branch == inv.scope })) {
+                        FormCard("اصلاح مبلغ فاکتور") { CorrectionForm(inv, d.items, d.accountNames) }
+                    }
                     if (inv.status == InvoiceStatus.POSTED && session.can(Permission.PURCHASE_REVERSE)) {
                         FormCard("مرجوعی یا برگشت فاکتور") {
                             if (inv.lines.isNotEmpty()) {
@@ -628,6 +636,56 @@ object PurchaseScreens {
                     action.run({ purchasing.resolveReviewLine(ResolveReviewLine(id.value, scope, invoiceId, index, null, null, null, AccountCode.of(account!!), session.today)) })
                 }, enabled = account != null && !action.busy)
             }
+        }
+    }
+
+    /**
+     * The true value of each item and expense line of a posted invoice, even after its goods were used (independent
+     * audit, finding 002). Only lines whose value changes are sent; the core splits the change between what is still
+     * in stock and what was already used.
+     */
+    @Composable
+    private fun CorrectionForm(inv: ir.sabou.purchasing.PurchaseInvoice, items: Map<GlobalId, Item>, accountNames: Map<String, String>) {
+        val session = LocalSession.current
+        val itemValues = ir.sabou.app.ui.rememberValueMap<GlobalId, Money?>()
+        val accountValues = ir.sabou.app.ui.rememberValueMap<Int, Money?>()
+        var reason by rememberSaveable { mutableStateOf("") }
+        var date by rememberSaveable { mutableStateOf(session.today) }
+        var confirm by rememberSaveable { mutableStateOf(false) }
+        val id = rememberCommandId()
+        val action = rememberAction()
+        Text("وقتی قیمت یا جمع ردیفی اشتباه ثبت شده (حتی اگر کالا مصرف شده باشد)، مبلغ درست را بنویسید. سهم کالایی که هنوز در انبار است " +
+            "ارزش موجودی را عوض می‌کند و بقیه بهای مصرف‌شده را؛ بدهی تأمین‌کننده به همان اندازه عوض می‌شود. ردیفی که دست نخورد، همان می‌ماند.",
+            style = SabouType.caption, color = Sabou.colors.muted)
+        inv.lines.map { it.itemId }.distinct().forEach { itemId ->
+            val now = inv.itemValue(itemId)
+            MoneyInput("مبلغ درست «${items[itemId]?.name ?: ""}»", itemValues[itemId], { itemValues[itemId] = it }, hint = "اکنون ${Fa.rial(now)} ریال")
+        }
+        inv.accountLines.forEachIndexed { i, l ->
+            if (l.branch == null || l.branch == inv.scope) {
+                MoneyInput("مبلغ درست «${accountNames[l.account.value] ?: l.account.value}»", accountValues[i], { accountValues[i] = it },
+                    hint = "اکنون ${Fa.rial(inv.accountValue(i))} ریال")
+            }
+        }
+        val itemChanges = itemValues.entries.mapNotNull { (k, v) -> v?.takeIf { it.rial != inv.itemValue(k) }?.let { ir.sabou.purchasing.InvoiceLineValue(k, it) } }
+        val accountChanges = accountValues.entries.mapNotNull { (k, v) -> v?.takeIf { it.rial != inv.accountValue(k) }?.let { ir.sabou.purchasing.AccountLineValue(k, it) } }
+        val change = itemChanges.sumOf { it.value.rial - inv.itemValue(it.itemId) } + accountChanges.sumOf { it.amount.rial - inv.accountValue(it.index) }
+        if (itemChanges.isNotEmpty() || accountChanges.isNotEmpty()) {
+            Text("جمع فاکتور ${Fa.rial(inv.total.rial)} ← ${Fa.rial(inv.total.rial + change)} ریال", style = SabouType.bodyStrong, color = Sabou.colors.ink)
+        }
+        DateInput("تاریخ اصلاح", date, { date = it }, session.today)
+        TextInput("دلیل اصلاح", reason, { reason = it }, placeholder = "مثلاً یک صفر اضافه زده شده بود")
+        action.error?.let { Banner(it) }
+        PrimaryButton("ثبت اصلاح", { confirm = true },
+            enabled = (itemChanges.isNotEmpty() || accountChanges.isNotEmpty()) && reason.trim().length >= 3 && !action.busy, busy = action.busy)
+        if (confirm) {
+            Confirm("اصلاح فاکتور؟", "سند اصلاح با شماره‌ی خودش ثبت می‌شود و فاکتور اصلی و سابقه‌اش می‌ماند.", "ثبت اصلاح",
+                onConfirm = {
+                    confirm = false
+                    action.run({ purchasing.correctInvoice(ir.sabou.purchasing.CorrectPurchaseInvoice(id.value, inv.scope, inv.id, itemChanges, date, reason, accountChanges)) }) {
+                        id.value = GlobalId.new(); itemValues.clear(); accountValues.clear(); reason = ""
+                    }
+                }, onDismiss = { confirm = false })
         }
     }
 
